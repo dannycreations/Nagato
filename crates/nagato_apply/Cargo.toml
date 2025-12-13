@@ -12,8 +12,10 @@ doctest = false
 [dependencies]
 aho-corasick.workspace = true
 bstr.workspace = true
-once_cell.workspace = true
+memchr.workspace = true
 nagato_core.workspace = true
+once_cell.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true

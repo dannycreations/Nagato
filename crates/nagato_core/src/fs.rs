@@ -15,11 +15,7 @@ pub struct AtomicWriter {
 
 impl AtomicWriter {
   pub fn new(path: &Path) -> io::Result<Self> {
-    // Relying on `NamedTempFile::new_in` to handle directory creation simplifies
-    // the logic and removes a potential point of failure. The parent directory
-    // is guaranteed to exist before the temp file is created.
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
     let tempfile = NamedTempFile::new_in(parent)?;
     let writer = BufWriter::new(tempfile);
 
@@ -32,12 +28,9 @@ impl AtomicWriter {
   pub fn commit(mut self) -> io::Result<()> {
     self.writer.flush()?;
 
-    // Using `io::Error::other` provides a more descriptive error message
-    // if the buffer writer is poisoned, which can help in debugging.
-    let tempfile = self.writer.into_inner().map_err(|_| {
-      io::Error::other("Buffer writer was poisoned, likely due to a panic")
-    })?;
-
+    // The previous `map_err` was replaced with `?` for more idiomatic error handling.
+    // This is functionally equivalent but more concise.
+    let tempfile = self.writer.into_inner()?;
     tempfile.persist(&self.dest_path).map_err(|e| e.error)?;
     Ok(())
   }
@@ -80,7 +73,7 @@ impl OsFileSystem {
     Ok(self.root.join(path))
   }
 
-  fn ensure_parent_dir_exists(&self, path: &Path) -> io::Result<()> {
+  fn ensure_parent_dir_exists(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
       fs::create_dir_all(parent)?;
     }
@@ -100,15 +93,14 @@ impl FileSystem for OsFileSystem {
 
   fn write(&mut self, path: &[u8]) -> io::Result<AtomicWriter> {
     let abs_path = self.absolute_path(path)?;
+    Self::ensure_parent_dir_exists(&abs_path)?;
     AtomicWriter::new(&abs_path)
   }
 
   fn copy(&mut self, from: &[u8], to: &[u8]) -> io::Result<()> {
     let from_abs = self.absolute_path(from)?;
     let to_abs = self.absolute_path(to)?;
-
-    self.ensure_parent_dir_exists(&to_abs)?;
-
+    Self::ensure_parent_dir_exists(&to_abs)?;
     fs::copy(from_abs, to_abs)?;
     Ok(())
   }
@@ -120,9 +112,7 @@ impl FileSystem for OsFileSystem {
   fn rename(&mut self, from: &[u8], to: &[u8]) -> io::Result<()> {
     let from_abs = self.absolute_path(from)?;
     let to_abs = self.absolute_path(to)?;
-
-    self.ensure_parent_dir_exists(&to_abs)?;
-
+    Self::ensure_parent_dir_exists(&to_abs)?;
     fs::rename(from_abs, to_abs)
   }
 

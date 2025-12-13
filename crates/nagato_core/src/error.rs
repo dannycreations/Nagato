@@ -9,8 +9,6 @@ pub enum ParseError {
   InvalidHunkRangeLine(String),
   #[error("Invalid hunk range span: {0}")]
   InvalidHunkRangeSpan(String),
-  #[error("Malformed hunk header")]
-  MalformedHunkHeader,
   #[error("Missing old range in hunk header")]
   MissingOldRange,
   #[error("Missing new range in hunk header")]
@@ -21,16 +19,10 @@ pub enum ParseError {
   InvalidFileMode(String),
   #[error("Invalid file header")]
   InvalidFileHeader,
-  #[error("Malformed file path")]
-  MalformedFilePath,
   #[error("Invalid index line")]
   InvalidIndexLine,
   #[error("Invalid index hash range")]
   InvalidIndexHashRange,
-  #[error("Invalid mode line")]
-  InvalidModeLine,
-  #[error("Invalid similarity line")]
-  InvalidSimilarityLine,
   #[error("Invalid binary files line")]
   InvalidBinaryFilesLine,
   #[error("Unexpected line: {0}")]
@@ -49,8 +41,6 @@ pub enum ParseError {
   PatchHasContentButNoFileInfo,
   #[error("Unexpected end of patch")]
   UnexpectedEof,
-  #[error("Expected a file header, but got something else")]
-  ExpectedFileHeader,
 }
 
 #[derive(ThisError, Debug)]

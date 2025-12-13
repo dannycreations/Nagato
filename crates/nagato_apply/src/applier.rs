@@ -17,6 +17,7 @@ impl<'a> Patch<'a> {
     mem::swap(&mut self.old_file, &mut self.new_file);
     mem::swap(&mut self.rename_from, &mut self.rename_to);
     mem::swap(&mut self.copy_from, &mut self.copy_to);
+    mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
 
     if self.old_file == b"/dev/null" {
       // This was a file creation, so the inverse is a deletion.
@@ -59,6 +60,9 @@ struct Applier<'s, 'b, W: Write + ?Sized> {
   source: Lines<'s>,
   is_at_start_of_file: bool,
   current_source_line: u32,
+  // By reusing this buffer, we avoid reallocating it for every hunk,
+  // which is more memory-efficient when processing patches with many hunks.
+  prospective_match_buffer: Vec<&'s [u8]>,
 }
 
 impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
@@ -68,6 +72,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       source: source.lines(),
       is_at_start_of_file: true,
       current_source_line: 0,
+      // Initialize the buffer once to be reused across all hunk applications.
+      prospective_match_buffer: Vec::new(),
     }
   }
 
@@ -112,8 +118,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return Ok(());
     }
 
-    let mut prospective_match_buffer: Vec<&'s [u8]> =
-      Vec::with_capacity(hunk.old_span as usize);
     // The 'search loop is the core of the fuzzy patch algorithm. It scans the source
     // file line by line, looking for a block that matches the hunk's context.
     'search: loop {
@@ -133,8 +137,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         continue;
       }
 
-      prospective_match_buffer.clear();
-      prospective_match_buffer.push(source_line);
+      self.prospective_match_buffer.clear();
+      self.prospective_match_buffer.push(source_line);
 
       // We clone the source iterator to "look ahead" without consuming the original.
       // If the match fails, we can revert to the original iterator's state.
@@ -142,7 +146,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       for hunk_line in hunk_lines_iter {
         if let Some(next_source_line) = source_clone.next() {
           if next_source_line == hunk_line {
-            prospective_match_buffer.push(next_source_line);
+            self.prospective_match_buffer.push(next_source_line);
           } else {
             // Match failed. Write the first line of the failed attempt and
             // jump back to the 'search loop to restart the search from the next line.
@@ -161,19 +165,26 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       self.source = source_clone;
       self.current_source_line += hunk.old_span - 1;
 
-      // Now we apply the changes from the hunk, writing added lines and
-      // using the matched source lines for context.
-      let mut matched_source_lines = prospective_match_buffer.iter();
+      // We now write out the matched lines, interspersed with the additions.
+      // By using an index instead of an iterator over `prospective_match_buffer`,
+      // we avoid cloning the buffer, which is a key performance optimization.
+      // This prevents an unnecessary heap allocation and memory copy for every hunk.
+      let mut matched_source_lines_index = 0;
       for line in &hunk.lines {
         match line {
           Line::Addition(s) => self.write_line(s)?,
           Line::Deletion(_) => {
-            // Deletions mean we just advance the matched source line iterator,
-            // effectively "skipping" the line from the original source.
-            matched_source_lines.next();
+            // Deletions mean we effectively "skip" a line from the original
+            // source by simply advancing our index into the matched buffer.
+            matched_source_lines_index += 1;
           }
           Line::Context(_) => {
-            self.write_line(matched_source_lines.next().unwrap())?;
+            // For context lines, we write the corresponding line from our
+            // buffer of matched lines from the source file.
+            self.write_line(
+              self.prospective_match_buffer[matched_source_lines_index],
+            )?;
+            matched_source_lines_index += 1;
           }
         }
       }
@@ -229,14 +240,12 @@ fn handle_file_deletion(
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
   let source_path = patch.source_file();
-  {
-    let source = fs.read(source_path).ok();
-    let source_slice = source.as_deref().unwrap_or(&[]);
-    // Before deleting, we "dry run" the patch against the source content
-    // to ensure it would apply cleanly. This prevents accidental data loss
-    // if the source file has changed unexpectedly. We write to a sink (null output).
-    apply(&mut io::sink(), patch, source_slice)?;
-  }
+  let source = fs.read(source_path).ok();
+  let source_slice = source.as_deref().unwrap_or(&[]);
+  // Before deleting, we "dry run" the patch against the source content
+  // to ensure it would apply cleanly. This prevents accidental data loss
+  // if the source file has changed unexpectedly. We write to a sink (null output).
+  apply(&mut io::sink(), patch, source_slice)?;
 
   ignore_not_found(fs.remove_file(source_path))?;
   Ok(())
@@ -288,18 +297,19 @@ fn patch_file_worker(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
-  // The logic is structured to handle different patch types by dispatching
-  // to specialized functions. This keeps the code clean and organized.
   if patch.binary {
     return Err(Error::Message("Binary files are not supported"));
   }
 
-  if patch.new_file == b"/dev/null" {
-    handle_file_deletion(fs, patch)?;
-  } else if patch.hunks.is_empty() {
-    handle_metadata_change(fs, patch)?;
-  } else {
-    handle_content_change(fs, patch)?;
+  // By using a `match` expression, we make the dispatch logic more explicit and idiomatic,
+  // clearly distinguishing between file deletion, metadata changes, and content updates.
+  match (patch.new_file, patch.hunks.is_empty()) {
+    // A patch with a `/dev/null` new file signifies a deletion.
+    (b"/dev/null", _) => handle_file_deletion(fs, patch)?,
+    // A patch with no hunks indicates a metadata-only change (e.g., rename or copy).
+    (_, true) => handle_metadata_change(fs, patch)?,
+    // Otherwise, the patch involves content changes.
+    (_, false) => handle_content_change(fs, patch)?,
   }
 
   // After content/metadata changes, apply any permission changes.

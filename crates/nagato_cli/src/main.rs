@@ -1,5 +1,8 @@
+use nagato_cli::{ClapParser, Cli};
+
 fn main() {
-  if let Err(e) = nagato_cli::run() {
+  let cli = Cli::parse();
+  if let Err(e) = nagato_cli::run(cli) {
     eprintln!("Error: {}", e);
     std::process::exit(1);
   }

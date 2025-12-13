@@ -81,12 +81,13 @@ impl<'a> Line<'a> {
     matches!(self, Line::Addition(_))
   }
 
-  pub fn text(&self) -> Option<&'a [u8]> {
-    match self {
-      Line::Addition(text) | Line::Deletion(text) | Line::Context(text) => {
-        Some(text)
-      }
-    }
+  pub fn text(&self) -> &'a [u8] {
+    // This was refactored from a `match` to a more direct destructuring,
+    // as all variants of `Line` contain a single `&[u8]` element.
+    // This is more concise and equally clear.
+    let (Line::Addition(text) | Line::Deletion(text) | Line::Context(text)) =
+      self;
+    text
   }
 }
 
@@ -136,6 +137,8 @@ pub struct Patch<'a> {
   pub dissimilarity: Option<u32>,
   /// Indicates whether the patch is for a binary file.
   pub binary: bool,
+  /// Indicates that the old file has no newline at the end.
+  pub old_file_no_newline: bool,
   /// Indicates that the new file has no newline at the end.
   pub new_file_no_newline: bool,
 }

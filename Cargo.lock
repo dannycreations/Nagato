@@ -249,9 +249,11 @@ dependencies = [
  "aho-corasick",
  "bstr",
  "indoc",
+ "memchr",
  "nagato_core",
  "once_cell",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

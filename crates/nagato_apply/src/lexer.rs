@@ -1,7 +1,8 @@
 use std::str;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
-use bstr::{ByteSlice, B};
+use bstr::ByteSlice;
+use memchr::memmem;
 use nagato_core::error::ParseError;
 use once_cell::sync::Lazy;
 
@@ -54,6 +55,24 @@ fn strip_git_prefix(s: &[u8]) -> &[u8] {
     .unwrap_or(s)
 }
 
+// This is a more efficient implementation that parses a u32 from a byte slice
+// without allocating a string. It's used in parsing hunk headers and percentages.
+fn parse_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
+  let mut num = 0u32;
+  let mut i = 0;
+  while i < bytes.len() && bytes[i].is_ascii_digit() {
+    num = num
+      .checked_mul(10)?
+      .checked_add(u32::from(bytes[i] - b'0'))?;
+    i += 1;
+  }
+  if i == 0 {
+    None
+  } else {
+    Some((num, &bytes[i..]))
+  }
+}
+
 impl<'a> Lexer<'a> {
   #[doc(hidden)]
   pub fn new(input: &'a [u8]) -> Self {
@@ -66,57 +85,61 @@ impl<'a> Lexer<'a> {
     self.lines.next()
   }
 
-  fn with_rest_as_str<F, T>(
-    &self,
-    rest: &'a [u8],
-    line: &'a [u8],
-    f: F,
-  ) -> Result<T, ParseError>
-  where
-    F: FnOnce(&'a str) -> Result<T, ParseError>,
-  {
-    // This is a helper to safely convert a byte slice to a UTF-8 string slice.
-    // It provides a consistent error handling mechanism for parsing operations
-    // that expect string input.
-    str::from_utf8(rest)
-      .map_err(|_| {
-        ParseError::UnexpectedLine(String::from_utf8_lossy(line).into())
-      })
-      .and_then(f)
-  }
+  // This function now parses a range from a byte slice, avoiding string conversion
+  // for better performance.
+  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), ParseError> {
+    let (line, rest) = parse_u32(range_bytes).ok_or_else(|| {
+      ParseError::InvalidHunkRangeLine(
+        String::from_utf8_lossy(range_bytes).into_owned(),
+      )
+    })?;
 
-  fn parse_range(&self, range_str: &str) -> Result<(u32, u32), ParseError> {
-    let (line_str, span_str) =
-      range_str.split_once(',').unwrap_or((range_str, "1"));
-    let line = line_str
-      .parse()
-      .map_err(|_| ParseError::InvalidHunkRangeLine(range_str.to_string()))?;
-    let span = span_str
-      .parse()
-      .map_err(|_| ParseError::InvalidHunkRangeSpan(span_str.to_string()))?;
+    if rest.is_empty() {
+      return Ok((line, 1));
+    }
+
+    if !rest.starts_with(b",") {
+      return Err(ParseError::InvalidHunkRangeLine(
+        String::from_utf8_lossy(range_bytes).into_owned(),
+      ));
+    }
+
+    let (span, rest) = parse_u32(&rest[1..]).ok_or_else(|| {
+      ParseError::InvalidHunkRangeSpan(
+        String::from_utf8_lossy(range_bytes).into_owned(),
+      )
+    })?;
+
+    if !rest.is_empty() {
+      return Err(ParseError::InvalidHunkRangeSpan(
+        String::from_utf8_lossy(range_bytes).into_owned(),
+      ));
+    }
+
     Ok((line, span))
   }
 
+  // The hunk header parsing is now more efficient by working directly on byte slices,
+  // which avoids the overhead of string conversion and validation.
   fn parse_hunk_header(
     &self,
-    header: &'a str,
+    header: &'a [u8],
   ) -> Result<Token<'a>, ParseError> {
-    let content = header
-      .split(" @@")
+    let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
+    let content = &header[..content_end];
+    let mut parts = content.fields();
+
+    let old_range_bytes = parts
       .next()
-      .ok_or(ParseError::MalformedHunkHeader)?;
-    let mut parts = content.split_whitespace();
-    let old_range_str = parts
-      .next()
-      .and_then(|s| s.strip_prefix('-'))
+      .and_then(|s: &[u8]| s.strip_prefix(b"-"))
       .ok_or(ParseError::MissingOldRange)?;
-    let new_range_str = parts
+    let new_range_bytes = parts
       .next()
-      .and_then(|s| s.strip_prefix('+'))
+      .and_then(|s: &[u8]| s.strip_prefix(b"+"))
       .ok_or(ParseError::MissingNewRange)?;
 
-    let (old_line, old_span) = self.parse_range(old_range_str)?;
-    let (new_line, new_span) = self.parse_range(new_range_str)?;
+    let (old_line, old_span) = self.parse_range(old_range_bytes)?;
+    let (new_line, new_span) = self.parse_range(new_range_bytes)?;
 
     Ok(Token::HunkHeader {
       old_line,
@@ -126,16 +149,42 @@ impl<'a> Lexer<'a> {
     })
   }
 
-  fn parse_percentage(&self, s: &str) -> Result<u32, ParseError> {
-    s.strip_suffix('%')
-      .ok_or_else(|| ParseError::InvalidPercentage(s.to_string()))?
-      .parse()
-      .map_err(|_| ParseError::InvalidPercentage(s.to_string()))
+  // This function now parses a percentage from a byte slice, avoiding string conversion
+  // for better performance.
+  fn parse_percentage(&self, s: &[u8]) -> Result<u32, ParseError> {
+    let s = s.strip_suffix(b"%").ok_or_else(|| {
+      ParseError::InvalidPercentage(String::from_utf8_lossy(s).into_owned())
+    })?;
+    let (num, rest) = parse_u32(s).ok_or_else(|| {
+      ParseError::InvalidPercentage(String::from_utf8_lossy(s).into_owned())
+    })?;
+    if !rest.is_empty() {
+      return Err(ParseError::InvalidPercentage(
+        String::from_utf8_lossy(s).into_owned(),
+      ));
+    }
+    Ok(num)
   }
 
-  fn parse_octal_mode(&self, s: &str) -> Result<u32, ParseError> {
-    u32::from_str_radix(s, 8)
-      .map_err(|_| ParseError::InvalidFileMode(s.to_string()))
+  // This function now parses an octal mode from a byte slice, which is faster
+  // than converting to a string first.
+  fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, ParseError> {
+    let mut mode = 0u32;
+    for &digit in s {
+      if (b'0'..=b'7').contains(&digit) {
+        mode = mode
+          .checked_mul(8)
+          .and_then(|m| m.checked_add(u32::from(digit - b'0')))
+          .ok_or_else(|| {
+            ParseError::InvalidFileMode(String::from_utf8_lossy(s).into_owned())
+          })?;
+      } else {
+        return Err(ParseError::InvalidFileMode(
+          String::from_utf8_lossy(s).into_owned(),
+        ));
+      }
+    }
+    Ok(mode)
   }
 
   fn parse_file_header(&self, rest: &'a [u8]) -> Result<Token<'a>, ParseError> {
@@ -155,10 +204,15 @@ impl<'a> Lexer<'a> {
     Err(ParseError::InvalidFileHeader)
   }
 
-  fn parse_index_line(&self, rest: &'a str) -> Result<Token<'a>, ParseError> {
-    let mut parts = rest.split_whitespace();
-    let hashes = parts.next().ok_or(ParseError::InvalidIndexLine)?;
-    let (old_hash, new_hash) = hashes
+  // This function is optimized to parse the index line from a byte slice. It converts
+  // the hash part to a string slice as required by the `Token::Index` struct,
+  // but still avoids string allocation for parsing the mode.
+  fn parse_index_line(&self, rest: &'a [u8]) -> Result<Token<'a>, ParseError> {
+    let mut parts = rest.fields();
+    let hashes_bytes = parts.next().ok_or(ParseError::InvalidIndexLine)?;
+    let hashes_str =
+      str::from_utf8(hashes_bytes).map_err(|_| ParseError::InvalidIndexLine)?;
+    let (old_hash, new_hash) = hashes_str
       .split_once("..")
       .ok_or(ParseError::InvalidIndexHashRange)?;
     let mode = parts.next().map(|s| self.parse_octal_mode(s)).transpose()?;
@@ -183,34 +237,24 @@ impl<'a> Lexer<'a> {
         // and simplifies the code.
         return Some(match mat.pattern().as_usize() {
           0 => self.parse_file_header(rest),
-          1 => self.with_rest_as_str(rest, line, |s| self.parse_index_line(s)),
+          1 => self.parse_index_line(rest),
           2 => Ok(Token::OldFile(strip_git_prefix(rest))),
           3 => Ok(Token::NewFile(strip_git_prefix(rest))),
-          4 => self.with_rest_as_str(rest, line, |s| self.parse_hunk_header(s)),
-          5 | 6 => self.with_rest_as_str(rest, line, |s| {
-            self.parse_octal_mode(s).map(Token::NewFileMode)
-          }),
-          7 | 8 => self.with_rest_as_str(rest, line, |s| {
-            self.parse_octal_mode(s).map(Token::OldFileMode)
-          }),
-          9 | 10 => self.with_rest_as_str(rest, line, |s| {
-            self.parse_octal_mode(s).map(Token::DeletedFileMode)
-          }),
+          4 => self.parse_hunk_header(rest),
+          5 | 6 => self.parse_octal_mode(rest).map(Token::NewFileMode),
+          7 | 8 => self.parse_octal_mode(rest).map(Token::OldFileMode),
+          9 | 10 => self.parse_octal_mode(rest).map(Token::DeletedFileMode),
           11 => Ok(Token::RenameFrom(rest)),
           12 => Ok(Token::RenameTo(rest)),
           13 => Ok(Token::CopyFrom(rest)),
           14 => Ok(Token::CopyTo(rest)),
-          15 => self.with_rest_as_str(rest, line, |s| {
-            self.parse_percentage(s).map(Token::Similarity)
-          }),
-          16 => self.with_rest_as_str(rest, line, |s| {
-            self.parse_percentage(s).map(Token::Dissimilarity)
-          }),
+          15 => self.parse_percentage(rest).map(Token::Similarity),
+          16 => self.parse_percentage(rest).map(Token::Dissimilarity),
           17 => {
             // This refactoring improves clarity by replacing a dense `and_then` chain
             // with a more readable `if let` structure. It makes the parsing steps explicit.
             if let Some(line_content) = rest.strip_suffix(b" differ") {
-              let mut parts = line_content.split_str(B(" and "));
+              let mut parts = line_content.split_str(b" and ");
               if let (Some(old_file), Some(new_file)) =
                 (parts.next(), parts.next())
               {
