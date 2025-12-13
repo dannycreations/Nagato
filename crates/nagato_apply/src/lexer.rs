@@ -3,7 +3,7 @@ use std::str;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use bstr::ByteSlice;
 use memchr::memmem;
-use nagato_core::error::ParseError;
+use nagato_core::error::ErrorKind;
 use once_cell::sync::Lazy;
 
 use crate::Token;
@@ -87,9 +87,9 @@ impl<'a> Lexer<'a> {
 
   // This function now parses a range from a byte slice, avoiding string conversion
   // for better performance.
-  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), ParseError> {
+  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
     let (line, rest) = parse_u32(range_bytes).ok_or_else(|| {
-      ParseError::InvalidHunkRangeLine(
+      ErrorKind::InvalidHunkRangeLine(
         String::from_utf8_lossy(range_bytes).into_owned(),
       )
     })?;
@@ -99,19 +99,19 @@ impl<'a> Lexer<'a> {
     }
 
     if !rest.starts_with(b",") {
-      return Err(ParseError::InvalidHunkRangeLine(
+      return Err(ErrorKind::InvalidHunkRangeLine(
         String::from_utf8_lossy(range_bytes).into_owned(),
       ));
     }
 
     let (span, rest) = parse_u32(&rest[1..]).ok_or_else(|| {
-      ParseError::InvalidHunkRangeSpan(
+      ErrorKind::InvalidHunkRangeSpan(
         String::from_utf8_lossy(range_bytes).into_owned(),
       )
     })?;
 
     if !rest.is_empty() {
-      return Err(ParseError::InvalidHunkRangeSpan(
+      return Err(ErrorKind::InvalidHunkRangeSpan(
         String::from_utf8_lossy(range_bytes).into_owned(),
       ));
     }
@@ -124,7 +124,7 @@ impl<'a> Lexer<'a> {
   fn parse_hunk_header(
     &self,
     header: &'a [u8],
-  ) -> Result<Token<'a>, ParseError> {
+  ) -> Result<Token<'a>, ErrorKind> {
     let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
     let content = &header[..content_end];
     let mut parts = content.fields();
@@ -132,11 +132,11 @@ impl<'a> Lexer<'a> {
     let old_range_bytes = parts
       .next()
       .and_then(|s: &[u8]| s.strip_prefix(b"-"))
-      .ok_or(ParseError::MissingOldRange)?;
+      .ok_or(ErrorKind::MissingOldRange)?;
     let new_range_bytes = parts
       .next()
       .and_then(|s: &[u8]| s.strip_prefix(b"+"))
-      .ok_or(ParseError::MissingNewRange)?;
+      .ok_or(ErrorKind::MissingNewRange)?;
 
     let (old_line, old_span) = self.parse_range(old_range_bytes)?;
     let (new_line, new_span) = self.parse_range(new_range_bytes)?;
@@ -151,15 +151,15 @@ impl<'a> Lexer<'a> {
 
   // This function now parses a percentage from a byte slice, avoiding string conversion
   // for better performance.
-  fn parse_percentage(&self, s: &[u8]) -> Result<u32, ParseError> {
+  fn parse_percentage(&self, s: &[u8]) -> Result<u32, ErrorKind> {
     let s = s.strip_suffix(b"%").ok_or_else(|| {
-      ParseError::InvalidPercentage(String::from_utf8_lossy(s).into_owned())
+      ErrorKind::InvalidPercentage(String::from_utf8_lossy(s).into_owned())
     })?;
     let (num, rest) = parse_u32(s).ok_or_else(|| {
-      ParseError::InvalidPercentage(String::from_utf8_lossy(s).into_owned())
+      ErrorKind::InvalidPercentage(String::from_utf8_lossy(s).into_owned())
     })?;
     if !rest.is_empty() {
-      return Err(ParseError::InvalidPercentage(
+      return Err(ErrorKind::InvalidPercentage(
         String::from_utf8_lossy(s).into_owned(),
       ));
     }
@@ -168,7 +168,7 @@ impl<'a> Lexer<'a> {
 
   // This function now parses an octal mode from a byte slice, which is faster
   // than converting to a string first.
-  fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, ParseError> {
+  fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, ErrorKind> {
     let mut mode = 0u32;
     for &digit in s {
       if (b'0'..=b'7').contains(&digit) {
@@ -176,10 +176,10 @@ impl<'a> Lexer<'a> {
           .checked_mul(8)
           .and_then(|m| m.checked_add(u32::from(digit - b'0')))
           .ok_or_else(|| {
-            ParseError::InvalidFileMode(String::from_utf8_lossy(s).into_owned())
+            ErrorKind::InvalidFileMode(String::from_utf8_lossy(s).into_owned())
           })?;
       } else {
-        return Err(ParseError::InvalidFileMode(
+        return Err(ErrorKind::InvalidFileMode(
           String::from_utf8_lossy(s).into_owned(),
         ));
       }
@@ -187,7 +187,7 @@ impl<'a> Lexer<'a> {
     Ok(mode)
   }
 
-  fn parse_file_header(&self, rest: &'a [u8]) -> Result<Token<'a>, ParseError> {
+  fn parse_file_header(&self, rest: &'a [u8]) -> Result<Token<'a>, ErrorKind> {
     // Using if-let and explicit returns improves readability over chained `and_then` calls,
     // making the parsing logic easier to follow without a performance penalty.
     let mut parts = rest.fields();
@@ -201,20 +201,20 @@ impl<'a> Lexer<'a> {
         return Ok(Token::FileHeader { old_file, new_file });
       }
     }
-    Err(ParseError::InvalidFileHeader)
+    Err(ErrorKind::InvalidFileHeader)
   }
 
   // This function is optimized to parse the index line from a byte slice. It converts
   // the hash part to a string slice as required by the `Token::Index` struct,
   // but still avoids string allocation for parsing the mode.
-  fn parse_index_line(&self, rest: &'a [u8]) -> Result<Token<'a>, ParseError> {
+  fn parse_index_line(&self, rest: &'a [u8]) -> Result<Token<'a>, ErrorKind> {
     let mut parts = rest.fields();
-    let hashes_bytes = parts.next().ok_or(ParseError::InvalidIndexLine)?;
+    let hashes_bytes = parts.next().ok_or(ErrorKind::InvalidIndexLine)?;
     let hashes_str =
-      str::from_utf8(hashes_bytes).map_err(|_| ParseError::InvalidIndexLine)?;
+      str::from_utf8(hashes_bytes).map_err(|_| ErrorKind::InvalidIndexLine)?;
     let (old_hash, new_hash) = hashes_str
       .split_once("..")
-      .ok_or(ParseError::InvalidIndexHashRange)?;
+      .ok_or(ErrorKind::InvalidIndexHashRange)?;
     let mode = parts.next().map(|s| self.parse_octal_mode(s)).transpose()?;
     Ok(Token::Index {
       old_hash,
@@ -223,7 +223,7 @@ impl<'a> Lexer<'a> {
     })
   }
 
-  fn parse_line(&mut self) -> Option<Result<Token<'a>, ParseError>> {
+  fn parse_line(&mut self) -> Option<Result<Token<'a>, ErrorKind>> {
     let line = self.next_line()?;
 
     // Using the Aho-Corasick automaton is much faster for matching multiple
@@ -260,10 +260,10 @@ impl<'a> Lexer<'a> {
               {
                 Ok(Token::Binary { old_file, new_file })
               } else {
-                Err(ParseError::InvalidBinaryFilesLine)
+                Err(ErrorKind::InvalidBinaryFilesLine)
               }
             } else {
-              Err(ParseError::InvalidBinaryFilesLine)
+              Err(ErrorKind::InvalidBinaryFilesLine)
             }
           }
           _ => unreachable!(),
@@ -293,14 +293,14 @@ impl<'a> Lexer<'a> {
       }
     }
 
-    Some(Err(ParseError::UnexpectedLine(
+    Some(Err(ErrorKind::UnexpectedLine(
       String::from_utf8_lossy(line).to_string(),
     )))
   }
 }
 
 impl<'a> Iterator for Lexer<'a> {
-  type Item = Result<Token<'a>, ParseError>;
+  type Item = Result<Token<'a>, ErrorKind>;
 
   fn next(&mut self) -> Option<Self::Item> {
     self.parse_line()

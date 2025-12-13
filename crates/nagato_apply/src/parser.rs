@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use nagato_core::error::{Error, ParseError};
+use nagato_core::error::ErrorKind;
 
 use crate::{Hunk, Lexer, Line, Patch, Token};
 
@@ -15,7 +15,7 @@ impl<'a> Parser<'a> {
     }
   }
 
-  fn parse_header(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
+  fn parse_header(&mut self, patch: &mut Patch<'a>) -> Result<(), ErrorKind> {
     // This refactoring simplifies the header parsing loop by using `while let`,
     // which is more idiomatic and readable than the previous `loop` and `match` combination.
     while let Some(Ok(token)) = self.tokens.peek() {
@@ -75,7 +75,7 @@ impl<'a> Parser<'a> {
     Ok(())
   }
 
-  fn parse_hunks(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
+  fn parse_hunks(&mut self, patch: &mut Patch<'a>) -> Result<(), ErrorKind> {
     while self.peek_is(|t| matches!(t, Token::HunkHeader { .. }))? {
       let (hunk, old_no_newline, new_no_newline) = self.parse_hunk()?;
       if old_no_newline {
@@ -92,7 +92,7 @@ impl<'a> Parser<'a> {
   fn parse_headerless_hunk(
     &mut self,
     patch: &mut Patch<'a>,
-  ) -> Result<(), Error> {
+  ) -> Result<(), ErrorKind> {
     let mut lines = Vec::new();
     let (old_span, new_span, old_no_newline, new_no_newline) =
       self.parse_hunk_lines(&mut lines)?;
@@ -102,7 +102,7 @@ impl<'a> Parser<'a> {
 
     if !lines.is_empty() {
       if patch.old_file.is_empty() && patch.new_file.is_empty() {
-        return Err(Error::Parse(ParseError::PatchHasContentButNoFileInfo));
+        return Err(ErrorKind::PatchHasContentButNoFileInfo);
       }
 
       patch.hunks.push(Hunk {
@@ -116,7 +116,7 @@ impl<'a> Parser<'a> {
     Ok(())
   }
 
-  fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
+  fn parse_patch(&mut self) -> Result<Patch<'a>, ErrorKind> {
     let mut patch = Patch::default();
     self.parse_header(&mut patch)?;
     self.skip_empty_context_lines();
@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
   fn parse_hunk_lines(
     &mut self,
     lines: &mut Vec<Line<'a>>,
-  ) -> Result<(u32, u32, bool, bool), Error> {
+  ) -> Result<(u32, u32, bool, bool), ErrorKind> {
     let mut old_span = 0;
     let mut new_span = 0;
     let mut last_line_was_new_file = false;
@@ -171,18 +171,18 @@ impl<'a> Parser<'a> {
     Ok((old_span, new_span, old_file_no_newline, new_file_no_newline))
   }
 
-  fn parse_hunk(&mut self) -> Result<(Hunk<'a>, bool, bool), Error> {
+  fn parse_hunk(&mut self) -> Result<(Hunk<'a>, bool, bool), ErrorKind> {
     // This was refactored to use a `match` expression, which is more idiomatic
     // for this kind of token processing. It makes the intent clearer.
     let (old_line, old_span, new_line, new_span) =
-      match self.tokens.next().ok_or(ParseError::UnexpectedEof)?? {
+      match self.tokens.next().ok_or(ErrorKind::UnexpectedEof)?? {
         Token::HunkHeader {
           old_line,
           old_span,
           new_line,
           new_span,
         } => (old_line, old_span, new_line, new_span),
-        _ => return Err(Error::Parse(ParseError::ExpectedHunkHeader)),
+        _ => return Err(ErrorKind::ExpectedHunkHeader),
       };
 
     let mut lines = Vec::with_capacity((old_span + new_span) as usize);
@@ -195,18 +195,8 @@ impl<'a> Parser<'a> {
       new_file_no_newline,
     ) = self.parse_hunk_lines(&mut lines)?;
 
-    if actual_old_span != old_span {
-      return Err(Error::Parse(ParseError::HunkLineCountMismatchOld {
-        expected: old_span,
-        actual: actual_old_span,
-      }));
-    }
-
-    if actual_new_span != new_span {
-      return Err(Error::Parse(ParseError::HunkLineCountMismatchNew {
-        expected: new_span,
-        actual: actual_new_span,
-      }));
+    if actual_old_span != old_span || actual_new_span != new_span {
+      return Err(ErrorKind::HunkLineCountMismatch);
     }
 
     let hunk = Hunk {
@@ -232,17 +222,17 @@ impl<'a> Parser<'a> {
   fn peek_is(
     &mut self,
     check: impl Fn(&Token<'a>) -> bool,
-  ) -> Result<bool, Error> {
+  ) -> Result<bool, ErrorKind> {
     match self.tokens.peek() {
       Some(Ok(token)) => Ok(check(token)),
-      Some(Err(e)) => Err(Error::Parse(e.clone())),
+      Some(Err(e)) => Err(e.clone()),
       None => Ok(false),
     }
   }
 }
 
 impl<'a> Iterator for Parser<'a> {
-  type Item = Result<Patch<'a>, Error>;
+  type Item = Result<Patch<'a>, ErrorKind>;
 
   fn next(&mut self) -> Option<Self::Item> {
     self.skip_empty_context_lines();

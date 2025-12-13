@@ -4,10 +4,7 @@ use std::{
 };
 
 use bstr::{ByteSlice, Lines};
-use nagato_core::{
-  error::{ApplyError, Error},
-  fs::FileSystem,
-};
+use nagato_core::{error::ErrorKind, fs::FileSystem};
 
 use crate::{Hunk, Line, Patch};
 
@@ -77,16 +74,17 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
-  fn write_line(&mut self, line: &[u8]) -> io::Result<()> {
+  fn write_line(&mut self, line: &[u8]) -> Result<(), ErrorKind> {
     // Avoids adding a leading newline to the output file.
     if !self.is_at_start_of_file {
       self.output.write_all(b"\n")?;
     }
     self.is_at_start_of_file = false;
-    self.output.write_all(line)
+    self.output.write_all(line)?;
+    Ok(())
   }
 
-  fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
+  fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), ErrorKind> {
     // This closure provides an iterator over the context and deletion lines of a hunk,
     // which are the lines that need to be matched against the source file.
     // Using an iterator directly instead of collecting into a `Vec` avoids an
@@ -124,7 +122,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       let source_line = if let Some(line) = self.source.next() {
         line
       } else {
-        return Err(ApplyError::CouldNotApplyHunk.into());
+        return Err(ErrorKind::CouldNotApplyHunk);
       };
       self.current_source_line += 1;
 
@@ -156,7 +154,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         } else {
           // Reached end of source file while trying to match context.
           self.write_line(source_line)?;
-          return Err(ApplyError::CouldNotApplyHunk.into());
+          return Err(ErrorKind::CouldNotApplyHunk);
         }
       }
 
@@ -192,7 +190,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
-  fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
+  fn process(mut self, patch: &Patch<'_>) -> Result<(), ErrorKind> {
     for hunk in &patch.hunks {
       self.process_hunk(hunk)?;
     }
@@ -216,7 +214,7 @@ pub fn apply<'a>(
   output: &mut (impl Write + ?Sized),
   patch: &Patch<'a>,
   source: &[u8],
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   // If there are no changes (no hunks and no copy operation), we can
   // perform a fast-path by just writing the original source to the output.
   if patch.hunks.is_empty() && patch.copy_to.is_none() {
@@ -238,7 +236,7 @@ fn ignore_not_found(res: io::Result<()>) -> io::Result<()> {
 fn handle_file_deletion(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   let source_path = patch.source_file();
   let source = fs.read(source_path).ok();
   let source_slice = source.as_deref().unwrap_or(&[]);
@@ -254,7 +252,7 @@ fn handle_file_deletion(
 fn handle_metadata_change(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   let source_path = patch.source_file();
   if patch.rename_to.is_some() {
     fs.rename(source_path, patch.new_file)?;
@@ -267,7 +265,7 @@ fn handle_metadata_change(
 fn handle_content_change(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   let source_path = patch.source_file();
   let mut writer = fs.write(patch.new_file)?;
   {
@@ -296,9 +294,9 @@ fn handle_content_change(
 fn patch_file_worker(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   if patch.binary {
-    return Err(Error::Message("Binary files are not supported"));
+    return Err(ErrorKind::BinaryFilesNotSupported);
   }
 
   // By using a `match` expression, we make the dispatch logic more explicit and idiomatic,
@@ -326,7 +324,7 @@ pub fn patch_file(
   fs: &mut impl FileSystem,
   patch: Patch<'_>,
   reverse: bool,
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   // Applying a patch in reverse is as simple as inverting it first.
   // This avoids duplicating the main patching logic.
   if reverse {

@@ -8,7 +8,7 @@ use std::{
 pub use clap::{CommandFactory, Parser as ClapParser};
 use memmap2::Mmap;
 use nagato_apply::{patch_file, Parser};
-use nagato_core::{error::Error, fs::OsFileSystem};
+use nagato_core::{error::ErrorKind, fs::OsFileSystem};
 
 #[derive(ClapParser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -27,7 +27,7 @@ fn process_patch(
   fs: &mut OsFileSystem,
   patch_content: &[u8],
   reverse: bool,
-) -> Result<(), Error> {
+) -> Result<(), ErrorKind> {
   // This function encapsulates the core logic of parsing and applying a patch,
   // allowing it to be reused for both file and stdin inputs.
   for patch in Parser::new(patch_content) {
@@ -36,7 +36,7 @@ fn process_patch(
   Ok(())
 }
 
-pub fn run(cli: Cli) -> Result<(), Error> {
+pub fn run(cli: Cli) -> Result<(), ErrorKind> {
   // If no file is given and we are in an interactive terminal, print the help
   // message. This is a better user experience than hanging while waiting for
   // stdin that will never come.

@@ -3,8 +3,18 @@ use std::io;
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
+// By deriving `Clone`, we can handle errors more flexibly, especially in the
+// parser where we need to peek at tokens and potentially clone errors.
+// `PartialEq` and `Eq` are also derived for easier testing and comparison.
 #[derive(ThisError, Debug, Clone, PartialEq, Eq)]
-pub enum ParseError {
+pub enum ErrorKind {
+  // Storing the I/O error as a String makes the `Error` enum cloneable,
+  // as `std::io::Error` itself is not cloneable. This is a pragmatic
+  // trade-off for cleaner error handling in the parser.
+  #[error("I/O error: {0}")]
+  Io(String),
+
+  // Parse errors
   #[error("Invalid hunk range line: {0}")]
   InvalidHunkRangeLine(String),
   #[error("Invalid hunk range span: {0}")]
@@ -27,42 +37,32 @@ pub enum ParseError {
   InvalidBinaryFilesLine,
   #[error("Unexpected line: {0}")]
   UnexpectedLine(String),
-  #[error(
-    "Hunk line count mismatch for old file. Expected {expected}, got {actual}"
-  )]
-  HunkLineCountMismatchOld { expected: u32, actual: u32 },
-  #[error(
-    "Hunk line count mismatch for new file. Expected {expected}, got {actual}"
-  )]
-  HunkLineCountMismatchNew { expected: u32, actual: u32 },
+  #[error("Hunk line count mismatch")]
+  HunkLineCountMismatch,
   #[error("Expected hunk header")]
   ExpectedHunkHeader,
   #[error("Patch has content but no file information")]
   PatchHasContentButNoFileInfo,
   #[error("Unexpected end of patch")]
   UnexpectedEof,
+
+  // Apply errors
+  #[error("Could not apply hunk")]
+  CouldNotApplyHunk,
+
+  // Other errors
+  #[error("Binary files are not supported")]
+  BinaryFilesNotSupported,
 }
 
-#[derive(ThisError, Debug)]
-pub enum Error {
-  #[error(transparent)]
-  Io(#[from] io::Error),
-  #[error("{0}")]
-  Parse(#[from] ParseError),
-  #[error("{0}")]
-  Apply(#[from] ApplyError),
-  #[error("{0}")]
-  Message(&'static str),
-}
-
-impl From<PersistError> for Error {
-  fn from(e: PersistError) -> Self {
-    Error::Io(e.error)
+impl From<io::Error> for ErrorKind {
+  fn from(e: io::Error) -> Self {
+    ErrorKind::Io(e.to_string())
   }
 }
 
-#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
-pub enum ApplyError {
-  #[error("Could not apply hunk")]
-  CouldNotApplyHunk,
+impl From<PersistError> for ErrorKind {
+  fn from(e: PersistError) -> Self {
+    ErrorKind::Io(e.error.to_string())
+  }
 }
