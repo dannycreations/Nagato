@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist
+
+      - name: Get version
+        id: get_version
+        run: |
+          chmod +x dist/nagato-linux-amd64
+          echo "VERSION=$(./dist/nagato-linux-amd64 --version | awk '{print $2}')" >> $GITHUB_OUTPUT
+
+      - name: Check for existing release
+        run: |
+          if gh release view ${{ steps.get_version.outputs.VERSION }} >/dev/null 2>&1; then
+            echo "Error: Release ${{ steps.get_version.outputs.VERSION }} already exists."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: ${{ steps.get_version.outputs.VERSION }}
+          body: ':)'
+          files: dist/*

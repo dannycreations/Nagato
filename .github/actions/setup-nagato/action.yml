@@ -1,0 +1,43 @@
+name: 'Setup Nagato'
+description: 'Download and install the nagato CLI'
+inputs:
+  version:
+    description: 'The version of nagato to install. Defaults to latest.'
+    required: false
+    default: 'latest'
+
+runs:
+  using: 'composite'
+
+  steps:
+    - name: Get download URL for nagato
+      id: get_download_url
+      shell: bash
+      run: |
+        VERSION=${{ inputs.version }}
+        if [ "$VERSION" == "latest" ]; then
+          URL="https://api.github.com/repos/dannycreations/nagato/releases/latest"
+        else
+          URL="https://api.github.com/repos/dannycreations/nagato/releases/tags/$VERSION"
+        fi
+
+        DOWNLOAD_URL=""
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          DOWNLOAD_URL=$(curl -s $URL | jq -r '.assets[] | select(.name == "nagato-linux-amd64") | .browser_download_url')
+        elif [ "$RUNNER_OS" == "Windows" ]; then
+          DOWNLOAD_URL=$(curl -s $URL | jq -r '.assets[] | select(.name == "nagato-windows-amd64.exe") | .browser_download_url')
+        fi
+        echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+
+    - name: Download nagato
+      shell: bash
+      run: |
+        NAGATO_PATH="${{ runner.temp }}/nagato"
+        mkdir -p "$NAGATO_PATH"
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          curl -L -o "$NAGATO_PATH/nagato" "${{ steps.get_download_url.outputs.DOWNLOAD_URL }}"
+          chmod +x "$NAGATO_PATH/nagato"
+        elif [ "$RUNNER_OS" == "Windows" ]; then
+          curl -L -o "$NAGATO_PATH/nagato.exe" "${{ steps.get_download_url.outputs.DOWNLOAD_URL }}"
+        fi
+        echo "$NAGATO_PATH" >> $GITHUB_PATH
