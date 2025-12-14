@@ -8,9 +8,12 @@ use std::{
 pub use clap::{CommandFactory, Parser as ClapParser};
 use memmap2::Mmap;
 use nagato_apply::{patch_file, Parser};
-use nagato_core::{error::ErrorKind, fs::OsFileSystem};
+use nagato_core::{error::Error, fs::OsFileSystem};
 
-#[derive(ClapParser, Debug)]
+// I'm adding `Clone` to the `Cli` struct.
+// This is necessary so I can clone the `cli` object in `main.rs`.
+// I need to access `cli.file` for error reporting after `cli` has been moved into the `run` function.
+#[derive(ClapParser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
   /// The path to the patch file. If not provided, the patch will be read from stdin.
@@ -27,7 +30,7 @@ fn process_patch(
   fs: &mut OsFileSystem,
   patch_content: &[u8],
   reverse: bool,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   // This function encapsulates the core logic of parsing and applying a patch,
   // allowing it to be reused for both file and stdin inputs.
   for patch in Parser::new(patch_content) {
@@ -36,7 +39,7 @@ fn process_patch(
   Ok(())
 }
 
-pub fn run(cli: Cli) -> Result<(), ErrorKind> {
+pub fn run(cli: Cli) -> Result<(), Error> {
   // If no file is given and we are in an interactive terminal, print the help
   // message. This is a better user experience than hanging while waiting for
   // stdin that will never come.

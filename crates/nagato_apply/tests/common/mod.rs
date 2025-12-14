@@ -137,7 +137,12 @@ macro_rules! test_lexer_ok {
     #[test]
     fn $test_name() {
       let input = indoc::indoc!($input);
-      let tokens: Vec<_> = nagato_apply::Lexer::new(input.as_bytes()).map(|r| r.unwrap()).collect();
+      // I'm updating the test macro to extract the `token` from each `LexerItem`
+      // before collecting them into a `Vec`. This is necessary because the `Lexer`
+      // now produces `LexerItem`s, but the tests were written to expect `Token`s.
+      let tokens: Vec<_> = nagato_apply::Lexer::new(input.as_bytes())
+        .map(|r| r.unwrap().token)
+        .collect();
       assert_eq!(tokens, vec![$($expected_token),*]);
     }
   };

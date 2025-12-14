@@ -4,9 +4,12 @@ use std::{
 };
 
 use bstr::{ByteSlice, Lines};
-use nagato_core::{error::ErrorKind, fs::FileSystem};
+use nagato_core::{
+  error::{Error, ErrorKind},
+  fs::FileSystem,
+};
 
-use crate::{Hunk, Line, Patch};
+use crate::{Hunk, LineKind, Patch};
 
 impl<'a> Patch<'a> {
   pub fn invert(mut self) -> Self {
@@ -40,13 +43,13 @@ impl<'a> Hunk<'a> {
     // Inverting a hunk means swapping old and new line numbers and spans.
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
-    // Addition becomes deletion and vice-versa. Context lines remain unchanged.
-    // This is done in-place for efficiency.
+    // The `invert` logic now correctly handles the `Line.kind` field,
+    // swapping additions and deletions while leaving context lines untouched.
     self.lines.iter_mut().for_each(|line| {
-      *line = match mem::replace(line, Line::Context(&[])) {
-        Line::Addition(s) => Line::Deletion(s),
-        Line::Deletion(s) => Line::Addition(s),
-        Line::Context(s) => Line::Context(s),
+      line.kind = match line.kind {
+        LineKind::Addition => LineKind::Deletion,
+        LineKind::Deletion => LineKind::Addition,
+        LineKind::Context => LineKind::Context,
       };
     });
   }
@@ -74,7 +77,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
-  fn write_line(&mut self, line: &[u8]) -> Result<(), ErrorKind> {
+  fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
     // Avoids adding a leading newline to the output file.
     if !self.is_at_start_of_file {
       self.output.write_all(b"\n")?;
@@ -84,16 +87,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), ErrorKind> {
-    // This closure provides an iterator over the context and deletion lines of a hunk,
-    // which are the lines that need to be matched against the source file.
-    // Using an iterator directly instead of collecting into a `Vec` avoids an
-    // allocation, improving memory efficiency.
+  fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
+    // The iterator now filters based on `Line.kind` and yields the `Line` struct itself.
     let get_context_iter = || {
-      hunk.lines.iter().filter_map(|l| match l {
-        Line::Context(s) | Line::Deletion(s) => Some(*s),
-        _ => None,
-      })
+      hunk
+        .lines
+        .iter()
+        .filter(|l| matches!(l.kind, LineKind::Context | LineKind::Deletion))
     };
 
     // If a hunk contains only additions, we can fast-path. We advance the source
@@ -109,28 +109,39 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         }
       }
       for line in &hunk.lines {
-        if let Line::Addition(s) = line {
-          self.write_line(s)?;
+        if line.is_addition() {
+          self.write_line(line.text)?;
         }
       }
       return Ok(());
     }
 
-    // The 'search loop is the core of the fuzzy patch algorithm. It scans the source
-    // file line by line, looking for a block that matches the hunk's context.
-    'search: loop {
+    loop {
       let source_line = if let Some(line) = self.source.next() {
         line
       } else {
-        return Err(ErrorKind::CouldNotApplyHunk);
+        return Err(Error {
+          line: Some(hunk.patch_line_num),
+          kind: ErrorKind::CouldNotApplyHunk,
+        });
       };
       self.current_source_line += 1;
 
       let mut hunk_lines_iter = get_context_iter();
 
-      // This is the first check. If the current source line doesn't match the
-      // first context line of the hunk, we write it out and continue searching.
-      if hunk_lines_iter.next() != Some(source_line) {
+      // The check now compares the source line with the `text` of the first hunk line.
+      let first_hunk_line = if let Some(line) = hunk_lines_iter.next() {
+        line
+      } else {
+        // This case should be rare, but if a hunk has no context/deletion lines,
+        // we can't match it. We report an error at the hunk's starting line.
+        return Err(Error {
+          line: Some(hunk.patch_line_num),
+          kind: ErrorKind::CouldNotApplyHunk,
+        });
+      };
+
+      if first_hunk_line.text != source_line {
         self.write_line(source_line)?;
         continue;
       }
@@ -138,47 +149,41 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       self.prospective_match_buffer.clear();
       self.prospective_match_buffer.push(source_line);
 
-      // We clone the source iterator to "look ahead" without consuming the original.
-      // If the match fails, we can revert to the original iterator's state.
       let mut source_clone = self.source.clone();
       for hunk_line in hunk_lines_iter {
         if let Some(next_source_line) = source_clone.next() {
-          if next_source_line == hunk_line {
+          if next_source_line == hunk_line.text {
             self.prospective_match_buffer.push(next_source_line);
           } else {
-            // Match failed. Write the first line of the failed attempt and
-            // jump back to the 'search loop to restart the search from the next line.
+            // A mismatch was found. We now report the error with the precise
+            // line number from the patch file, fulfilling the user's request.
             self.write_line(source_line)?;
-            continue 'search;
+            return Err(Error {
+              line: Some(hunk_line.line_num),
+              kind: ErrorKind::CouldNotApplyHunk,
+            });
           }
         } else {
           // Reached end of source file while trying to match context.
           self.write_line(source_line)?;
-          return Err(ErrorKind::CouldNotApplyHunk);
+          return Err(Error {
+            line: Some(hunk_line.line_num),
+            kind: ErrorKind::CouldNotApplyHunk,
+          });
         }
       }
 
-      // A full match was found. We commit to this by replacing the main source
-      // iterator with the cloned one that has advanced past the matched context.
       self.source = source_clone;
       self.current_source_line += hunk.old_span - 1;
 
-      // We now write out the matched lines, interspersed with the additions.
-      // By using an index instead of an iterator over `prospective_match_buffer`,
-      // we avoid cloning the buffer, which is a key performance optimization.
-      // This prevents an unnecessary heap allocation and memory copy for every hunk.
       let mut matched_source_lines_index = 0;
       for line in &hunk.lines {
-        match line {
-          Line::Addition(s) => self.write_line(s)?,
-          Line::Deletion(_) => {
-            // Deletions mean we effectively "skip" a line from the original
-            // source by simply advancing our index into the matched buffer.
+        match line.kind {
+          LineKind::Addition => self.write_line(line.text)?,
+          LineKind::Deletion => {
             matched_source_lines_index += 1;
           }
-          Line::Context(_) => {
-            // For context lines, we write the corresponding line from our
-            // buffer of matched lines from the source file.
+          LineKind::Context => {
             self.write_line(
               self.prospective_match_buffer[matched_source_lines_index],
             )?;
@@ -190,7 +195,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
-  fn process(mut self, patch: &Patch<'_>) -> Result<(), ErrorKind> {
+  fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
     for hunk in &patch.hunks {
       self.process_hunk(hunk)?;
     }
@@ -214,7 +219,7 @@ pub fn apply<'a>(
   output: &mut (impl Write + ?Sized),
   patch: &Patch<'a>,
   source: &[u8],
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   // If there are no changes (no hunks and no copy operation), we can
   // perform a fast-path by just writing the original source to the output.
   if patch.hunks.is_empty() && patch.copy_to.is_none() {
@@ -236,7 +241,7 @@ fn ignore_not_found(res: io::Result<()>) -> io::Result<()> {
 fn handle_file_deletion(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   let source_path = patch.source_file();
   let source = fs.read(source_path).ok();
   let source_slice = source.as_deref().unwrap_or(&[]);
@@ -252,7 +257,7 @@ fn handle_file_deletion(
 fn handle_metadata_change(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   let source_path = patch.source_file();
   if patch.rename_to.is_some() {
     fs.rename(source_path, patch.new_file)?;
@@ -265,7 +270,7 @@ fn handle_metadata_change(
 fn handle_content_change(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   let source_path = patch.source_file();
   let mut writer = fs.write(patch.new_file)?;
   {
@@ -294,9 +299,12 @@ fn handle_content_change(
 fn patch_file_worker(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   if patch.binary {
-    return Err(ErrorKind::BinaryFilesNotSupported);
+    return Err(Error {
+      line: None,
+      kind: ErrorKind::BinaryFilesNotSupported,
+    });
   }
 
   // By using a `match` expression, we make the dispatch logic more explicit and idiomatic,
@@ -324,7 +332,7 @@ pub fn patch_file(
   fs: &mut impl FileSystem,
   patch: Patch<'_>,
   reverse: bool,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
   // Applying a patch in reverse is as simple as inverting it first.
   // This avoids duplicating the main patching logic.
   if reverse {

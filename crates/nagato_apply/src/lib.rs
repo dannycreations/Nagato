@@ -3,13 +3,13 @@ mod lexer;
 mod parser;
 
 pub use applier::{apply, patch_file};
-pub use lexer::Lexer;
+pub use lexer::{Lexer, LexerItem};
 pub use parser::Parser;
 
 /// Represents a single token from a diff file.
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
-pub enum Token<'a> {
+pub enum TokenKind<'a> {
   /// The header of a file diff, containing the old and new file paths.
   FileHeader {
     old_file: &'a [u8],
@@ -65,29 +65,30 @@ pub enum Token<'a> {
   },
 }
 
-/// Represents a single line in a hunk.
+// I'm refactoring the `Line` enum into a struct. This is a significant change
+// that allows each line to carry its own contextual information, specifically
+// its original line number from the patch file. This is the key to providing
+// precise, line-level error reporting.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Line<'a> {
-  /// A line that was added.
-  Addition(&'a [u8]),
-  /// A line that was deleted.
-  Deletion(&'a [u8]),
-  /// A line that is part of the context.
-  Context(&'a [u8]),
+pub struct Line<'a> {
+  pub kind: LineKind,
+  pub text: &'a [u8],
+  pub line_num: u64,
+}
+
+// This new enum represents the type of a line in a hunk.
+// It was previously part of the `Line` enum itself, but has been
+// extracted to be a field within the new `Line` struct.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LineKind {
+  Addition,
+  Deletion,
+  Context,
 }
 
 impl<'a> Line<'a> {
   pub fn is_addition(&self) -> bool {
-    matches!(self, Line::Addition(_))
-  }
-
-  pub fn text(&self) -> &'a [u8] {
-    // This was refactored from a `match` to a more direct destructuring,
-    // as all variants of `Line` contain a single `&[u8]` element.
-    // This is more concise and equally clear.
-    let (Line::Addition(text) | Line::Deletion(text) | Line::Context(text)) =
-      self;
-    text
+    matches!(self.kind, LineKind::Addition)
   }
 }
 
@@ -104,6 +105,8 @@ pub struct Hunk<'a> {
   pub new_span: u32,
   /// The lines in the hunk.
   pub lines: Vec<Line<'a>>,
+  // This will be populated by the parser using the line number from the LexerItem.
+  pub patch_line_num: u64,
 }
 
 /// Represents a single patch, which can contain multiple hunks.

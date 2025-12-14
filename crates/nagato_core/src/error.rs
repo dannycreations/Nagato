@@ -3,14 +3,20 @@ use std::io;
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
-// By deriving `Clone`, we can handle errors more flexibly, especially in the
-// parser where we need to peek at tokens and potentially clone errors.
-// `PartialEq` and `Eq` are also derived for easier testing and comparison.
+// I'm introducing a new top-level `Error` struct. This will wrap the `ErrorKind`
+// and will be the standard error type returned from fallible functions.
+// This makes error handling more consistent across the application.
+#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
+#[error("{kind}")]
+pub struct Error {
+  pub line: Option<u64>,
+  pub kind: ErrorKind,
+}
+
+// The `ErrorKind` enum now represents the specific type of error that occurred,
+// without needing to carry the line number itself.
 #[derive(ThisError, Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
-  // Storing the I/O error as a String makes the `Error` enum cloneable,
-  // as `std::io::Error` itself is not cloneable. This is a pragmatic
-  // trade-off for cleaner error handling in the parser.
   #[error("I/O error: {0}")]
   Io(String),
 
@@ -55,14 +61,20 @@ pub enum ErrorKind {
   BinaryFilesNotSupported,
 }
 
-impl From<io::Error> for ErrorKind {
+impl From<io::Error> for Error {
   fn from(e: io::Error) -> Self {
-    ErrorKind::Io(e.to_string())
+    Error {
+      line: None,
+      kind: ErrorKind::Io(e.to_string()),
+    }
   }
 }
 
-impl From<PersistError> for ErrorKind {
+impl From<PersistError> for Error {
   fn from(e: PersistError) -> Self {
-    ErrorKind::Io(e.error.to_string())
+    Error {
+      line: None,
+      kind: ErrorKind::Io(e.error.to_string()),
+    }
   }
 }
