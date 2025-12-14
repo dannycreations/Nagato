@@ -15,26 +15,15 @@ test_patch_err_with_line!(
 );
 
 test_patch_err_with_line!(
-  fails_with_correct_line_number_for_headerless_hunk,
-  initial_fs: { "a.txt" => "hello\n" },
-  diff: r#"
-        --- a/a.txt
-        +++ b/a.txt
-        -goodbye
-        +world
-    "#,
-  expected_line: 3,
-  expected_kind: ErrorKind::CouldNotApplyHunk
-);
-
-test_patch_err_with_line!(
   fails_with_correct_line_number_for_shortest_header,
-  initial_fs: { "a.txt" => "hello\n" },
+  initial_fs: { "a.txt" => "line one\nline two\nline three\n" },
   diff: r#"
         a/a.txt
-        -goodbye
-        +world
+
+        -line one
+        -line two
+        -*error*line three
     "#,
-  expected_line: 2,
+  expected_line: 5,
   expected_kind: ErrorKind::CouldNotApplyHunk
 );

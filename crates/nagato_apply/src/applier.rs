@@ -13,23 +13,31 @@ use crate::{Hunk, LineKind, Patch};
 
 impl<'a> Patch<'a> {
   pub fn invert(mut self) -> Self {
-    // Swapping fields is a direct and efficient way to invert the patch's metadata.
+    // Determine the patch type before making changes. This avoids relying on a
+    // partially-mutated state, making the logic clearer and less error-prone.
+    let is_creation = self.old_file == b"/dev/null";
+    let is_deletion = self.new_file == b"/dev/null";
+
+    // Invert file paths and metadata.
     mem::swap(&mut self.old_file, &mut self.new_file);
     mem::swap(&mut self.rename_from, &mut self.rename_to);
     mem::swap(&mut self.copy_from, &mut self.copy_to);
     mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
 
-    if self.old_file == b"/dev/null" {
-      // This was a file creation, so the inverse is a deletion.
-      self.new_mode = self.deleted_mode;
-      self.old_mode = None;
-      self.deleted_mode = None;
-    } else if self.new_file == b"/dev/null" {
-      // This was a file deletion, so the inverse is a creation.
+    if is_creation {
+      // Inverting a creation results in a deletion.
+      // The creation's `new_mode` becomes the deletion's `deleted_mode`.
       self.deleted_mode = self.new_mode;
       self.new_mode = None;
+      self.old_mode = None; // A creation has no old_mode.
+    } else if is_deletion {
+      // Inverting a deletion results in a creation.
+      // The deletion's `deleted_mode` becomes the creation's `new_mode`.
+      self.new_mode = self.deleted_mode.or(self.old_mode);
+      self.old_mode = None;
+      self.deleted_mode = None;
     } else {
-      // This was a modification, so we swap the modes.
+      // Inverting a modification swaps the modes.
       mem::swap(&mut self.old_mode, &mut self.new_mode);
     }
 
@@ -60,9 +68,6 @@ struct Applier<'s, 'b, W: Write + ?Sized> {
   source: Lines<'s>,
   is_at_start_of_file: bool,
   current_source_line: u32,
-  // By reusing this buffer, we avoid reallocating it for every hunk,
-  // which is more memory-efficient when processing patches with many hunks.
-  prospective_match_buffer: Vec<&'s [u8]>,
 }
 
 impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
@@ -72,8 +77,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       source: source.lines(),
       is_at_start_of_file: true,
       current_source_line: 0,
-      // Initialize the buffer once to be reused across all hunk applications.
-      prospective_match_buffer: Vec::new(),
     }
   }
 
@@ -88,7 +91,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
-    // The iterator now filters based on `Line.kind` and yields the `Line` struct itself.
+    // This buffer stores lines from the source that are part of a potential match.
+    // By keeping it local to this function, we improve encapsulation.
+    let mut prospective_match_buffer = Vec::new();
     let get_context_iter = || {
       hunk
         .lines
@@ -96,18 +101,28 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         .filter(|l| matches!(l.kind, LineKind::Context | LineKind::Deletion))
     };
 
-    // If a hunk contains only additions, we can fast-path. We advance the source
-    // to the correct line and then write all the new lines.
-    if hunk.old_span == 0 {
-      let target_line = hunk.old_line.saturating_sub(1);
-      while self.current_source_line < target_line {
-        if let Some(line) = self.source.next() {
-          self.write_line(line)?;
-          self.current_source_line += 1;
-        } else {
-          break;
+    // Advance to the target line before starting detailed matching.
+    let target_line = hunk.old_line.saturating_sub(1);
+    while self.current_source_line < target_line {
+      if let Some(line) = self.source.next() {
+        self.write_line(line)?;
+        self.current_source_line += 1;
+      } else {
+        // If the source ends before we reach the hunk's target line,
+        // and the hunk expected to find content, it's an error.
+        if hunk.old_span > 0 {
+          return Err(Error {
+            line: Some(hunk.patch_line_num),
+            kind: ErrorKind::CouldNotApplyHunk,
+          });
         }
+        break;
       }
+    }
+
+    // If a hunk has `old_span == 0`, it's a pure addition.
+    // We just need to write the new lines.
+    if hunk.old_span == 0 {
       for line in &hunk.lines {
         if line.is_addition() {
           self.write_line(line.text)?;
@@ -120,6 +135,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       let source_line = if let Some(line) = self.source.next() {
         line
       } else {
+        // If we run out of source lines while trying to find a match, the hunk cannot be applied.
         return Err(Error {
           line: Some(hunk.patch_line_num),
           kind: ErrorKind::CouldNotApplyHunk,
@@ -129,12 +145,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
       let mut hunk_lines_iter = get_context_iter();
 
-      // The check now compares the source line with the `text` of the first hunk line.
       let first_hunk_line = if let Some(line) = hunk_lines_iter.next() {
         line
       } else {
-        // This case should be rare, but if a hunk has no context/deletion lines,
-        // we can't match it. We report an error at the hunk's starting line.
+        // A hunk that is not a pure addition must have at least one context or deletion line.
         return Err(Error {
           line: Some(hunk.patch_line_num),
           kind: ErrorKind::CouldNotApplyHunk,
@@ -146,26 +160,25 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         continue;
       }
 
-      self.prospective_match_buffer.clear();
-      self.prospective_match_buffer.push(source_line);
+      // We've found a potential match for the first line of the hunk.
+      prospective_match_buffer.clear();
+      prospective_match_buffer.push(source_line);
 
       let mut source_clone = self.source.clone();
+      // Now, we check if the rest of the hunk's context/deletion lines match.
       for hunk_line in hunk_lines_iter {
         if let Some(next_source_line) = source_clone.next() {
-          if next_source_line == hunk_line.text {
-            self.prospective_match_buffer.push(next_source_line);
-          } else {
-            // A mismatch was found. We now report the error with the precise
-            // line number from the patch file, fulfilling the user's request.
-            self.write_line(source_line)?;
+          if next_source_line != hunk_line.text {
+            // A mismatch was found inside a hunk that had started to match.
+            // This is a definitive error.
             return Err(Error {
               line: Some(hunk_line.line_num),
               kind: ErrorKind::CouldNotApplyHunk,
             });
           }
+          prospective_match_buffer.push(next_source_line);
         } else {
-          // Reached end of source file while trying to match context.
-          self.write_line(source_line)?;
+          // Reached end of source file while matching. This is a definitive error.
           return Err(Error {
             line: Some(hunk_line.line_num),
             kind: ErrorKind::CouldNotApplyHunk,
@@ -173,6 +186,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         }
       }
 
+      // If we're here, the hunk matched successfully.
       self.source = source_clone;
       self.current_source_line += hunk.old_span - 1;
 
@@ -185,7 +199,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
           }
           LineKind::Context => {
             self.write_line(
-              self.prospective_match_buffer[matched_source_lines_index],
+              prospective_match_buffer[matched_source_lines_index],
             )?;
             matched_source_lines_index += 1;
           }

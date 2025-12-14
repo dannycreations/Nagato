@@ -94,43 +94,34 @@ impl<'a> Lexer<'a> {
     self.lines.next()
   }
 
-  // This function now parses a range from a byte slice, avoiding string conversion
-  // for better performance.
-  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), Error> {
-    let (line, rest) = parse_u32(range_bytes).ok_or_else(|| Error {
+  fn error_from_slice(&self, s: &[u8], f: fn(String) -> ErrorKind) -> Error {
+    Error {
       line: Some(self.line_num),
-      kind: ErrorKind::InvalidHunkRangeLine(
-        String::from_utf8_lossy(range_bytes).into_owned(),
-      ),
+      kind: f(String::from_utf8_lossy(s).into_owned()),
+    }
+  }
+
+  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), Error> {
+    let (line, rest) = parse_u32(range_bytes).ok_or_else(|| {
+      self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeLine)
     })?;
 
     if rest.is_empty() {
       return Ok((line, 1));
     }
 
-    if !rest.starts_with(b",") {
-      return Err(Error {
-        line: Some(self.line_num),
-        kind: ErrorKind::InvalidHunkRangeLine(
-          String::from_utf8_lossy(range_bytes).into_owned(),
-        ),
-      });
-    }
+    let rest = rest.strip_prefix(b",").ok_or_else(|| {
+      self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeLine)
+    })?;
 
-    let (span, rest) = parse_u32(&rest[1..]).ok_or_else(|| Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidHunkRangeSpan(
-        String::from_utf8_lossy(range_bytes).into_owned(),
-      ),
+    let (span, rest) = parse_u32(rest).ok_or_else(|| {
+      self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeSpan)
     })?;
 
     if !rest.is_empty() {
-      return Err(Error {
-        line: Some(self.line_num),
-        kind: ErrorKind::InvalidHunkRangeSpan(
-          String::from_utf8_lossy(range_bytes).into_owned(),
-        ),
-      });
+      return Err(
+        self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeSpan),
+      );
     }
 
     Ok((line, span))
@@ -172,77 +163,51 @@ impl<'a> Lexer<'a> {
     })
   }
 
-  // This function now parses a percentage from a byte slice, avoiding string conversion
-  // for better performance.
   fn parse_percentage(&self, s: &[u8]) -> Result<u32, Error> {
-    let s = s.strip_suffix(b"%").ok_or_else(|| Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidPercentage(
-        String::from_utf8_lossy(s).into_owned(),
-      ),
-    })?;
-    let (num, rest) = parse_u32(s).ok_or_else(|| Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidPercentage(
-        String::from_utf8_lossy(s).into_owned(),
-      ),
-    })?;
+    let s = s
+      .strip_suffix(b"%")
+      .ok_or_else(|| self.error_from_slice(s, ErrorKind::InvalidPercentage))?;
+    let (num, rest) = parse_u32(s)
+      .ok_or_else(|| self.error_from_slice(s, ErrorKind::InvalidPercentage))?;
     if !rest.is_empty() {
-      return Err(Error {
-        line: Some(self.line_num),
-        kind: ErrorKind::InvalidPercentage(
-          String::from_utf8_lossy(s).into_owned(),
-        ),
-      });
+      return Err(self.error_from_slice(s, ErrorKind::InvalidPercentage));
     }
     Ok(num)
   }
 
-  // This function now parses an octal mode from a byte slice, which is faster
-  // than converting to a string first.
   fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, Error> {
+    if s.is_empty() {
+      return Err(self.error_from_slice(s, ErrorKind::InvalidFileMode));
+    }
     let mut mode = 0u32;
     for &digit in s {
       if (b'0'..=b'7').contains(&digit) {
         mode = mode
           .checked_mul(8)
           .and_then(|m| m.checked_add(u32::from(digit - b'0')))
-          .ok_or_else(|| Error {
-            line: Some(self.line_num),
-            kind: ErrorKind::InvalidFileMode(
-              String::from_utf8_lossy(s).into_owned(),
-            ),
+          .ok_or_else(|| {
+            self.error_from_slice(s, ErrorKind::InvalidFileMode)
           })?;
       } else {
-        return Err(Error {
-          line: Some(self.line_num),
-          kind: ErrorKind::InvalidFileMode(
-            String::from_utf8_lossy(s).into_owned(),
-          ),
-        });
+        return Err(self.error_from_slice(s, ErrorKind::InvalidFileMode));
       }
     }
     Ok(mode)
   }
 
   fn parse_file_header(&self, rest: &'a [u8]) -> Result<TokenKind<'a>, Error> {
-    // Using if-let and explicit returns improves readability over chained `and_then` calls,
-    // making the parsing logic easier to follow without a performance penalty.
     let mut parts = rest.fields();
-    if let (Some(old_file_part), Some(new_file_part)) =
-      (parts.next(), parts.next())
-    {
-      if let (Some(old_file), Some(new_file)) = (
-        old_file_part.strip_prefix(b"a/"),
-        new_file_part.strip_prefix(b"b/"),
-      ) {
-        return Ok(TokenKind::FileHeader { old_file, new_file });
-      }
+    let old_file = parts.next().and_then(|p| p.strip_prefix(b"a/"));
+    let new_file = parts.next().and_then(|p| p.strip_prefix(b"b/"));
+
+    if let (Some(old_file), Some(new_file)) = (old_file, new_file) {
+      Ok(TokenKind::FileHeader { old_file, new_file })
+    } else {
+      Err(Error {
+        line: Some(self.line_num),
+        kind: ErrorKind::InvalidFileHeader,
+      })
     }
-    Err(Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidFileHeader,
-    })
   }
 
   // This function is optimized to parse the index line from a byte slice. It converts
@@ -338,19 +303,19 @@ impl<'a> Lexer<'a> {
       None => Ok(TokenKind::Context(&[])),
       _ => {
         let mut parts = line.fields();
-        if let Some(first) = parts.next() {
-          let old_file = strip_git_prefix(first);
-          let new_file = parts.next().map(strip_git_prefix).unwrap_or(old_file);
-          if parts.next().is_none() {
+        let first = parts.next();
+        let second = parts.next();
+        let third = parts.next();
+
+        if let Some(first_part) = first {
+          if third.is_none() {
+            let old_file = strip_git_prefix(first_part);
+            let new_file = second.map(strip_git_prefix).unwrap_or(old_file);
             return Ok(TokenKind::FileHeader { old_file, new_file });
           }
         }
-        Err(Error {
-          line: Some(self.line_num),
-          kind: ErrorKind::UnexpectedLine(
-            String::from_utf8_lossy(line).into_owned(),
-          ),
-        })
+
+        Err(self.error_from_slice(line, ErrorKind::UnexpectedLine))
       }
     }
   }
