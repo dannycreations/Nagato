@@ -22,6 +22,12 @@ jobs:
           name: dist
           path: dist
 
+      - name: Freshen Nightly Release
+        continue-on-error: true
+        run: gh release delete nightly -y --cleanup-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Create Nightly Release
         uses: softprops/action-gh-release@v2
         with:
