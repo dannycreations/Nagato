@@ -28,8 +28,6 @@ impl AtomicWriter {
   pub fn commit(mut self) -> io::Result<()> {
     self.writer.flush()?;
 
-    // The previous `map_err` was replaced with `?` for more idiomatic error handling.
-    // This is functionally equivalent but more concise.
     let tempfile = self.writer.into_inner()?;
     tempfile.persist(&self.dest_path).map_err(|e| e.error)?;
     Ok(())
@@ -61,6 +59,16 @@ pub struct OsFileSystem {
   root: PathBuf,
 }
 
+// This function is being moved out of the `OsFileSystem` implementation because
+// it doesn't depend on the struct's state (`self`). Making it a free function
+// clarifies its role as a general utility for file system operations.
+fn ensure_parent_dir_exists(path: &Path) -> io::Result<()> {
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent)?;
+  }
+  Ok(())
+}
+
 impl OsFileSystem {
   pub fn new(root: impl Into<PathBuf>) -> Self {
     Self { root: root.into() }
@@ -71,13 +79,6 @@ impl OsFileSystem {
       .to_path()
       .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     Ok(self.root.join(path))
-  }
-
-  fn ensure_parent_dir_exists(path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-      fs::create_dir_all(parent)?;
-    }
-    Ok(())
   }
 }
 
@@ -93,14 +94,14 @@ impl FileSystem for OsFileSystem {
 
   fn write(&mut self, path: &[u8]) -> io::Result<AtomicWriter> {
     let abs_path = self.absolute_path(path)?;
-    Self::ensure_parent_dir_exists(&abs_path)?;
+    ensure_parent_dir_exists(&abs_path)?;
     AtomicWriter::new(&abs_path)
   }
 
   fn copy(&mut self, from: &[u8], to: &[u8]) -> io::Result<()> {
     let from_abs = self.absolute_path(from)?;
     let to_abs = self.absolute_path(to)?;
-    Self::ensure_parent_dir_exists(&to_abs)?;
+    ensure_parent_dir_exists(&to_abs)?;
     fs::copy(from_abs, to_abs)?;
     Ok(())
   }
@@ -112,7 +113,7 @@ impl FileSystem for OsFileSystem {
   fn rename(&mut self, from: &[u8], to: &[u8]) -> io::Result<()> {
     let from_abs = self.absolute_path(from)?;
     let to_abs = self.absolute_path(to)?;
-    Self::ensure_parent_dir_exists(&to_abs)?;
+    ensure_parent_dir_exists(&to_abs)?;
     fs::rename(from_abs, to_abs)
   }
 

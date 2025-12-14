@@ -2,7 +2,7 @@ use std::{
   ffi::OsString,
   fs::File,
   io::{self, IsTerminal, Read},
-  path::Path,
+  path::{Path, PathBuf},
 };
 
 pub use clap::{CommandFactory, Parser as ClapParser};
@@ -10,10 +10,7 @@ use memmap2::Mmap;
 use nagato_apply::{patch_file, Parser};
 use nagato_core::{error::Error, fs::OsFileSystem};
 
-// I'm adding `Clone` to the `Cli` struct.
-// This is necessary so I can clone the `cli` object in `main.rs`.
-// I need to access `cli.file` for error reporting after `cli` has been moved into the `run` function.
-#[derive(ClapParser, Debug, Clone)]
+#[derive(ClapParser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
   /// The path to the patch file. If not provided, the patch will be read from stdin.
@@ -39,7 +36,7 @@ fn process_patch(
   Ok(())
 }
 
-pub fn run(cli: Cli) -> Result<(), Error> {
+pub fn run(cli: &Cli) -> Result<(), Error> {
   // If no file is given and we are in an interactive terminal, print the help
   // message. This is a better user experience than hanging while waiting for
   // stdin that will never come.
@@ -48,14 +45,16 @@ pub fn run(cli: Cli) -> Result<(), Error> {
     return Ok(());
   }
 
-  let root = cli
+  // The compiler needs a type hint here to know that `Into::into` should produce a `PathBuf`.
+  let root: PathBuf = cli
     .directory
-    .map_or_else(|| Path::new(".").to_path_buf(), Into::into);
+    .as_deref()
+    .map_or_else(|| Path::new(".").into(), Into::into);
   let mut fs = OsFileSystem::new(root);
 
   // Using a `match` expression here is more idiomatic and clearly expresses
   // the logic for handling either a file or stdin as the patch source.
-  match cli.file {
+  match &cli.file {
     Some(path) => {
       let file = File::open(path)?;
       // Using memory-mapping is highly efficient for large files, as it avoids

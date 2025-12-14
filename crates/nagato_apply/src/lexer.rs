@@ -196,9 +196,11 @@ impl<'a> Lexer<'a> {
   }
 
   fn parse_file_header(&self, rest: &'a [u8]) -> Result<TokenKind<'a>, Error> {
+    // The logic is now more robust, using `strip_git_prefix` to handle file
+    // paths that may or may not have the `a/` or `b/` prefixes.
     let mut parts = rest.fields();
-    let old_file = parts.next().and_then(|p| p.strip_prefix(b"a/"));
-    let new_file = parts.next().and_then(|p| p.strip_prefix(b"b/"));
+    let old_file = parts.next().map(strip_git_prefix);
+    let new_file = parts.next().map(strip_git_prefix);
 
     if let (Some(old_file), Some(new_file)) = (old_file, new_file) {
       Ok(TokenKind::FileHeader { old_file, new_file })
@@ -301,21 +303,26 @@ impl<'a> Lexer<'a> {
         Ok(TokenKind::NoNewline)
       }
       None => Ok(TokenKind::Context(&[])),
+      // The fallback logic for parsing a header-less diff is now more memory-efficient.
+      // Instead of collecting parts into a `Vec`, it uses an iterator directly,
+      // avoiding heap allocation for every non-keyword line.
       _ => {
         let mut parts = line.fields();
-        let first = parts.next();
-        let second = parts.next();
-        let third = parts.next();
-
-        if let Some(first_part) = first {
-          if third.is_none() {
-            let old_file = strip_git_prefix(first_part);
-            let new_file = second.map(strip_git_prefix).unwrap_or(old_file);
-            return Ok(TokenKind::FileHeader { old_file, new_file });
+        match (parts.next(), parts.next(), parts.next()) {
+          (Some(part1), None, _) => {
+            let old_file = strip_git_prefix(part1);
+            Ok(TokenKind::FileHeader {
+              old_file,
+              new_file: old_file,
+            })
           }
+          (Some(part1), Some(part2), None) => {
+            let old_file = strip_git_prefix(part1);
+            let new_file = strip_git_prefix(part2);
+            Ok(TokenKind::FileHeader { old_file, new_file })
+          }
+          _ => Err(self.error_from_slice(line, ErrorKind::UnexpectedLine)),
         }
-
-        Err(self.error_from_slice(line, ErrorKind::UnexpectedLine))
       }
     }
   }

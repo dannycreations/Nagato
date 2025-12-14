@@ -86,12 +86,6 @@ pub enum LineKind {
   Context,
 }
 
-impl<'a> Line<'a> {
-  pub fn is_addition(&self) -> bool {
-    matches!(self.kind, LineKind::Addition)
-  }
-}
-
 /// Represents a single hunk in a patch.
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Hunk<'a> {

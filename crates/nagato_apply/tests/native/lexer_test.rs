@@ -137,7 +137,11 @@ test_lexer_ok!(
   }
 );
 
-test_lexer_err!(
-  fails_on_malformed_git_prefix,
-  "diff --git file.txt b/file.txt"
+test_lexer_ok!(
+  lexes_malformed_git_prefix,
+  "diff --git file.txt b/file.txt",
+  TokenKind::FileHeader {
+    old_file: b"file.txt",
+    new_file: b"file.txt",
+  }
 );

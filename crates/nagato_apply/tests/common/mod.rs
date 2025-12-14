@@ -148,17 +148,6 @@ macro_rules! test_lexer_ok {
   };
 }
 
-macro_rules! test_lexer_err {
-  ($test_name:ident, $input:expr) => {
-    #[test]
-    fn $test_name() {
-      let input = indoc::indoc!($input);
-      let mut lexer = nagato_apply::Lexer::new(input.as_bytes());
-      assert!(lexer.next().unwrap().is_err());
-    }
-  };
-}
-
 macro_rules! test_invert_patch {
   ($test_name:ident, $patch:expr, $expected_old_file:expr, $expected_new_file:expr, $expected_old_mode:expr, $expected_new_mode:expr) => {
     #[test]

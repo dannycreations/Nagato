@@ -250,6 +250,7 @@ dependencies = [
  "bstr",
  "indoc",
  "memchr",
+ "memmap2",
  "nagato_core",
  "once_cell",
  "tempfile",

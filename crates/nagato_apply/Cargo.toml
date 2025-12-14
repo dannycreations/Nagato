@@ -13,6 +13,7 @@ doctest = false
 aho-corasick.workspace = true
 bstr.workspace = true
 memchr.workspace = true
+memmap2.workspace = true
 nagato_core.workspace = true
 once_cell.workspace = true
 thiserror.workspace = true
