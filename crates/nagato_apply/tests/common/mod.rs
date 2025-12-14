@@ -171,3 +171,33 @@ macro_rules! test_invert_patch {
     }
   };
 }
+
+// I'm adding a new macro to test for specific patch errors, including the line number.
+// This will make it easier to write tests for the new error handling infrastructure.
+macro_rules! test_patch_err_with_line {
+    (
+        $test_name:ident,
+        initial_fs: { $($path:expr => $content:expr),* },
+        diff: $diff:expr,
+        expected_line: $expected_line:expr,
+        expected_kind: $expected_kind:pat
+    ) => {
+        #[test]
+        fn $test_name() {
+            let dir = create_test_fs! {
+                $($path => $content),*
+            };
+            let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+            let diff = indoc::indoc!($diff);
+            let patch = nagato_apply::Parser::new(diff.as_bytes()).next().unwrap().unwrap();
+            let result = nagato_apply::patch_file(&mut fs, patch, false);
+            match result {
+                Err(e) => {
+                    assert_eq!(e.line, Some($expected_line));
+                    assert!(matches!(e.kind, $expected_kind));
+                }
+                Ok(_) => panic!("Expected an error but got Ok"),
+            }
+        }
+    };
+}
