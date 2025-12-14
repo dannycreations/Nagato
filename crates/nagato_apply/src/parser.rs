@@ -75,7 +75,7 @@ impl<'a> Parser<'a> {
   }
 
   fn parse_hunks(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
-    while self.peek_is(|t| matches!(t, TokenKind::HunkHeader { .. }))? {
+    while self.peek_is(|t| matches!(t, TokenKind::HunkHeader { .. })) {
       let (hunk, old_no_newline, new_no_newline) = self.parse_hunk()?;
       if old_no_newline {
         patch.old_file_no_newline = true;
@@ -250,23 +250,19 @@ impl<'a> Parser<'a> {
   }
 
   fn skip_empty_context_lines(&mut self) {
-    while self
-      .peek_is(|t| matches!(t, TokenKind::Context(s) if s.is_empty()))
-      .unwrap_or(false)
-    {
+    while self.peek_is(|t| matches!(t, TokenKind::Context(s) if s.is_empty())) {
       self.tokens.next();
     }
   }
 
-  fn peek_is(
-    &mut self,
-    check: impl Fn(&TokenKind<'a>) -> bool,
-  ) -> Result<bool, Error> {
-    // The `peek_is` function now correctly looks inside the `LexerItem` to check the token.
-    match self.tokens.peek() {
-      Some(Ok(item)) => Ok(check(&item.token)),
-      Some(Err(e)) => Err(e.clone()),
-      None => Ok(false),
+  // The `peek_is` function is simplified to return a `bool`. It now only checks
+  // for `Ok` values, letting subsequent calls to `next()` handle any `Err`
+  // variants. This avoids the need to clone an error, which is no longer possible.
+  fn peek_is(&mut self, check: impl Fn(&TokenKind<'a>) -> bool) -> bool {
+    if let Some(Ok(item)) = self.tokens.peek() {
+      check(&item.token)
+    } else {
+      false
     }
   }
 }

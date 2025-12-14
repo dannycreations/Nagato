@@ -16,7 +16,6 @@ memchr.workspace = true
 memmap2.workspace = true
 nagato_core.workspace = true
 once_cell.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true

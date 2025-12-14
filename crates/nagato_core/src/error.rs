@@ -3,22 +3,20 @@ use std::io;
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
-// I'm introducing a new top-level `Error` struct. This will wrap the `ErrorKind`
-// and will be the standard error type returned from fallible functions.
-// This makes error handling more consistent across the application.
-#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
+#[derive(ThisError, Debug)]
 #[error("{kind}")]
 pub struct Error {
   pub line: Option<u64>,
+  #[source]
   pub kind: ErrorKind,
 }
 
-// The `ErrorKind` enum now represents the specific type of error that occurred,
-// without needing to carry the line number itself.
-#[derive(ThisError, Debug, Clone, PartialEq, Eq)]
+#[derive(ThisError, Debug)]
 pub enum ErrorKind {
-  #[error("I/O error: {0}")]
-  Io(String),
+  #[error("I/O error")]
+  Io(#[from] io::Error),
+  #[error("Failed to persist temporary file")]
+  Persist(#[from] PersistError),
 
   // Parse errors
   #[error("Invalid hunk range line: {0}")]
@@ -61,20 +59,26 @@ pub enum ErrorKind {
   BinaryFilesNotSupported,
 }
 
+// By implementing `From<io::Error>` for `Error`, we enable the `?` operator
+// to automatically convert standard I/O errors into our custom error type.
+// This is a common pattern in Rust for ergonomic error handling. It works by
+// delegating the conversion to the `ErrorKind`'s `From` implementation.
 impl From<io::Error> for Error {
   fn from(e: io::Error) -> Self {
     Error {
       line: None,
-      kind: ErrorKind::Io(e.to_string()),
+      kind: e.into(),
     }
   }
 }
 
+// Similarly, this implementation handles errors that can occur when persisting
+// a temporary file, ensuring they are also wrapped in our custom `Error` type.
 impl From<PersistError> for Error {
   fn from(e: PersistError) -> Self {
     Error {
       line: None,
-      kind: ErrorKind::Io(e.error.to_string()),
+      kind: e.into(),
     }
   }
 }
