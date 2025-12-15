@@ -5,7 +5,7 @@ check: format
 	cargo +nightly clippy --all-features --all-targets --fix --allow-dirty -- -D warnings
 
 test: check
-	cargo nextest run --config-file nextest.toml --no-capture --no-fail-fast
+	cargo nextest run --config-file nextest.toml
 
 machete:
 	cargo machete --with-metadata
