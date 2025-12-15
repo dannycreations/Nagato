@@ -56,15 +56,16 @@ test_lexer_ok!(
 
 test_lexer_ok!(
   lexes_simple_diff,
-  r#"diff --git a/file.txt b/file.txt
-index 1234567..abcdefg 100644
---- a/file.txt
-+++ b/file.txt
-@@ -1,2 +1,2 @@
--hello world
-+Hello, world!
- context
-"#,
+  r#"
+    diff --git a/file.txt b/file.txt
+    index 1234567..abcdefg 100644
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -1,2 +1,2 @@
+    -hello world
+    +Hello, world!
+     context
+  "#,
   TokenKind::FileHeader {
     old_file: b"file.txt",
     new_file: b"file.txt",
@@ -89,18 +90,19 @@ index 1234567..abcdefg 100644
 
 test_lexer_ok!(
   lexes_no_newline_at_end_of_file,
-  r#"diff --git a/file.txt b/file.txt
-index 1234567..abcdefg 100644
---- a/file.txt
-+++ b/file.txt
-@@ -1,2 +1,2 @@
--hello
--world
-\ No newline at end of file
-+hello
-+world
-\ No newline at end of file
-"#,
+  r#"
+    diff --git a/file.txt b/file.txt
+    index 1234567..abcdefg 100644
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -1,2 +1,2 @@
+    -hello
+    -world
+    \ No newline at end of file
+    +hello
+    +world
+    \ No newline at end of file
+  "#,
   TokenKind::FileHeader {
     old_file: b"file.txt",
     new_file: b"file.txt"

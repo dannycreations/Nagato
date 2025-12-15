@@ -1,24 +1,29 @@
 macro_rules! create_test_fs {
-    { $($path:expr => $content:expr),* } => {
-        {
-            let dir = tempfile::Builder::new()
-                .prefix("test")
-                .tempdir()
-                .unwrap();
-            $(
-                let file_path = dir.path().join($path);
-                if let Some(parent) = file_path.parent() {
-                    std::fs::create_dir_all(parent).unwrap();
-                }
-                std::fs::write(file_path, $content).unwrap();
-            )*
-            dir
+  { $($path:expr => $content:expr),* } => {
+    {
+      let dir = tempfile::Builder::new()
+        .prefix("test")
+        .tempdir()
+        .unwrap();
+      $(
+        let file_path = dir.path().join($path);
+        if let Some(parent) = file_path.parent() {
+          std::fs::create_dir_all(parent).unwrap();
         }
-    };
+        std::fs::write(file_path, $content).unwrap();
+      )*
+      dir
+    }
+  };
 }
 
 macro_rules! test_apply_ok {
-  ($test_name:ident, $diff:expr, $source:expr, $expected:expr) => {
+  (
+    $test_name:ident,
+    $diff:expr,
+    $source:expr,
+    $expected:expr
+  ) => {
     #[test]
     fn $test_name() {
       let diff = indoc::indoc!($diff);
@@ -34,7 +39,11 @@ macro_rules! test_apply_ok {
 }
 
 macro_rules! test_apply_err {
-  ($test_name:ident, $diff:expr, $source:expr) => {
+  (
+    $test_name:ident,
+    $diff:expr,
+    $source:expr
+  ) => {
     #[test]
     fn $test_name() {
       let diff = indoc::indoc!($diff);
@@ -51,78 +60,78 @@ macro_rules! test_apply_err {
 }
 
 macro_rules! test_patch_ok {
-    (
-        $test_name:ident,
-        reverse: $reverse:expr,
-        initial_fs: { $($initial_path:expr => $initial_content:expr),* },
-        diff: $diff:expr,
-        assertions: |$root:ident| { $($assertions:tt)* }
-    ) => {
-        #[test]
-        fn $test_name() {
-            let dir = create_test_fs! {
-                $($initial_path => $initial_content),*
-            };
-            let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
-            let diff = indoc::indoc!($diff);
-            for patch in nagato_apply::Parser::new(diff.as_bytes()) {
-                nagato_apply::patch_file(&mut fs, patch.unwrap(), $reverse).unwrap();
-            }
+  (
+    $test_name:ident,
+    reverse: $reverse:expr,
+    initial_fs: { $($initial_path:expr => $initial_content:expr),* },
+    diff: $diff:expr,
+    assertions: |$root:ident| { $($assertions:tt)* }
+  ) => {
+    #[test]
+    fn $test_name() {
+      let dir = create_test_fs! { $($initial_path => $initial_content),* };
+      let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+      let diff = indoc::indoc!($diff);
+      for patch in nagato_apply::Parser::new(diff.as_bytes()) {
+        nagato_apply::patch_file(&mut fs, patch.unwrap(), $reverse).unwrap();
+      }
 
-            let $root = dir.path();
-            $($assertions)*
-        }
-    };
-    (
-        $test_name:ident,
-        initial_fs: { $($initial_path:expr => $initial_content:expr),* },
-        diff: $diff:expr,
-        assertions: |$root:ident| { $($assertions:tt)* }
-    ) => {
-        test_patch_ok!(
-            $test_name,
-            reverse: false,
-            initial_fs: { $($initial_path => $initial_content),* },
-            diff: $diff,
-            assertions: |$root| { $($assertions)* }
-        );
-    };
+      let $root = dir.path();
+      $($assertions)*
+    }
+  };
+  (
+    $test_name:ident,
+    initial_fs: { $($initial_path:expr => $initial_content:expr),* },
+    diff: $diff:expr,
+    assertions: |$root:ident| { $($assertions:tt)* }
+  ) => {
+    test_patch_ok!(
+      $test_name,
+      reverse: false,
+      initial_fs: { $($initial_path => $initial_content),* },
+      diff: $diff,
+      assertions: |$root| { $($assertions)* }
+    );
+  };
 }
 
 macro_rules! test_patch_err {
-    (
-        $test_name:ident,
-        reverse: $reverse:expr,
-        initial_fs: { $($path:expr => $content:expr),* },
-        diff: $diff:expr
-    ) => {
-        #[test]
-        fn $test_name() {
-            let dir = create_test_fs! {
-                $($path => $content),*
-            };
-            let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
-            let diff = indoc::indoc!($diff);
-            let mut parser = nagato_apply::Parser::new(diff.as_bytes());
-            assert!(nagato_apply::patch_file(&mut fs, parser.next().unwrap().unwrap(), $reverse).is_err());
-        }
-    };
-    (
-        $test_name:ident,
-        initial_fs: { $($path:expr => $content:expr),* },
-        diff: $diff:expr
-    ) => {
-        test_patch_err!(
-            $test_name,
-            reverse: false,
-            initial_fs: { $($path => $content),* },
-            diff: $diff
-        );
-    };
+  (
+    $test_name:ident,
+    reverse: $reverse:expr,
+    initial_fs: { $($path:expr => $content:expr),* },
+    diff: $diff:expr
+  ) => {
+    #[test]
+    fn $test_name() {
+      let dir = create_test_fs! { $($path => $content),* };
+      let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+      let diff = indoc::indoc!($diff);
+      let mut parser = nagato_apply::Parser::new(diff.as_bytes());
+      assert!(nagato_apply::patch_file(&mut fs, parser.next().unwrap().unwrap(), $reverse).is_err());
+    }
+  };
+  (
+    $test_name:ident,
+    initial_fs: { $($path:expr => $content:expr),* },
+    diff: $diff:expr
+  ) => {
+    test_patch_err!(
+      $test_name,
+      reverse: false,
+      initial_fs: { $($path => $content),* },
+      diff: $diff
+    );
+  };
 }
 
 macro_rules! test_parser_err {
-  ($test_name:ident, $diff:expr, $expected_kind:pat) => {
+  (
+    $test_name:ident,
+    $diff:expr,
+    $expected_kind:pat
+  ) => {
     #[test]
     fn $test_name() {
       let diff = indoc::indoc!($diff);
@@ -139,13 +148,14 @@ macro_rules! test_parser_err {
 }
 
 macro_rules! test_lexer_ok {
-  ($test_name:ident, $input:expr, $($expected_token:expr),*) => {
+  (
+    $test_name:ident,
+    $input:expr,
+    $($expected_token:expr),*
+  ) => {
     #[test]
     fn $test_name() {
       let input = indoc::indoc!($input);
-      // I'm updating the test macro to extract the `token` from each `LexerItem`
-      // before collecting them into a `Vec`. This is necessary because the `Lexer`
-      // now produces `LexerItem`s, but the tests were written to expect `Token`s.
       let tokens: Vec<_> = nagato_apply::Lexer::new(input.as_bytes())
         .map(|r| r.unwrap().token)
         .collect();
@@ -154,45 +164,28 @@ macro_rules! test_lexer_ok {
   };
 }
 
-macro_rules! test_invert_patch {
-  ($test_name:ident, $patch:expr, $expected_old_file:expr, $expected_new_file:expr, $expected_old_mode:expr, $expected_new_mode:expr) => {
+macro_rules! test_patch_err_with_line {
+  (
+    $test_name:ident,
+    initial_fs: { $($path:expr => $content:expr),* },
+    diff: $diff:expr,
+    expected_line: $expected_line:expr,
+    expected_kind: $expected_kind:pat
+  ) => {
     #[test]
     fn $test_name() {
-      let inverted_patch = $patch.invert();
-      assert_eq!(inverted_patch.old_file, $expected_old_file);
-      assert_eq!(inverted_patch.new_file, $expected_new_file);
-      assert_eq!(inverted_patch.deleted_mode, $expected_old_mode);
-      assert_eq!(inverted_patch.new_mode, $expected_new_mode);
+      let dir = create_test_fs! { $($path => $content),* };
+      let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+      let diff = indoc::indoc!($diff);
+      let patch = nagato_apply::Parser::new(diff.as_bytes()).next().unwrap().unwrap();
+      let result = nagato_apply::patch_file(&mut fs, patch, false);
+      match result {
+        Err(e) => {
+          assert_eq!(e.line, Some($expected_line));
+          assert!(matches!(e.kind, $expected_kind));
+        }
+        Ok(_) => panic!("Expected an error but got Ok"),
+      }
     }
   };
-}
-
-// I'm adding a new macro to test for specific patch errors, including the line number.
-// This will make it easier to write tests for the new error handling infrastructure.
-macro_rules! test_patch_err_with_line {
-    (
-        $test_name:ident,
-        initial_fs: { $($path:expr => $content:expr),* },
-        diff: $diff:expr,
-        expected_line: $expected_line:expr,
-        expected_kind: $expected_kind:pat
-    ) => {
-        #[test]
-        fn $test_name() {
-            let dir = create_test_fs! {
-                $($path => $content),*
-            };
-            let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
-            let diff = indoc::indoc!($diff);
-            let patch = nagato_apply::Parser::new(diff.as_bytes()).next().unwrap().unwrap();
-            let result = nagato_apply::patch_file(&mut fs, patch, false);
-            match result {
-                Err(e) => {
-                    assert_eq!(e.line, Some($expected_line));
-                    assert!(matches!(e.kind, $expected_kind));
-                }
-                Ok(_) => panic!("Expected an error but got Ok"),
-            }
-        }
-    };
 }
