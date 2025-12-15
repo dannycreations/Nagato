@@ -49,6 +49,10 @@ static AUTOMATON: Lazy<AhoCorasick> = Lazy::new(|| {
 pub struct Lexer<'a> {
   lines: bstr::Lines<'a>,
   line_num: u64,
+  // This state is required to correctly interpret the "No newline at end of file"
+  // message. The lexer now tracks whether the last content line seen was for the
+  // new file (`+` or context) or the old file (`-`).
+  last_line_was_new_file: bool,
 }
 
 fn strip_git_prefix(s: &[u8]) -> &[u8] {
@@ -84,6 +88,8 @@ impl<'a> Lexer<'a> {
     Lexer {
       lines: input.lines(),
       line_num: 0,
+      // The initial state is set to `false`. This will be updated as hunk lines are processed.
+      last_line_was_new_file: false,
     }
   }
 
@@ -177,9 +183,12 @@ impl<'a> Lexer<'a> {
   // The hunk header parsing is now more efficient by working directly on byte slices,
   // which avoids the overhead of string conversion and validation.
   fn parse_hunk_header(
-    &self,
+    &mut self,
     header: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
+    // A hunk header marks the beginning of a new content section, so we reset
+    // the context-tracking state here.
+    self.last_line_was_new_file = false;
     let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
     let content = &header[..content_end];
     let mut parts = content.fields();
@@ -269,17 +278,35 @@ impl<'a> Lexer<'a> {
   }
 
   fn parse_non_keyword_line(
-    &self,
+    &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     match line.first() {
-      Some(b'+') => Ok(TokenKind::Addition(&line[1..])),
-      Some(b'-') => Ok(TokenKind::Deletion(&line[1..])),
-      Some(b' ') => Ok(TokenKind::Context(&line[1..])),
-      Some(b'\\') if line == b"\\ No newline at end of file" => {
-        Ok(TokenKind::NoNewline)
+      Some(b'+') => {
+        self.last_line_was_new_file = true;
+        Ok(TokenKind::Addition(&line[1..]))
       }
-      None => Ok(TokenKind::Context(&[])),
+      Some(b'-') => {
+        self.last_line_was_new_file = false;
+        Ok(TokenKind::Deletion(&line[1..]))
+      }
+      Some(b' ') => {
+        self.last_line_was_new_file = true;
+        Ok(TokenKind::Context(&line[1..]))
+      }
+      Some(b'\\') if line == b"\\ No newline at end of file" => {
+        // The logic is now self-contained in the lexer. Based on the state
+        // of `last_line_was_new_file`, we emit a specific token, which simplifies the parser.
+        if self.last_line_was_new_file {
+          Ok(TokenKind::NewFileNoNewline)
+        } else {
+          Ok(TokenKind::OldFileNoNewline)
+        }
+      }
+      None => {
+        self.last_line_was_new_file = true;
+        Ok(TokenKind::Context(&[]))
+      }
       // The fallback logic for parsing a header-less diff is now more memory-efficient.
       // Instead of collecting parts into a `Vec`, it uses an iterator directly,
       // avoiding heap allocation for every non-keyword line.

@@ -76,13 +76,10 @@ impl<'a> Parser<'a> {
 
   fn parse_hunks(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
     while self.peek_is(|t| matches!(t, TokenKind::HunkHeader { .. })) {
-      let (hunk, old_no_newline, new_no_newline) = self.parse_hunk()?;
-      if old_no_newline {
-        patch.old_file_no_newline = true;
-      }
-      if new_no_newline {
-        patch.new_file_no_newline = true;
-      }
+      // The main `patch` object is now passed down into `parse_hunk`. This ensures
+      // that any "No newline" flags encountered while parsing the hunk's lines
+      // are set on the correct `Patch` instance.
+      let hunk = self.parse_hunk(patch)?;
       patch.hunks.push(hunk);
     }
     Ok(())
@@ -102,11 +99,7 @@ impl<'a> Parser<'a> {
       .unwrap_or(0);
 
     let mut lines = Vec::new();
-    let (old_span, new_span, old_no_newline, new_no_newline) =
-      self.parse_hunk_lines(&mut lines)?;
-
-    patch.old_file_no_newline = old_no_newline;
-    patch.new_file_no_newline = new_no_newline;
+    let (old_span, new_span) = self.parse_hunk_lines(&mut lines, patch)?;
 
     if !lines.is_empty() {
       if patch.old_file.is_empty() && patch.new_file.is_empty() {
@@ -145,12 +138,10 @@ impl<'a> Parser<'a> {
   fn parse_hunk_lines(
     &mut self,
     lines: &mut Vec<Line<'a>>,
-  ) -> Result<(u32, u32, bool, bool), Error> {
+    patch: &mut Patch<'a>,
+  ) -> Result<(u32, u32), Error> {
     let mut old_span = 0;
     let mut new_span = 0;
-    let mut last_line_was_new_file = false;
-    let mut old_file_no_newline = false;
-    let mut new_file_no_newline = false;
 
     while let Some(Ok(item)) = self.tokens.peek() {
       let line_num = item.line_num;
@@ -162,7 +153,6 @@ impl<'a> Parser<'a> {
             text: s,
             line_num,
           });
-          last_line_was_new_file = true;
         }
         TokenKind::Deletion(s) => {
           old_span += 1;
@@ -171,7 +161,6 @@ impl<'a> Parser<'a> {
             text: s,
             line_num,
           });
-          last_line_was_new_file = false;
         }
         TokenKind::Context(s) => {
           old_span += 1;
@@ -181,23 +170,24 @@ impl<'a> Parser<'a> {
             text: s,
             line_num,
           });
-          last_line_was_new_file = true;
         }
-        TokenKind::NoNewline => {
-          if last_line_was_new_file {
-            new_file_no_newline = true;
-          } else {
-            old_file_no_newline = true;
-          }
+        // The logic for handling "No newline" is now much simpler. The parser
+        // just needs to check for the specific tokens and set the corresponding
+        // flag on the patch.
+        TokenKind::OldFileNoNewline => {
+          patch.old_file_no_newline = true;
+        }
+        TokenKind::NewFileNoNewline => {
+          patch.new_file_no_newline = true;
         }
         _ => break,
       }
       self.tokens.next();
     }
-    Ok((old_span, new_span, old_file_no_newline, new_file_no_newline))
+    Ok((old_span, new_span))
   }
 
-  fn parse_hunk(&mut self) -> Result<(Hunk<'a>, bool, bool), Error> {
+  fn parse_hunk(&mut self, patch: &mut Patch<'a>) -> Result<Hunk<'a>, Error> {
     // The parser now consumes a `LexerItem` and extracts both the token and the line number.
     let (old_line, old_span, new_line, new_span, patch_line_num) =
       match self.tokens.next().ok_or(Error {
@@ -223,12 +213,11 @@ impl<'a> Parser<'a> {
       };
 
     let mut lines = Vec::with_capacity((old_span + new_span) as usize);
-    let (
-      actual_old_span,
-      actual_new_span,
-      old_file_no_newline,
-      new_file_no_newline,
-    ) = self.parse_hunk_lines(&mut lines)?;
+    // The dummy patch is no longer needed. We pass the real `patch` object directly
+    // to `parse_hunk_lines`, ensuring that the `old_file_no_newline` and
+    // `new_file_no_newline` flags are set on the correct instance.
+    let (actual_old_span, actual_new_span) =
+      self.parse_hunk_lines(&mut lines, patch)?;
 
     if actual_old_span != old_span || actual_new_span != new_span {
       return Err(Error {
@@ -246,7 +235,7 @@ impl<'a> Parser<'a> {
       patch_line_num,
     };
 
-    Ok((hunk, old_file_no_newline, new_file_no_newline))
+    Ok(hunk)
   }
 
   fn skip_empty_context_lines(&mut self) {
