@@ -7,6 +7,9 @@ check: format
 test: check
 	cargo nextest run --config-file nextest.toml
 
+bench: check
+	cargo bench
+
 machete:
 	cargo machete --with-metadata
 
