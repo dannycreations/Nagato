@@ -1,5 +1,8 @@
 use nagato_apply::{patch_file, Parser};
-use nagato_core::fs::{FileSystem, OsFileSystem};
+use nagato_core::{
+  error::ErrorKind,
+  fs::{FileSystem, OsFileSystem},
+};
 
 fn patch_file_ok(fs: &mut impl FileSystem, diff: &str, reverse: bool) {
   for patch in Parser::new(diff.as_bytes()) {
@@ -381,7 +384,11 @@ test_patch_ok!(
     }
 );
 
-test_parser_err!(fails_on_missing_file_header, "-hello\n+world");
+test_parser_err!(
+  fails_on_missing_file_header,
+  "-hello\n+world",
+  ErrorKind::PatchHasContentButNoFileInfo
+);
 
 #[test]
 #[cfg(unix)]
@@ -465,5 +472,6 @@ test_parser_err!(
 +++ b/file.txt
 @@ -1,1 +1,1 @@
 -hello
-"#
+"#,
+  ErrorKind::HunkLineCountMismatch
 );

@@ -8,6 +8,8 @@ use bstr::ByteSlice;
 use memmap2::Mmap;
 use tempfile::NamedTempFile;
 
+use crate::error::{Error, ErrorKind};
+
 pub struct AtomicWriter {
   writer: BufWriter<NamedTempFile>,
   dest_path: PathBuf,
@@ -15,7 +17,12 @@ pub struct AtomicWriter {
 
 impl AtomicWriter {
   pub fn new(path: &Path) -> io::Result<Self> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = path.parent().ok_or_else(|| {
+      io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "Destination path has no parent directory",
+      )
+    })?;
     let tempfile = NamedTempFile::new_in(parent)?;
     let writer = BufWriter::new(tempfile);
 
@@ -25,11 +32,14 @@ impl AtomicWriter {
     })
   }
 
-  pub fn commit(mut self) -> io::Result<()> {
+  pub fn commit(mut self) -> Result<(), Error> {
     self.writer.flush()?;
 
-    let tempfile = self.writer.into_inner()?;
-    tempfile.persist(&self.dest_path).map_err(|e| e.error)?;
+    // The `into_inner` method can fail, and its error type doesn't automatically
+    // convert to our custom `Error`. We now explicitly map it to a standard
+    // `io::Error`, which allows the `?` operator to work correctly.
+    let tempfile = self.writer.into_inner().map_err(|e| e.into_error())?;
+    tempfile.persist(&self.dest_path)?;
     Ok(())
   }
 }
@@ -46,12 +56,12 @@ impl io::Write for AtomicWriter {
 
 pub trait FileSystem {
   fn exists(&self, path: &[u8]) -> bool;
-  fn read(&self, path: &[u8]) -> io::Result<Mmap>;
-  fn write(&mut self, path: &[u8]) -> io::Result<AtomicWriter>;
-  fn copy(&mut self, from: &[u8], to: &[u8]) -> io::Result<()>;
-  fn remove_file(&mut self, path: &[u8]) -> io::Result<()>;
-  fn rename(&mut self, from: &[u8], to: &[u8]) -> io::Result<()>;
-  fn set_permissions(&mut self, path: &[u8], mode: u32) -> io::Result<()>;
+  fn read(&self, path: &[u8]) -> Result<Mmap, Error>;
+  fn write(&mut self, path: &[u8]) -> Result<AtomicWriter, Error>;
+  fn copy(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error>;
+  fn remove_file(&mut self, path: &[u8]) -> Result<(), Error>;
+  fn rename(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error>;
+  fn set_permissions(&mut self, path: &[u8], mode: u32) -> Result<(), Error>;
 }
 
 #[derive(Debug, Default)]
@@ -74,11 +84,23 @@ impl OsFileSystem {
     Self { root: root.into() }
   }
 
-  fn absolute_path(&self, path: &[u8]) -> io::Result<PathBuf> {
-    let path = path
+  // The path conversion logic is now centralized here. It attempts to convert
+  // a byte slice to a path, returning a specific `InvalidPath` error on failure.
+  // This is more efficient than the previous `io::Error::other` approach.
+  fn absolute_path(&self, path: &[u8]) -> Result<PathBuf, Error> {
+    path
       .to_path()
-      .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-    Ok(self.root.join(path))
+      .map(|p| self.root.join(p))
+      .map_err(|_| Error {
+        line: None,
+        kind: ErrorKind::InvalidPath,
+      })
+  }
+
+  fn prepare_destination_path(&self, path: &[u8]) -> Result<PathBuf, Error> {
+    let abs_path = self.absolute_path(path)?;
+    ensure_parent_dir_exists(&abs_path)?;
+    Ok(abs_path)
   }
 }
 
@@ -87,47 +109,44 @@ impl FileSystem for OsFileSystem {
     self.absolute_path(path).is_ok_and(|p| p.exists())
   }
 
-  fn read(&self, path: &[u8]) -> io::Result<Mmap> {
+  fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
     let file = File::open(self.absolute_path(path)?)?;
-    unsafe { Mmap::map(&file) }
+    unsafe { Mmap::map(&file) }.map_err(Into::into)
   }
 
-  fn write(&mut self, path: &[u8]) -> io::Result<AtomicWriter> {
-    let abs_path = self.absolute_path(path)?;
-    ensure_parent_dir_exists(&abs_path)?;
-    AtomicWriter::new(&abs_path)
+  fn write(&mut self, path: &[u8]) -> Result<AtomicWriter, Error> {
+    let abs_path = self.prepare_destination_path(path)?;
+    AtomicWriter::new(&abs_path).map_err(Into::into)
   }
 
-  fn copy(&mut self, from: &[u8], to: &[u8]) -> io::Result<()> {
+  fn copy(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error> {
     let from_abs = self.absolute_path(from)?;
-    let to_abs = self.absolute_path(to)?;
-    ensure_parent_dir_exists(&to_abs)?;
+    let to_abs = self.prepare_destination_path(to)?;
     fs::copy(from_abs, to_abs)?;
     Ok(())
   }
 
-  fn remove_file(&mut self, path: &[u8]) -> io::Result<()> {
-    fs::remove_file(self.absolute_path(path)?)
+  fn remove_file(&mut self, path: &[u8]) -> Result<(), Error> {
+    fs::remove_file(self.absolute_path(path)?).map_err(Into::into)
   }
 
-  fn rename(&mut self, from: &[u8], to: &[u8]) -> io::Result<()> {
+  fn rename(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error> {
     let from_abs = self.absolute_path(from)?;
-    let to_abs = self.absolute_path(to)?;
-    ensure_parent_dir_exists(&to_abs)?;
-    fs::rename(from_abs, to_abs)
+    let to_abs = self.prepare_destination_path(to)?;
+    fs::rename(from_abs, to_abs).map_err(Into::into)
   }
 
-  fn set_permissions(&mut self, path: &[u8], mode: u32) -> io::Result<()> {
+  fn set_permissions(&mut self, path: &[u8], mode: u32) -> Result<(), Error> {
     let abs_path = self.absolute_path(path)?;
     #[cfg(unix)]
     {
       use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-      fs::set_permissions(abs_path, Permissions::from_mode(mode))
+      fs::set_permissions(abs_path, Permissions::from_mode(mode))?;
     }
     #[cfg(not(unix))]
     {
       let _ = (abs_path, mode);
-      Ok(())
     }
+    Ok(())
   }
 }

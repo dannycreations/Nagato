@@ -1,5 +1,5 @@
 use std::{
-  io::{self, Write},
+  io::{self, sink, Write},
   mem,
 };
 
@@ -10,7 +10,7 @@ use nagato_core::{
   fs::FileSystem,
 };
 
-use crate::{Hunk, LineKind, Patch};
+use crate::{Hunk, Line, LineKind, Patch};
 
 impl<'a> Patch<'a> {
   pub fn invert(mut self) -> Self {
@@ -115,30 +115,16 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  // This function is the heart of the patch application logic. It finds the
-  // location in the source file where a hunk should be applied and performs the
-  // changes. It implements a search that aborts with an error if a partial match
-  // is found, which mimics the behavior of `git apply`.
-  fn find_and_apply_hunk<'p>(
+  // I am extracting the hunk matching logic into its own function.
+  // This simplifies the `find_and_apply_hunk` function by separating the
+  // "finding" from the "applying", improving readability and maintainability.
+  fn find_hunk_match<'p>(
     &mut self,
     hunk: &Hunk<'p>,
+    lines_to_match: impl Iterator<Item = &'p Line<'p>> + Clone,
+    first_line_to_match: &Line,
     prospective_match_buffer: &mut Vec<&'s [u8]>,
   ) -> Result<(), Error> {
-    // By creating an iterator and immediately taking the first item, we avoid
-    // allocating a `Vec` for all matching lines. This is a small but meaningful
-    // optimization that reduces heap allocation in a hot loop.
-    let mut lines_to_match = hunk
-      .lines
-      .iter()
-      .filter(|l| !matches!(l.kind, LineKind::Addition));
-    let first_line_to_match = if let Some(line) = lines_to_match.next() {
-      line
-    } else {
-      // This is a pure-addition hunk. This case should be handled earlier in `process_hunk`,
-      // but we return Ok(()) here as a safeguard.
-      return Ok(());
-    };
-
     // This is the main search loop. It consumes lines from the source until a
     // match is found or the source is exhausted.
     loop {
@@ -190,30 +176,66 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       // 4. Full match confirmed!
       // We commit the speculative read by updating the main source iterator.
       self.source = source_clone;
-      self.current_source_line += hunk.old_span - 1;
-      // 5. Apply the changes by writing the new content to the output.
-      let mut matched_source_lines_index = 0;
-      for line in &hunk.lines {
-        match line.kind {
-          LineKind::Addition => self.write_line(line.text)?,
-          LineKind::Deletion => {
-            // For deletions, we simply advance our index into the buffer of
-            // matched source lines, effectively "deleting" it.
-            matched_source_lines_index += 1;
-          }
-          LineKind::Context => {
-            // For context lines, we write the corresponding line from the
-            // source buffer that we captured during the match.
-            self.write_line(
-              prospective_match_buffer[matched_source_lines_index],
-            )?;
-            matched_source_lines_index += 1;
-          }
-        }
-      }
-      // The hunk is successfully applied, so we exit the search loop.
       return Ok(());
     }
+  }
+
+  // This function is the heart of the patch application logic. It finds the
+  // location in the source file where a hunk should be applied and performs the
+  // changes. It implements a search that aborts with an error if a partial match
+  // is found, which mimics the behavior of `git apply`.
+  fn find_and_apply_hunk<'p>(
+    &mut self,
+    hunk: &Hunk<'p>,
+    prospective_match_buffer: &mut Vec<&'s [u8]>,
+  ) -> Result<(), Error> {
+    // By creating an iterator and immediately taking the first item, we avoid
+    // allocating a `Vec` for all matching lines. This is a small but meaningful
+    // optimization that reduces heap allocation in a hot loop.
+    let mut lines_to_match = hunk
+      .lines
+      .iter()
+      .filter(|l| !matches!(l.kind, LineKind::Addition));
+    let first_line_to_match = if let Some(line) = lines_to_match.next() {
+      line
+    } else {
+      // This is a pure-addition hunk. This case should be handled earlier in `process_hunk`,
+      // but we return Ok(()) here as a safeguard.
+      return Ok(());
+    };
+
+    // The hunk matching logic is now in its own function, `find_hunk_match`.
+    // This makes the code flow easier to follow.
+    self.find_hunk_match(
+      hunk,
+      lines_to_match,
+      first_line_to_match,
+      prospective_match_buffer,
+    )?;
+
+    // With the match found, we can now apply the changes.
+    self.current_source_line += hunk.old_span - 1;
+
+    let mut matched_source_lines_index = 0;
+    for line in &hunk.lines {
+      match line.kind {
+        LineKind::Addition => self.write_line(line.text)?,
+        LineKind::Deletion => {
+          // For deletions, we simply advance our index into the buffer of
+          // matched source lines, effectively "deleting" it.
+          matched_source_lines_index += 1;
+        }
+        LineKind::Context => {
+          // For context lines, we write the corresponding line from the
+          // source buffer that we captured during the match.
+          self
+            .write_line(prospective_match_buffer[matched_source_lines_index])?;
+          matched_source_lines_index += 1;
+        }
+      }
+    }
+
+    Ok(())
   }
 
   // The `process_hunk` function is now much simpler. It delegates the work to the
@@ -277,11 +299,12 @@ pub fn apply<'a>(
   Applier::new(output, source).process(patch)
 }
 
-fn ignore_not_found(res: io::Result<()>) -> io::Result<()> {
+fn ignore_not_found(res: Result<(), Error>) -> Result<(), Error> {
   match res {
-    // In many cases (e.g., deleting an already-deleted file), a "NotFound"
-    // error is not a failure. This function suppresses it.
-    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+    Err(Error {
+      kind: ErrorKind::Io(e),
+      ..
+    }) if e.kind() == io::ErrorKind::NotFound => Ok(()),
     res => res,
   }
 }
@@ -295,8 +318,11 @@ fn read_source_or_empty(
 ) -> Result<Option<Mmap>, Error> {
   match fs.read(path) {
     Ok(mmap) => Ok(Some(mmap)),
-    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-    Err(e) => Err(e.into()),
+    Err(Error {
+      kind: ErrorKind::Io(e),
+      ..
+    }) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+    Err(e) => Err(e),
   }
 }
 
@@ -310,7 +336,7 @@ fn handle_file_deletion(
   // Before deleting, we "dry run" the patch against the source content
   // to ensure it would apply cleanly. This prevents accidental data loss
   // if the source file has changed unexpectedly. We write to a sink (null output).
-  apply(&mut io::sink(), patch, source_slice)?;
+  apply(&mut sink(), patch, source_slice)?;
 
   ignore_not_found(fs.remove_file(source_path))?;
   Ok(())

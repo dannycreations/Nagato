@@ -94,34 +94,30 @@ impl<'a> Lexer<'a> {
     self.lines.next()
   }
 
-  fn error_from_slice(&self, s: &[u8], f: fn(String) -> ErrorKind) -> Error {
+  fn error(&self, kind: ErrorKind) -> Error {
     Error {
       line: Some(self.line_num),
-      kind: f(String::from_utf8_lossy(s).into_owned()),
+      kind,
     }
   }
 
   fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), Error> {
-    let (line, rest) = parse_u32(range_bytes).ok_or_else(|| {
-      self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeLine)
-    })?;
+    let (line, rest) = parse_u32(range_bytes)
+      .ok_or_else(|| self.error(ErrorKind::InvalidHunkRangeLine))?;
 
     if rest.is_empty() {
       return Ok((line, 1));
     }
 
-    let rest = rest.strip_prefix(b",").ok_or_else(|| {
-      self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeLine)
-    })?;
+    let rest = rest
+      .strip_prefix(b",")
+      .ok_or_else(|| self.error(ErrorKind::InvalidHunkRangeLine))?;
 
-    let (span, rest) = parse_u32(rest).ok_or_else(|| {
-      self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeSpan)
-    })?;
+    let (span, rest) = parse_u32(rest)
+      .ok_or_else(|| self.error(ErrorKind::InvalidHunkRangeSpan))?;
 
     if !rest.is_empty() {
-      return Err(
-        self.error_from_slice(range_bytes, ErrorKind::InvalidHunkRangeSpan),
-      );
+      return Err(self.error(ErrorKind::InvalidHunkRangeSpan));
     }
 
     Ok((line, span))
@@ -166,18 +162,18 @@ impl<'a> Lexer<'a> {
   fn parse_percentage(&self, s: &[u8]) -> Result<u32, Error> {
     let s = s
       .strip_suffix(b"%")
-      .ok_or_else(|| self.error_from_slice(s, ErrorKind::InvalidPercentage))?;
-    let (num, rest) = parse_u32(s)
-      .ok_or_else(|| self.error_from_slice(s, ErrorKind::InvalidPercentage))?;
+      .ok_or_else(|| self.error(ErrorKind::InvalidPercentage))?;
+    let (num, rest) =
+      parse_u32(s).ok_or_else(|| self.error(ErrorKind::InvalidPercentage))?;
     if !rest.is_empty() {
-      return Err(self.error_from_slice(s, ErrorKind::InvalidPercentage));
+      return Err(self.error(ErrorKind::InvalidPercentage));
     }
     Ok(num)
   }
 
   fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, Error> {
     if s.is_empty() {
-      return Err(self.error_from_slice(s, ErrorKind::InvalidFileMode));
+      return Err(self.error(ErrorKind::InvalidFileMode));
     }
     let mut mode = 0u32;
     for &digit in s {
@@ -185,11 +181,9 @@ impl<'a> Lexer<'a> {
         mode = mode
           .checked_mul(8)
           .and_then(|m| m.checked_add(u32::from(digit - b'0')))
-          .ok_or_else(|| {
-            self.error_from_slice(s, ErrorKind::InvalidFileMode)
-          })?;
+          .ok_or_else(|| self.error(ErrorKind::InvalidFileMode))?;
       } else {
-        return Err(self.error_from_slice(s, ErrorKind::InvalidFileMode));
+        return Err(self.error(ErrorKind::InvalidFileMode));
       }
     }
     Ok(mode)
@@ -321,7 +315,7 @@ impl<'a> Lexer<'a> {
             let new_file = strip_git_prefix(part2);
             Ok(TokenKind::FileHeader { old_file, new_file })
           }
-          _ => Err(self.error_from_slice(line, ErrorKind::UnexpectedLine)),
+          _ => Err(self.error(ErrorKind::UnexpectedLine)),
         }
       }
     }

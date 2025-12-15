@@ -122,12 +122,18 @@ macro_rules! test_patch_err {
 }
 
 macro_rules! test_parser_err {
-  ($test_name:ident, $diff:expr) => {
+  ($test_name:ident, $diff:expr, $expected_kind:pat) => {
     #[test]
     fn $test_name() {
       let diff = indoc::indoc!($diff);
       let mut parser = nagato_apply::Parser::new(diff.as_bytes());
-      assert!(parser.next().unwrap().is_err());
+      let result = parser.next().unwrap();
+      match result {
+        Err(e) => {
+          assert!(matches!(e.kind, $expected_kind));
+        }
+        Ok(_) => panic!("Expected an error but got Ok"),
+      }
     }
   };
 }

@@ -1,8 +1,9 @@
 use std::{
+  env,
   ffi::OsString,
   fs::File,
   io::{self, IsTerminal, Read},
-  path::{Path, PathBuf},
+  path::PathBuf,
 };
 
 pub use clap::{CommandFactory, Parser as ClapParser};
@@ -45,11 +46,15 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
     return Ok(());
   }
 
-  // The compiler needs a type hint here to know that `Into::into` should produce a `PathBuf`.
-  let root: PathBuf = cli
-    .directory
-    .as_deref()
-    .map_or_else(|| Path::new(".").into(), Into::into);
+  // Using `env::current_dir()` is more explicit and robust than relying on
+  // a relative path like ".". It clearly establishes the current working
+  // directory as the default root for applying patches, improving clarity
+  // without changing behavior.
+  let root = if let Some(dir) = &cli.directory {
+    PathBuf::from(dir)
+  } else {
+    env::current_dir()?
+  };
   let mut fs = OsFileSystem::new(root);
 
   // Using a `match` expression here is more idiomatic and clearly expresses
