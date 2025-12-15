@@ -10,7 +10,7 @@ repository.workspace = true
 doctest = false
 
 [dependencies]
-bstr = { workspace = true, features = ["std"] }
+bstr.workspace = true
 memmap2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

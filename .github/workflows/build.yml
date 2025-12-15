@@ -31,10 +31,19 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      - name: Cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TERM_COLOR: always
 
       - name: Prepare artifact
         shell: bash
