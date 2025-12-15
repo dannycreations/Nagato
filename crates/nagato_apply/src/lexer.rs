@@ -97,6 +97,43 @@ impl<'a> Lexer<'a> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
+    // Fast path: Check the first byte of the line.
+    // Most lines in a patch are additions (+), deletions (-), or context (space).
+    // Checking this first avoids the more expensive Aho-Corasick search for these common cases.
+    if let Some(&first_byte) = line.first() {
+      match first_byte {
+        b'+' if !line.starts_with(b"+++ ") => {
+          self.last_line_was_new_file = true;
+          return Some(Ok(LexerItem {
+            token: TokenKind::Addition(&line[1..]),
+            line_num,
+          }));
+        }
+        b'-' if !line.starts_with(b"--- ") => {
+          self.last_line_was_new_file = false;
+          return Some(Ok(LexerItem {
+            token: TokenKind::Deletion(&line[1..]),
+            line_num,
+          }));
+        }
+        b' ' => {
+          self.last_line_was_new_file = true;
+          return Some(Ok(LexerItem {
+            token: TokenKind::Context(&line[1..]),
+            line_num,
+          }));
+        }
+        _ => {}
+      }
+    } else {
+      // Empty line is treated as context
+      self.last_line_was_new_file = true;
+      return Some(Ok(LexerItem {
+        token: TokenKind::Context(&[]),
+        line_num,
+      }));
+    }
+
     // By having the sub-parsers return `ErrorKind`, we can centralize the creation
     // of the `Error` struct here. This simplifies the sub-parsers and ensures
     // the line number is always correctly associated with the error.
@@ -287,18 +324,6 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     match line.first() {
-      Some(b'+') => {
-        self.last_line_was_new_file = true;
-        Ok(TokenKind::Addition(&line[1..]))
-      }
-      Some(b'-') => {
-        self.last_line_was_new_file = false;
-        Ok(TokenKind::Deletion(&line[1..]))
-      }
-      Some(b' ') => {
-        self.last_line_was_new_file = true;
-        Ok(TokenKind::Context(&line[1..]))
-      }
       Some(b'\\') if line == b"\\ No newline at end of file" => {
         // The logic is now self-contained in the lexer. Based on the state
         // of `last_line_was_new_file`, we emit a specific token, which simplifies the parser.
@@ -307,10 +332,6 @@ impl<'a> Lexer<'a> {
         } else {
           Ok(TokenKind::OldFileNoNewline)
         }
-      }
-      None => {
-        self.last_line_was_new_file = true;
-        Ok(TokenKind::Context(&[]))
       }
       // The fallback logic for parsing a header-less diff is now more memory-efficient.
       // Instead of collecting parts into a `Vec`, it uses an iterator directly,

@@ -24,7 +24,9 @@ impl AtomicWriter {
       )
     })?;
     let tempfile = NamedTempFile::new_in(parent)?;
-    let writer = BufWriter::new(tempfile);
+    // Increase buffer size to 128KB for better performance with large files.
+    // The default is usually 8KB, which can be too small for heavy I/O.
+    let writer = BufWriter::with_capacity(128 * 1024, tempfile);
 
     Ok(Self {
       writer,

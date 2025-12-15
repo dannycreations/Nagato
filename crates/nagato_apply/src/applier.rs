@@ -228,9 +228,19 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         LineKind::Context => {
           // For context lines, we write the corresponding line from the
           // source buffer that we captured during the match.
-          self
-            .write_line(prospective_match_buffer[matched_source_lines_index])?;
-          matched_source_lines_index += 1;
+          // Using `get` instead of direct indexing for safety, although the index should be valid.
+          if let Some(line) =
+            prospective_match_buffer.get(matched_source_lines_index)
+          {
+            self.write_line(line)?;
+            matched_source_lines_index += 1;
+          } else {
+            // This should theoretically not happen if logic is correct, but safe guard.
+            return Err(Error {
+              line: Some(hunk.patch_line_num),
+              kind: ErrorKind::CouldNotApplyHunk,
+            });
+          }
         }
       }
     }
