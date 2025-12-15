@@ -9,7 +9,7 @@ use crate::TokenKind;
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexerItem<'a> {
   pub token: TokenKind<'a>,
-  pub line_num: u64,
+  pub line_num: u32,
 }
 
 // The Aho-Corasick automaton is used for efficient multi-pattern string matching.
@@ -48,7 +48,7 @@ static AUTOMATON: Lazy<AhoCorasick> = Lazy::new(|| {
 #[doc(hidden)]
 pub struct Lexer<'a> {
   lines: bstr::Lines<'a>,
-  line_num: u64,
+  line_num: u32,
   // This state is required to correctly interpret the "No newline at end of file"
   // message. The lexer now tracks whether the last content line seen was for the
   // new file (`+` or context) or the old file (`-`).

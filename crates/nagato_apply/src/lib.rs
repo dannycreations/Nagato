@@ -75,7 +75,7 @@ pub enum TokenKind<'a> {
 pub struct Line<'a> {
   pub kind: LineKind,
   pub text: &'a [u8],
-  pub line_num: u64,
+  pub line_num: u32,
 }
 
 // This new enum represents the type of a line in a hunk.
@@ -102,7 +102,7 @@ pub struct Hunk<'a> {
   /// The lines in the hunk.
   pub lines: Vec<Line<'a>>,
   // This will be populated by the parser using the line number from the LexerItem.
-  pub patch_line_num: u64,
+  pub patch_line_num: u32,
 }
 
 /// Represents a single patch, which can contain multiple hunks.

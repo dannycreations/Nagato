@@ -6,7 +6,7 @@ use thiserror::Error as ThisError;
 #[derive(ThisError, Debug)]
 #[error("{kind}")]
 pub struct Error {
-  pub line: Option<u64>,
+  pub line: Option<u32>,
   #[source]
   pub kind: ErrorKind,
 }

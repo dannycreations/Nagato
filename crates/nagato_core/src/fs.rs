@@ -4,7 +4,6 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use bstr::ByteSlice;
 use memmap2::Mmap;
 use tempfile::NamedTempFile;
 
@@ -90,6 +89,7 @@ impl OsFileSystem {
   // a byte slice to a path, returning a specific `InvalidPath` error on failure.
   // This is more efficient than the previous `io::Error::other` approach.
   fn absolute_path(&self, path: &[u8]) -> Result<PathBuf, Error> {
+    use bstr::ByteSlice;
     path
       .to_path()
       .map(|p| self.root.join(p))
@@ -147,6 +147,8 @@ impl FileSystem for OsFileSystem {
     }
     #[cfg(not(unix))]
     {
+      // On non-unix systems, we just ignore the mode for now.
+      // This prevents errors when applying patches created on Linux to Windows.
       let _ = (abs_path, mode);
     }
     Ok(())

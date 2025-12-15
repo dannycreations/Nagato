@@ -123,7 +123,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     hunk: &Hunk<'p>,
     lines_to_match: impl Iterator<Item = &'p Line<'p>> + Clone,
     first_line_to_match: &Line,
-    prospective_match_buffer: &mut Vec<&'s [u8]>,
   ) -> Result<(), Error> {
     // This is the main search loop. It consumes lines from the source until a
     // match is found or the source is exhausted.
@@ -148,15 +147,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       // 3. Potential match found. Now we must verify the REST of the hunk.
       // We clone the source iterator to perform a speculative match. If it fails,
       // the original `self.source` iterator is unaffected.
-      prospective_match_buffer.clear();
-      prospective_match_buffer.push(source_line);
       let mut source_clone = self.source.clone();
       // The `lines_to_match` iterator is cloned here for the speculative match.
       // Since it was already advanced by one, it now represents the rest of the
       // lines that need to be matched.
       for hunk_line in lines_to_match.clone() {
         if let Some(next_source_line) = source_clone.next() {
-          prospective_match_buffer.push(next_source_line);
           if next_source_line != hunk_line.text {
             // HARD FAILURE: A partial match that then fails is a fatal error
             // for this hunk, as per `git apply` behavior.
@@ -184,11 +180,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   // location in the source file where a hunk should be applied and performs the
   // changes. It implements a search that aborts with an error if a partial match
   // is found, which mimics the behavior of `git apply`.
-  fn find_and_apply_hunk<'p>(
-    &mut self,
-    hunk: &Hunk<'p>,
-    prospective_match_buffer: &mut Vec<&'s [u8]>,
-  ) -> Result<(), Error> {
+  fn find_and_apply_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
     // By creating an iterator and immediately taking the first item, we avoid
     // allocating a `Vec` for all matching lines. This is a small but meaningful
     // optimization that reduces heap allocation in a hot loop.
@@ -206,41 +198,23 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     // The hunk matching logic is now in its own function, `find_hunk_match`.
     // This makes the code flow easier to follow.
-    self.find_hunk_match(
-      hunk,
-      lines_to_match,
-      first_line_to_match,
-      prospective_match_buffer,
-    )?;
+    self.find_hunk_match(hunk, lines_to_match, first_line_to_match)?;
 
     // With the match found, we can now apply the changes.
     self.current_source_line += hunk.old_span - 1;
 
-    let mut matched_source_lines_index = 0;
     for line in &hunk.lines {
       match line.kind {
         LineKind::Addition => self.write_line(line.text)?,
         LineKind::Deletion => {
-          // For deletions, we simply advance our index into the buffer of
-          // matched source lines, effectively "deleting" it.
-          matched_source_lines_index += 1;
+          // For deletions, we simply do nothing. The source lines were already
+          // "consumed" by `find_hunk_match` (by updating `self.source`).
         }
         LineKind::Context => {
-          // For context lines, we write the corresponding line from the
-          // source buffer that we captured during the match.
-          // Using `get` instead of direct indexing for safety, although the index should be valid.
-          if let Some(line) =
-            prospective_match_buffer.get(matched_source_lines_index)
-          {
-            self.write_line(line)?;
-            matched_source_lines_index += 1;
-          } else {
-            // This should theoretically not happen if logic is correct, but safe guard.
-            return Err(Error {
-              line: Some(hunk.patch_line_num),
-              kind: ErrorKind::CouldNotApplyHunk,
-            });
-          }
+          // For context lines, we write the text from the patch line.
+          // Since we verified exact equality in `find_hunk_match`, this is safe.
+          // This avoids needing to buffer the matched source lines.
+          self.write_line(line.text)?;
         }
       }
     }
@@ -251,11 +225,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   // The `process_hunk` function is now much simpler. It delegates the work to the
   // new `advance_to_hunk` and `find_and_apply_hunk` methods, making the overall
   // logic easier to follow. It also handles the special case of pure-addition hunks.
-  fn process_hunk<'p>(
-    &mut self,
-    hunk: &Hunk<'p>,
-    prospective_match_buffer: &mut Vec<&'s [u8]>,
-  ) -> Result<(), Error> {
+  fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
     self.advance_to_hunk(hunk)?;
 
     // If a hunk has `old_span == 0`, it's a pure addition.
@@ -269,15 +239,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return Ok(());
     }
 
-    self.find_and_apply_hunk(hunk, prospective_match_buffer)
+    self.find_and_apply_hunk(hunk)
   }
 
   fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
-    // By declaring the buffer here, its capacity can be reused across multiple
-    // hunk applications, reducing heap allocations and improving performance.
-    let mut prospective_match_buffer = Vec::new();
     for hunk in &patch.hunks {
-      self.process_hunk(hunk, &mut prospective_match_buffer)?;
+      self.process_hunk(hunk)?;
     }
 
     // After all hunks are processed, write any remaining lines from the source.
