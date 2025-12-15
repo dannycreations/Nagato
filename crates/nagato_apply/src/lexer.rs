@@ -1,5 +1,3 @@
-use std::str;
-
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use bstr::ByteSlice;
 use memchr::memmem;
@@ -89,153 +87,16 @@ impl<'a> Lexer<'a> {
     }
   }
 
-  fn next_line(&mut self) -> Option<&'a [u8]> {
-    self.line_num += 1;
-    self.lines.next()
-  }
-
-  fn error(&self, kind: ErrorKind) -> Error {
-    Error {
-      line: Some(self.line_num),
-      kind,
-    }
-  }
-
-  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), Error> {
-    let (line, rest) = parse_u32(range_bytes)
-      .ok_or_else(|| self.error(ErrorKind::InvalidHunkRangeLine))?;
-
-    if rest.is_empty() {
-      return Ok((line, 1));
-    }
-
-    let rest = rest
-      .strip_prefix(b",")
-      .ok_or_else(|| self.error(ErrorKind::InvalidHunkRangeLine))?;
-
-    let (span, rest) = parse_u32(rest)
-      .ok_or_else(|| self.error(ErrorKind::InvalidHunkRangeSpan))?;
-
-    if !rest.is_empty() {
-      return Err(self.error(ErrorKind::InvalidHunkRangeSpan));
-    }
-
-    Ok((line, span))
-  }
-
-  // The hunk header parsing is now more efficient by working directly on byte slices,
-  // which avoids the overhead of string conversion and validation.
-  fn parse_hunk_header(
-    &self,
-    header: &'a [u8],
-  ) -> Result<TokenKind<'a>, Error> {
-    let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
-    let content = &header[..content_end];
-    let mut parts = content.fields();
-
-    let old_range_bytes = parts
-      .next()
-      .and_then(|s: &[u8]| s.strip_prefix(b"-"))
-      .ok_or(Error {
-        line: Some(self.line_num),
-        kind: ErrorKind::MissingOldRange,
-      })?;
-    let new_range_bytes = parts
-      .next()
-      .and_then(|s: &[u8]| s.strip_prefix(b"+"))
-      .ok_or(Error {
-        line: Some(self.line_num),
-        kind: ErrorKind::MissingNewRange,
-      })?;
-
-    let (old_line, old_span) = self.parse_range(old_range_bytes)?;
-    let (new_line, new_span) = self.parse_range(new_range_bytes)?;
-
-    Ok(TokenKind::HunkHeader {
-      old_line,
-      old_span,
-      new_line,
-      new_span,
-    })
-  }
-
-  fn parse_percentage(&self, s: &[u8]) -> Result<u32, Error> {
-    let s = s
-      .strip_suffix(b"%")
-      .ok_or_else(|| self.error(ErrorKind::InvalidPercentage))?;
-    let (num, rest) =
-      parse_u32(s).ok_or_else(|| self.error(ErrorKind::InvalidPercentage))?;
-    if !rest.is_empty() {
-      return Err(self.error(ErrorKind::InvalidPercentage));
-    }
-    Ok(num)
-  }
-
-  fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, Error> {
-    if s.is_empty() {
-      return Err(self.error(ErrorKind::InvalidFileMode));
-    }
-    let mut mode = 0u32;
-    for &digit in s {
-      if (b'0'..=b'7').contains(&digit) {
-        mode = mode
-          .checked_mul(8)
-          .and_then(|m| m.checked_add(u32::from(digit - b'0')))
-          .ok_or_else(|| self.error(ErrorKind::InvalidFileMode))?;
-      } else {
-        return Err(self.error(ErrorKind::InvalidFileMode));
-      }
-    }
-    Ok(mode)
-  }
-
-  fn parse_file_header(&self, rest: &'a [u8]) -> Result<TokenKind<'a>, Error> {
-    // The logic is now more robust, using `strip_git_prefix` to handle file
-    // paths that may or may not have the `a/` or `b/` prefixes.
-    let mut parts = rest.fields();
-    let old_file = parts.next().map(strip_git_prefix);
-    let new_file = parts.next().map(strip_git_prefix);
-
-    if let (Some(old_file), Some(new_file)) = (old_file, new_file) {
-      Ok(TokenKind::FileHeader { old_file, new_file })
-    } else {
-      Err(Error {
-        line: Some(self.line_num),
-        kind: ErrorKind::InvalidFileHeader,
-      })
-    }
-  }
-
-  // This function is optimized to parse the index line from a byte slice. It converts
-  // the hash part to a string slice as required by the `Token::Index` struct,
-  // but still avoids string allocation for parsing the mode.
-  fn parse_index_line(&self, rest: &'a [u8]) -> Result<TokenKind<'a>, Error> {
-    let mut parts = rest.fields();
-    let hashes_bytes = parts.next().ok_or(Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidIndexLine,
-    })?;
-    let hashes_str = str::from_utf8(hashes_bytes).map_err(|_| Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidIndexLine,
-    })?;
-    let (old_hash, new_hash) = hashes_str.split_once("..").ok_or(Error {
-      line: Some(self.line_num),
-      kind: ErrorKind::InvalidIndexHashRange,
-    })?;
-    let mode = parts.next().map(|s| self.parse_octal_mode(s)).transpose()?;
-    Ok(TokenKind::Index {
-      old_hash,
-      new_hash,
-      mode,
-    })
-  }
-
   fn parse_line(&mut self) -> Option<Result<LexerItem<'a>, Error>> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
-    let token_result = if let Some(mat) = AUTOMATON.find(line) {
+    // By having the sub-parsers return `ErrorKind`, we can centralize the creation
+    // of the `Error` struct here. This simplifies the sub-parsers and ensures
+    // the line number is always correctly associated with the error.
+    let token_result: Result<TokenKind, ErrorKind> = if let Some(mat) =
+      AUTOMATON.find(line)
+    {
       if mat.start() == 0 {
         let rest = line[mat.end()..].trim_end();
         match mat.pattern().as_usize() {
@@ -261,16 +122,10 @@ impl<'a> Lexer<'a> {
               {
                 Ok(TokenKind::Binary { old_file, new_file })
               } else {
-                Err(Error {
-                  line: Some(self.line_num),
-                  kind: ErrorKind::InvalidBinaryFilesLine,
-                })
+                Err(ErrorKind::InvalidBinaryFilesLine)
               }
             } else {
-              Err(Error {
-                line: Some(self.line_num),
-                kind: ErrorKind::InvalidBinaryFilesLine,
-              })
+              Err(ErrorKind::InvalidBinaryFilesLine)
             }
           }
           _ => unreachable!(),
@@ -282,13 +137,141 @@ impl<'a> Lexer<'a> {
       self.parse_non_keyword_line(line)
     };
 
-    Some(token_result.map(|token| LexerItem { token, line_num }))
+    Some(
+      token_result
+        .map(|token| LexerItem { token, line_num })
+        .map_err(|kind| Error {
+          line: Some(line_num),
+          kind,
+        }),
+    )
+  }
+
+  fn next_line(&mut self) -> Option<&'a [u8]> {
+    self.line_num += 1;
+    self.lines.next()
+  }
+
+  fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
+    let (line, rest) =
+      parse_u32(range_bytes).ok_or(ErrorKind::InvalidHunkRangeLine)?;
+
+    if rest.is_empty() {
+      return Ok((line, 1));
+    }
+
+    let rest = rest
+      .strip_prefix(b",")
+      .ok_or(ErrorKind::InvalidHunkRangeLine)?;
+
+    let (span, rest) =
+      parse_u32(rest).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
+
+    if !rest.is_empty() {
+      return Err(ErrorKind::InvalidHunkRangeSpan);
+    }
+
+    Ok((line, span))
+  }
+
+  // The hunk header parsing is now more efficient by working directly on byte slices,
+  // which avoids the overhead of string conversion and validation.
+  fn parse_hunk_header(
+    &self,
+    header: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
+    let content = &header[..content_end];
+    let mut parts = content.fields();
+
+    let old_range_bytes = parts
+      .next()
+      .and_then(|s: &[u8]| s.strip_prefix(b"-"))
+      .ok_or(ErrorKind::MissingOldRange)?;
+    let new_range_bytes = parts
+      .next()
+      .and_then(|s: &[u8]| s.strip_prefix(b"+"))
+      .ok_or(ErrorKind::MissingNewRange)?;
+
+    let (old_line, old_span) = self.parse_range(old_range_bytes)?;
+    let (new_line, new_span) = self.parse_range(new_range_bytes)?;
+
+    Ok(TokenKind::HunkHeader {
+      old_line,
+      old_span,
+      new_line,
+      new_span,
+    })
+  }
+
+  fn parse_percentage(&self, s: &[u8]) -> Result<u32, ErrorKind> {
+    let s = s.strip_suffix(b"%").ok_or(ErrorKind::InvalidPercentage)?;
+    let (num, rest) = parse_u32(s).ok_or(ErrorKind::InvalidPercentage)?;
+    if !rest.is_empty() {
+      return Err(ErrorKind::InvalidPercentage);
+    }
+    Ok(num)
+  }
+
+  fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, ErrorKind> {
+    if s.is_empty() {
+      return Err(ErrorKind::InvalidFileMode);
+    }
+    let mut mode = 0u32;
+    for &digit in s {
+      if (b'0'..=b'7').contains(&digit) {
+        mode = mode
+          .checked_mul(8)
+          .and_then(|m| m.checked_add(u32::from(digit - b'0')))
+          .ok_or(ErrorKind::InvalidFileMode)?;
+      } else {
+        return Err(ErrorKind::InvalidFileMode);
+      }
+    }
+    Ok(mode)
+  }
+
+  fn parse_file_header(
+    &self,
+    rest: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    // The logic is now more robust, using `strip_git_prefix` to handle file
+    // paths that may or may not have the `a/` or `b/` prefixes.
+    let mut parts = rest.fields();
+    let old_file = parts.next().map(strip_git_prefix);
+    let new_file = parts.next().map(strip_git_prefix);
+
+    if let (Some(old_file), Some(new_file)) = (old_file, new_file) {
+      Ok(TokenKind::FileHeader { old_file, new_file })
+    } else {
+      Err(ErrorKind::InvalidFileHeader)
+    }
+  }
+
+  // This function is optimized to parse the index line from a byte slice. It converts
+  // the hash part to a string slice as required by the `Token::Index` struct,
+  // but still avoids string allocation for parsing the mode.
+  fn parse_index_line(
+    &self,
+    rest: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    let mut parts = rest.fields();
+    let hashes_bytes = parts.next().ok_or(ErrorKind::InvalidIndexLine)?;
+    let (old_hash, new_hash) = hashes_bytes
+      .split_once_str(b"..")
+      .ok_or(ErrorKind::InvalidIndexHashRange)?;
+    let mode = parts.next().map(|s| self.parse_octal_mode(s)).transpose()?;
+    Ok(TokenKind::Index {
+      old_hash,
+      new_hash,
+      mode,
+    })
   }
 
   fn parse_non_keyword_line(
     &self,
     line: &'a [u8],
-  ) -> Result<TokenKind<'a>, Error> {
+  ) -> Result<TokenKind<'a>, ErrorKind> {
     match line.first() {
       Some(b'+') => Ok(TokenKind::Addition(&line[1..])),
       Some(b'-') => Ok(TokenKind::Deletion(&line[1..])),
@@ -315,7 +298,7 @@ impl<'a> Lexer<'a> {
             let new_file = strip_git_prefix(part2);
             Ok(TokenKind::FileHeader { old_file, new_file })
           }
-          _ => Err(self.error(ErrorKind::UnexpectedLine)),
+          _ => Err(ErrorKind::UnexpectedLine),
         }
       }
     }

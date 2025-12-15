@@ -71,8 +71,8 @@ test_lexer_ok!(
     new_file: b"file.txt",
   },
   TokenKind::Index {
-    old_hash: "1234567",
-    new_hash: "abcdefg",
+    old_hash: b"1234567",
+    new_hash: b"abcdefg",
     mode: Some(0o100644),
   },
   TokenKind::OldFile(b"file.txt"),
@@ -108,8 +108,8 @@ test_lexer_ok!(
     new_file: b"file.txt"
   },
   TokenKind::Index {
-    old_hash: "1234567",
-    new_hash: "abcdefg",
+    old_hash: b"1234567",
+    new_hash: b"abcdefg",
     mode: Some(0o100644)
   },
   TokenKind::OldFile(b"file.txt"),

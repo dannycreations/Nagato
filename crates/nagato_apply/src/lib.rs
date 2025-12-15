@@ -17,8 +17,8 @@ pub enum TokenKind<'a> {
   },
   /// The index line, containing the hashes of the old and new files.
   Index {
-    old_hash: &'a str,
-    new_hash: &'a str,
+    old_hash: &'a [u8],
+    new_hash: &'a [u8],
     mode: Option<u32>,
   },
   /// The old file path (`---`).
