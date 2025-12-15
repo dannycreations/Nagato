@@ -25,7 +25,7 @@ thiserror = "2.0.17"
 
 [profile.dev]
 codegen-units = 16
-debug = 0
+debug = 1
 incremental = true
 
 [profile.release]

@@ -55,8 +55,8 @@ pub enum ErrorKind {
   CouldNotApplyHunk,
 
   // Other errors
-  #[error("Binary files are not supported")]
-  BinaryFilesNotSupported,
+  #[error("Binary patch content is not supported")]
+  UnsupportedBinaryPatch,
   #[error("Invalid path")]
   InvalidPath,
 }

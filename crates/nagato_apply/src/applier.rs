@@ -351,6 +351,10 @@ fn handle_metadata_change(
     fs.rename(source_path, patch.new_file)?;
   } else if patch.copy_to.is_some() {
     fs.copy(source_path, patch.new_file)?;
+  } else if patch.old_file == b"/dev/null" {
+    // This case handles the creation of a new, empty file, which is common
+    // for binary files where the patch does not contain content.
+    fs.write(patch.new_file)?.commit()?;
   }
   Ok(())
 }
@@ -384,10 +388,13 @@ fn patch_file_worker(
   fs: &mut impl FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
-  if patch.binary {
+  // Patches that are marked as binary but also contain hunks are not supported.
+  // This is because the "Binary files differ" format doesn't provide enough
+  // information to apply content changes.
+  if patch.binary && !patch.hunks.is_empty() {
     return Err(Error {
       line: None,
-      kind: ErrorKind::BinaryFilesNotSupported,
+      kind: ErrorKind::UnsupportedBinaryPatch,
     });
   }
 
@@ -397,6 +404,7 @@ fn patch_file_worker(
     // A patch with a `/dev/null` new file signifies a deletion.
     (b"/dev/null", _) => handle_file_deletion(fs, patch)?,
     // A patch with no hunks indicates a metadata-only change (e.g., rename or copy).
+    // This also applies to binary files that are created empty.
     (_, true) => handle_metadata_change(fs, patch)?,
     // Otherwise, the patch involves content changes.
     (_, false) => handle_content_change(fs, patch)?,

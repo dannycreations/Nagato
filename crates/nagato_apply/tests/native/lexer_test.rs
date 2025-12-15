@@ -49,8 +49,8 @@ test_lexer_ok!(
   lexes_binary_files_differ,
   "Binary files a/old.bin and b/new.bin differ",
   TokenKind::Binary {
-    old_file: b"a/old.bin",
-    new_file: b"b/new.bin",
+    old_file: b"old.bin",
+    new_file: b"new.bin",
   }
 );
 

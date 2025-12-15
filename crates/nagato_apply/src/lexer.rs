@@ -126,7 +126,12 @@ impl<'a> Lexer<'a> {
               if let (Some(old_file), Some(new_file)) =
                 (parts.next(), parts.next())
               {
-                Ok(TokenKind::Binary { old_file, new_file })
+                // The `strip_git_prefix` function is now correctly applied to
+                // file paths in binary diffs, ensuring consistent path handling.
+                Ok(TokenKind::Binary {
+                  old_file: strip_git_prefix(old_file),
+                  new_file: strip_git_prefix(new_file),
+                })
               } else {
                 Err(ErrorKind::InvalidBinaryFilesLine)
               }

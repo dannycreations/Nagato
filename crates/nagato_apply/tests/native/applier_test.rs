@@ -292,15 +292,19 @@ test_patch_err!(
   "#
 );
 
-test_patch_err!(
-  fails_on_patching_binary_file,
-  initial_fs: { "file.txt" => "" },
+test_patch_ok!(
+  creates_empty_binary_file,
+  initial_fs: {},
   diff: r#"
     diff --git a/image.png b/image.png
     new file mode 100644
     index 0000000..8989898
     Binary files /dev/null and b/image.png differ
-  "#
+  "#,
+  assertions: |root| {
+    assert!(root.join("image.png").exists());
+    assert_eq!(fs::read(root.join("image.png")).unwrap().len(), 0);
+  }
 );
 
 test_patch_ok!(
