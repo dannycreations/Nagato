@@ -424,13 +424,11 @@ dependencies = [
 name = "nagato_apply"
 version = "0.1.0"
 dependencies = [
- "aho-corasick",
  "bstr",
  "indoc",
  "memchr",
  "memmap2",
  "nagato_core",
- "once_cell",
  "tempfile",
 ]
 

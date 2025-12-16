@@ -1,8 +1,6 @@
-use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use bstr::ByteSlice;
 use memchr::memmem;
 use nagato_core::error::{Error, ErrorKind};
-use once_cell::sync::Lazy;
 
 use crate::TokenKind;
 
@@ -11,39 +9,6 @@ pub struct LexerItem<'a> {
   pub token: TokenKind<'a>,
   pub line_num: u32,
 }
-
-// The Aho-Corasick automaton is used for efficient multi-pattern string matching.
-// Building it can be expensive, so we use `once_cell::sync::Lazy` to ensure it's
-// constructed only once and shared across all calls, improving performance.
-static AUTOMATON: Lazy<AhoCorasick> = Lazy::new(|| {
-  // These are the keywords that identify different lines in a git diff.
-  // The order is important as it corresponds to the match arms below.
-  let patterns = &[
-    "diff --git ",
-    "index ",
-    "--- ",
-    "+++ ",
-    "@@ ",
-    "new file mode ",
-    "new mode ",
-    "old file mode ",
-    "old mode ",
-    "deleted file mode ",
-    "deleted mode ",
-    "rename from ",
-    "rename to ",
-    "copy from ",
-    "copy to ",
-    "similarity index ",
-    "dissimilarity index ",
-    "Binary files ",
-  ];
-
-  AhoCorasickBuilder::new()
-    .match_kind(MatchKind::LeftmostLongest)
-    .build(patterns)
-    .unwrap()
-});
 
 #[doc(hidden)]
 pub struct Lexer<'a> {
@@ -99,7 +64,7 @@ impl<'a> Lexer<'a> {
 
     // Fast path: Check the first byte of the line.
     // Most lines in a patch are additions (+), deletions (-), or context (space).
-    // Checking this first avoids the more expensive Aho-Corasick search for these common cases.
+    // Checking this first avoids the more expensive search for these common cases.
     if let Some(&first_byte) = line.first() {
       match first_byte {
         b'+' if !line.starts_with(b"+++ ") => {
@@ -134,52 +99,57 @@ impl<'a> Lexer<'a> {
       }));
     }
 
-    // By having the sub-parsers return `ErrorKind`, we can centralize the creation
-    // of the `Error` struct here. This simplifies the sub-parsers and ensures
-    // the line number is always correctly associated with the error.
-    let token_result: Result<TokenKind, ErrorKind> = if let Some(mat) =
-      AUTOMATON.find(line)
+    // Replace Aho-Corasick with simple prefix matching.
+    // Order matters for overlapping prefixes (longest first).
+    let token_result: Result<TokenKind, ErrorKind> = if let Some(rest) =
+      line.strip_prefix(b"diff --git ")
     {
-      if mat.start() == 0 {
-        let rest = line[mat.end()..].trim_end();
-        match mat.pattern().as_usize() {
-          0 => self.parse_file_header(rest),
-          1 => self.parse_index_line(rest),
-          2 => Ok(TokenKind::OldFile(strip_git_prefix(rest))),
-          3 => Ok(TokenKind::NewFile(strip_git_prefix(rest))),
-          4 => self.parse_hunk_header(rest),
-          5 | 6 => self.parse_octal_mode(rest).map(TokenKind::NewFileMode),
-          7 | 8 => self.parse_octal_mode(rest).map(TokenKind::OldFileMode),
-          9 | 10 => self.parse_octal_mode(rest).map(TokenKind::DeletedFileMode),
-          11 => Ok(TokenKind::RenameFrom(rest)),
-          12 => Ok(TokenKind::RenameTo(rest)),
-          13 => Ok(TokenKind::CopyFrom(rest)),
-          14 => Ok(TokenKind::CopyTo(rest)),
-          15 => self.parse_percentage(rest).map(TokenKind::Similarity),
-          16 => self.parse_percentage(rest).map(TokenKind::Dissimilarity),
-          17 => {
-            if let Some(line_content) = rest.strip_suffix(b" differ") {
-              let mut parts = line_content.split_str(b" and ");
-              if let (Some(old_file), Some(new_file)) =
-                (parts.next(), parts.next())
-              {
-                // The `strip_git_prefix` function is now correctly applied to
-                // file paths in binary diffs, ensuring consistent path handling.
-                Ok(TokenKind::Binary {
-                  old_file: strip_git_prefix(old_file),
-                  new_file: strip_git_prefix(new_file),
-                })
-              } else {
-                Err(ErrorKind::InvalidBinaryFilesLine)
-              }
-            } else {
-              Err(ErrorKind::InvalidBinaryFilesLine)
-            }
-          }
-          _ => unreachable!(),
+      self.parse_file_header(rest)
+    } else if let Some(rest) = line.strip_prefix(b"index ") {
+      self.parse_index_line(rest)
+    } else if let Some(rest) = line.strip_prefix(b"--- ") {
+      Ok(TokenKind::OldFile(strip_git_prefix(rest)))
+    } else if let Some(rest) = line.strip_prefix(b"+++ ") {
+      Ok(TokenKind::NewFile(strip_git_prefix(rest)))
+    } else if let Some(rest) = line.strip_prefix(b"@@ ") {
+      self.parse_hunk_header(rest)
+    } else if let Some(rest) = line.strip_prefix(b"new file mode ") {
+      self.parse_octal_mode(rest).map(TokenKind::NewFileMode)
+    } else if let Some(rest) = line.strip_prefix(b"new mode ") {
+      self.parse_octal_mode(rest).map(TokenKind::NewFileMode)
+    } else if let Some(rest) = line.strip_prefix(b"old file mode ") {
+      self.parse_octal_mode(rest).map(TokenKind::OldFileMode)
+    } else if let Some(rest) = line.strip_prefix(b"old mode ") {
+      self.parse_octal_mode(rest).map(TokenKind::OldFileMode)
+    } else if let Some(rest) = line.strip_prefix(b"deleted file mode ") {
+      self.parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
+    } else if let Some(rest) = line.strip_prefix(b"deleted mode ") {
+      self.parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
+    } else if let Some(rest) = line.strip_prefix(b"rename from ") {
+      Ok(TokenKind::RenameFrom(rest))
+    } else if let Some(rest) = line.strip_prefix(b"rename to ") {
+      Ok(TokenKind::RenameTo(rest))
+    } else if let Some(rest) = line.strip_prefix(b"copy from ") {
+      Ok(TokenKind::CopyFrom(rest))
+    } else if let Some(rest) = line.strip_prefix(b"copy to ") {
+      Ok(TokenKind::CopyTo(rest))
+    } else if let Some(rest) = line.strip_prefix(b"similarity index ") {
+      self.parse_percentage(rest).map(TokenKind::Similarity)
+    } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
+      self.parse_percentage(rest).map(TokenKind::Dissimilarity)
+    } else if let Some(rest) = line.strip_prefix(b"Binary files ") {
+      if let Some(line_content) = rest.strip_suffix(b" differ") {
+        let mut parts = line_content.split_str(b" and ");
+        if let (Some(old_file), Some(new_file)) = (parts.next(), parts.next()) {
+          Ok(TokenKind::Binary {
+            old_file: strip_git_prefix(old_file),
+            new_file: strip_git_prefix(new_file),
+          })
+        } else {
+          Err(ErrorKind::InvalidBinaryFilesLine)
         }
       } else {
-        self.parse_non_keyword_line(line)
+        Err(ErrorKind::InvalidBinaryFilesLine)
       }
     } else {
       self.parse_non_keyword_line(line)
