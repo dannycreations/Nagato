@@ -57,6 +57,10 @@ pub enum ErrorKind {
   /// Other errors
   #[error("Binary patch content is not supported")]
   UnsupportedBinaryPatch,
+  #[error("Invalid binary patch data")]
+  InvalidBinaryPatch,
+  #[error("Binary patch source length mismatch")]
+  BinaryPatchSourceMismatch,
   #[error("Invalid path")]
   InvalidPath,
 }

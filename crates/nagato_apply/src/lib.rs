@@ -1,4 +1,5 @@
 mod applier;
+mod binary;
 mod lexer;
 mod parser;
 
@@ -65,6 +66,18 @@ pub enum TokenKind<'a> {
     old_file: &'a [u8],
     new_file: &'a [u8],
   },
+  /// The header of a git binary patch.
+  GitBinaryPatchHeader,
+  /// The type and size of a binary patch fragment.
+  BinaryPatchType { kind: BinaryPatchKind, size: u64 },
+  /// A line of binary data.
+  BinaryData(&'a [u8]),
+}
+
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum BinaryPatchKind {
+  Literal,
+  Delta,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,11 +110,22 @@ pub struct Hunk<'a> {
   pub patch_line_num: u32,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct BinaryFragment<'a> {
+  pub kind: BinaryPatchKind,
+  pub size: u64,
+  pub data: Vec<&'a [u8]>,
+}
+
 /// Represents a single patch, which can contain multiple hunks.
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Patch<'a> {
   /// The index mode.
   pub index_mode: Option<u32>,
+  /// The SHA1 hash of the old file.
+  pub old_hash: Option<&'a [u8]>,
+  /// The SHA1 hash of the new file.
+  pub new_hash: Option<&'a [u8]>,
   /// The path to the old file.
   pub old_file: &'a [u8],
   /// The path to the new file.
@@ -132,6 +156,8 @@ pub struct Patch<'a> {
   pub old_file_no_newline: bool,
   /// Indicates that the new file has no newline at the end.
   pub new_file_no_newline: bool,
+  /// Binary patch fragments.
+  pub binary_fragments: Vec<BinaryFragment<'a>>,
 }
 
 impl<'a> Patch<'a> {

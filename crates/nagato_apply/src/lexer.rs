@@ -2,7 +2,7 @@ use bstr::ByteSlice;
 use memchr::memmem;
 use nagato_core::error::{Error, ErrorKind};
 
-use crate::TokenKind;
+use crate::{BinaryPatchKind, TokenKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexerItem<'a> {
@@ -15,6 +15,7 @@ pub struct Lexer<'a> {
   lines: bstr::Lines<'a>,
   line_num: u32,
   last_line_was_new_file: bool,
+  in_binary_patch: bool,
 }
 
 fn strip_git_prefix(s: &[u8]) -> &[u8] {
@@ -30,6 +31,22 @@ fn parse_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
     num = num
       .checked_mul(10)?
       .checked_add(u32::from(bytes[i] - b'0'))?;
+    i += 1;
+  }
+  if i == 0 {
+    None
+  } else {
+    Some((num, &bytes[i..]))
+  }
+}
+
+fn parse_u64(bytes: &[u8]) -> Option<(u64, &[u8])> {
+  let mut num = 0u64;
+  let mut i = 0;
+  while i < bytes.len() && bytes[i].is_ascii_digit() {
+    num = num
+      .checked_mul(10)?
+      .checked_add(u64::from(bytes[i] - b'0'))?;
     i += 1;
   }
   if i == 0 {
@@ -64,12 +81,56 @@ impl<'a> Lexer<'a> {
       lines: input.lines(),
       line_num: 0,
       last_line_was_new_file: false,
+      in_binary_patch: false,
     }
   }
 
   fn parse_line(&mut self) -> Option<Result<LexerItem<'a>, Error>> {
     let line = self.next_line()?;
     let line_num = self.line_num;
+
+    if self.in_binary_patch {
+      if line.is_empty() {
+        return Some(Ok(LexerItem {
+          token: TokenKind::Context(&[]),
+          line_num,
+        }));
+      }
+
+      if let Some(rest) = line.strip_prefix(b"literal ") {
+        if let Some((size, _)) = parse_u64(rest) {
+          return Some(Ok(LexerItem {
+            token: TokenKind::BinaryPatchType {
+              kind: BinaryPatchKind::Literal,
+              size,
+            },
+            line_num,
+          }));
+        }
+      } else if let Some(rest) = line.strip_prefix(b"delta ") {
+        if let Some((size, _)) = parse_u64(rest) {
+          return Some(Ok(LexerItem {
+            token: TokenKind::BinaryPatchType {
+              kind: BinaryPatchKind::Delta,
+              size,
+            },
+            line_num,
+          }));
+        }
+      }
+
+      if line.starts_with(b"diff --git")
+        || line.starts_with(b"--- ")
+        || line.starts_with(b"+++ ")
+      {
+        self.in_binary_patch = false;
+      } else {
+        return Some(Ok(LexerItem {
+          token: TokenKind::BinaryData(line),
+          line_num,
+        }));
+      }
+    }
 
     if line.is_empty() {
       self.last_line_was_new_file = true;
@@ -116,6 +177,14 @@ impl<'a> Lexer<'a> {
           parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
         } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
           self.parse_percentage(rest).map(TokenKind::Dissimilarity)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'G' => {
+        if line == b"GIT binary patch" {
+          self.in_binary_patch = true;
+          Ok(TokenKind::GitBinaryPatchHeader)
         } else {
           self.parse_non_keyword_line(line)
         }

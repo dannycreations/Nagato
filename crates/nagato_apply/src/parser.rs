@@ -2,7 +2,9 @@ use std::iter::Peekable;
 
 use nagato_core::error::{Error, ErrorKind};
 
-use crate::{Hunk, Lexer, LexerItem, Line, LineKind, Patch, TokenKind};
+use crate::{
+  BinaryFragment, Hunk, Lexer, LexerItem, Line, LineKind, Patch, TokenKind,
+};
 
 pub struct Parser<'a> {
   tokens: Peekable<Lexer<'a>>,
@@ -22,7 +24,13 @@ impl<'a> Parser<'a> {
           patch.old_file = old_file;
           patch.new_file = new_file;
         }
-        TokenKind::Index { mode, .. } => {
+        TokenKind::Index {
+          old_hash,
+          new_hash,
+          mode,
+        } => {
+          patch.old_hash = Some(old_hash);
+          patch.new_hash = Some(new_hash);
           patch.index_mode = *mode;
         }
         TokenKind::OldFile(file) => {
@@ -63,11 +71,43 @@ impl<'a> Parser<'a> {
           patch.new_file = new_file;
           patch.binary = true;
           self.tokens.next();
+        }
+        TokenKind::GitBinaryPatchHeader => {
+          self.tokens.next();
+          self.parse_binary_patch(patch)?;
           return Ok(());
         }
         _ => break,
       }
       self.tokens.next();
+    }
+    Ok(())
+  }
+
+  fn parse_binary_patch(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
+    patch.binary = true;
+    while let Some(Ok(item)) = self.tokens.peek() {
+      match item.token {
+        TokenKind::BinaryPatchType { kind, size } => {
+          self.tokens.next();
+          let mut data = Vec::new();
+          while let Some(Ok(item)) = self.tokens.peek() {
+            if let TokenKind::BinaryData(line) = item.token {
+              data.push(line);
+              self.tokens.next();
+            } else {
+              break;
+            }
+          }
+          patch
+            .binary_fragments
+            .push(BinaryFragment { kind, size, data });
+        }
+        TokenKind::Context(_) => {
+          self.tokens.next();
+        }
+        _ => break,
+      }
     }
     Ok(())
   }
@@ -120,7 +160,7 @@ impl<'a> Parser<'a> {
     self.skip_empty_context_lines();
     self.parse_hunks(&mut patch)?;
 
-    if patch.hunks.is_empty() {
+    if patch.hunks.is_empty() && patch.binary_fragments.is_empty() {
       self.parse_headerless_hunk(&mut patch)?;
     }
 
@@ -247,7 +287,8 @@ impl<'a> Iterator for Parser<'a> {
       Ok(patch)
         if patch.old_file.is_empty()
           && patch.new_file.is_empty()
-          && patch.hunks.is_empty() =>
+          && patch.hunks.is_empty()
+          && patch.binary_fragments.is_empty() =>
       {
         None
       }

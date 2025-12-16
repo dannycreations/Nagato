@@ -10,8 +10,9 @@ use nagato_core::{
   error::{Error, ErrorKind},
   fs::FileSystem,
 };
+use sha1::{Digest, Sha1};
 
-use crate::{Hunk, Line, LineKind, Patch};
+use crate::{binary, BinaryPatchKind, Hunk, Line, LineKind, Patch};
 
 impl<'a> Patch<'a> {
   pub fn invert(mut self) -> Self {
@@ -22,6 +23,7 @@ impl<'a> Patch<'a> {
     mem::swap(&mut self.rename_from, &mut self.rename_to);
     mem::swap(&mut self.copy_from, &mut self.copy_to);
     mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
+    mem::swap(&mut self.old_hash, &mut self.new_hash);
 
     if is_creation {
       self.deleted_mode = self.new_mode;
@@ -275,6 +277,72 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
+    if !patch.binary_fragments.is_empty() {
+      if let Some(old_hash_bytes) = patch.old_hash {
+        if old_hash_bytes.len() >= 7 {
+          let mut hasher = Sha1::new();
+          hasher.update(b"blob ");
+          hasher.update(self.source.len().to_string().as_bytes());
+          hasher.update(b"\0");
+          hasher.update(self.source);
+          let result = hasher.finalize();
+          let hex_hash = hex::encode(result);
+
+          let old_hash_str =
+            std::str::from_utf8(old_hash_bytes).map_err(|_| Error {
+              line: None,
+              kind: ErrorKind::InvalidIndexLine,
+            })?;
+
+          if !hex_hash.starts_with(old_hash_str)
+            && old_hash_str.chars().any(|c| c != '0')
+          {
+            return Err(Error {
+              line: None,
+              kind: ErrorKind::BinaryPatchSourceMismatch,
+            });
+          }
+        }
+      }
+
+      let mut applied = false;
+      for fragment in &patch.binary_fragments {
+        match fragment.kind {
+          BinaryPatchKind::Literal => {
+            let decoded = binary::decode_base85(&fragment.data)?;
+            self.output.write_all(&decoded)?;
+            applied = true;
+            break;
+          }
+          BinaryPatchKind::Delta => {
+            let decoded = binary::decode_base85(&fragment.data)?;
+            match binary::apply_delta(&decoded, self.source) {
+              Ok(result) => {
+                self.output.write_all(&result)?;
+                applied = true;
+                break;
+              }
+              Err(Error {
+                kind: ErrorKind::BinaryPatchSourceMismatch,
+                ..
+              }) => {
+                continue;
+              }
+              Err(e) => return Err(e),
+            }
+          }
+        }
+      }
+
+      if !applied {
+        return Err(Error {
+          line: None,
+          kind: ErrorKind::CouldNotApplyHunk,
+        });
+      }
+      return Ok(());
+    }
+
     for hunk in &patch.hunks {
       self.process_hunk(hunk)?;
     }
@@ -296,7 +364,10 @@ pub fn apply<'a>(
   patch: &Patch<'a>,
   source: &[u8],
 ) -> Result<(), Error> {
-  if patch.hunks.is_empty() && patch.copy_to.is_none() {
+  if patch.hunks.is_empty()
+    && patch.copy_to.is_none()
+    && patch.binary_fragments.is_empty()
+  {
     output.write_all(source)?;
     return Ok(());
   }
@@ -383,6 +454,10 @@ fn patch_file_worker(
       line: None,
       kind: ErrorKind::UnsupportedBinaryPatch,
     });
+  }
+
+  if !patch.binary_fragments.is_empty() {
+    return handle_content_change(fs, patch);
   }
 
   match (patch.new_file, patch.hunks.is_empty()) {

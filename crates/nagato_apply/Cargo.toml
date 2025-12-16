@@ -11,9 +11,12 @@ doctest = false
 
 [dependencies]
 bstr.workspace = true
+flate2.workspace = true
+hex.workspace = true
 memchr.workspace = true
 memmap2.workspace = true
 nagato_core.workspace = true
+sha1.workspace = true
 
 [dev-dependencies]
 indoc.workspace = true
