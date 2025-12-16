@@ -52,24 +52,54 @@ impl Write for AtomicWriter {
   }
 }
 
-pub trait FileSystem {
-  fn exists(&self, path: &[u8]) -> bool;
-  fn read(&self, path: &[u8]) -> Result<Mmap, Error>;
-  fn write(&mut self, path: &[u8]) -> Result<AtomicWriter, Error>;
-  fn copy(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error>;
-  fn remove_file(&mut self, path: &[u8]) -> Result<(), Error>;
-  fn rename(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error>;
-  fn set_permissions(&mut self, path: &[u8], mode: u32) -> Result<(), Error>;
-}
-
 #[derive(Debug, Default)]
-pub struct OsFileSystem {
+pub struct FileSystem {
   root: PathBuf,
 }
 
-impl OsFileSystem {
+impl FileSystem {
   pub fn new(root: impl Into<PathBuf>) -> Self {
     Self { root: root.into() }
+  }
+
+  pub fn exists(&self, path: &[u8]) -> bool {
+    self.resolve(path).is_ok_and(|p| p.exists())
+  }
+
+  pub fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
+    let file = File::open(self.resolve(path)?)?;
+    unsafe { Mmap::map(&file) }.map_err(Into::into)
+  }
+
+  pub fn write(&self, path: &[u8]) -> Result<AtomicWriter, Error> {
+    AtomicWriter::new(&self.resolve_mut(path)?).map_err(Into::into)
+  }
+
+  pub fn copy(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
+    fs::copy(self.resolve(from)?, self.resolve_mut(to)?)?;
+    Ok(())
+  }
+
+  pub fn remove_file(&self, path: &[u8]) -> Result<(), Error> {
+    fs::remove_file(self.resolve(path)?).map_err(Into::into)
+  }
+
+  pub fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
+    fs::rename(self.resolve(from)?, self.resolve_mut(to)?).map_err(Into::into)
+  }
+
+  pub fn set_permissions(&self, path: &[u8], _mode: u32) -> Result<(), Error> {
+    let path = self.resolve(path)?;
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    }
+    #[cfg(not(unix))]
+    {
+      let _ = path;
+    }
+    Ok(())
   }
 
   fn resolve(&self, path: &[u8]) -> Result<PathBuf, Error> {
@@ -89,47 +119,5 @@ impl OsFileSystem {
       fs::create_dir_all(parent)?;
     }
     Ok(p)
-  }
-}
-
-impl FileSystem for OsFileSystem {
-  fn exists(&self, path: &[u8]) -> bool {
-    self.resolve(path).is_ok_and(|p| p.exists())
-  }
-
-  fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
-    let file = File::open(self.resolve(path)?)?;
-    unsafe { Mmap::map(&file) }.map_err(Into::into)
-  }
-
-  fn write(&mut self, path: &[u8]) -> Result<AtomicWriter, Error> {
-    AtomicWriter::new(&self.resolve_mut(path)?).map_err(Into::into)
-  }
-
-  fn copy(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error> {
-    fs::copy(self.resolve(from)?, self.resolve_mut(to)?)?;
-    Ok(())
-  }
-
-  fn remove_file(&mut self, path: &[u8]) -> Result<(), Error> {
-    fs::remove_file(self.resolve(path)?).map_err(Into::into)
-  }
-
-  fn rename(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error> {
-    fs::rename(self.resolve(from)?, self.resolve_mut(to)?).map_err(Into::into)
-  }
-
-  fn set_permissions(&mut self, path: &[u8], _mode: u32) -> Result<(), Error> {
-    let path = self.resolve(path)?;
-    #[cfg(unix)]
-    {
-      use std::os::unix::fs::PermissionsExt;
-      fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-    }
-    #[cfg(not(unix))]
-    {
-      let _ = path;
-    }
-    Ok(())
   }
 }

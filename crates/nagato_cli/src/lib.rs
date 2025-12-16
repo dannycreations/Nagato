@@ -9,7 +9,7 @@ use std::{
 pub use clap::{CommandFactory, Parser as ClapParser};
 use memmap2::Mmap;
 use nagato_apply::{patch_file, Parser};
-use nagato_core::{error::Error, fs::OsFileSystem};
+use nagato_core::{error::Error, fs::FileSystem};
 
 #[derive(ClapParser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -25,7 +25,7 @@ pub struct Cli {
 }
 
 fn process_patch(
-  fs: &mut OsFileSystem,
+  fs: &FileSystem,
   patch_content: &[u8],
   reverse: bool,
 ) -> Result<(), Error> {
@@ -46,18 +46,18 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   } else {
     env::current_dir()?
   };
-  let mut fs = OsFileSystem::new(root);
+  let fs = FileSystem::new(root);
 
   match &cli.file {
     Some(path) => {
       let file = File::open(path)?;
       let mmap = unsafe { Mmap::map(&file)? };
-      process_patch(&mut fs, &mmap, cli.reverse)
+      process_patch(&fs, &mmap, cli.reverse)
     }
     None => {
       let mut stdin_content = Vec::new();
       io::stdin().read_to_end(&mut stdin_content)?;
-      process_patch(&mut fs, &stdin_content, cli.reverse)
+      process_patch(&fs, &stdin_content, cli.reverse)
     }
   }
 }

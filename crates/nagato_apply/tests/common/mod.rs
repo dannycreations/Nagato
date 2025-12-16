@@ -70,7 +70,7 @@ macro_rules! test_patch_ok {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($initial_path => $initial_content),* };
-      let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+      let mut fs = nagato_core::fs::FileSystem::new(dir.path());
       let diff = indoc::indoc!($diff);
       for patch in nagato_apply::Parser::new(diff.as_bytes()) {
         nagato_apply::patch_file(&mut fs, patch.unwrap(), $reverse).unwrap();
@@ -106,7 +106,7 @@ macro_rules! test_patch_err {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
-      let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+      let mut fs = nagato_core::fs::FileSystem::new(dir.path());
       let diff = indoc::indoc!($diff);
       let mut parser = nagato_apply::Parser::new(diff.as_bytes());
       assert!(nagato_apply::patch_file(&mut fs, parser.next().unwrap().unwrap(), $reverse).is_err());
@@ -175,7 +175,7 @@ macro_rules! test_patch_err_with_line {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
-      let mut fs = nagato_core::fs::OsFileSystem::new(dir.path());
+      let mut fs = nagato_core::fs::FileSystem::new(dir.path());
       let diff = indoc::indoc!($diff);
       let patch = nagato_apply::Parser::new(diff.as_bytes()).next().unwrap().unwrap();
       let result = nagato_apply::patch_file(&mut fs, patch, false);

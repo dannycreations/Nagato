@@ -385,7 +385,7 @@ fn ignore_not_found(res: Result<(), Error>) -> Result<(), Error> {
 }
 
 fn read_source_or_empty(
-  fs: &impl FileSystem,
+  fs: &FileSystem,
   path: &[u8],
 ) -> Result<Option<Mmap>, Error> {
   match fs.read(path) {
@@ -399,7 +399,7 @@ fn read_source_or_empty(
 }
 
 fn handle_file_deletion(
-  fs: &mut impl FileSystem,
+  fs: &FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
   let source_path = patch.source_file();
@@ -412,7 +412,7 @@ fn handle_file_deletion(
 }
 
 fn handle_metadata_change(
-  fs: &mut impl FileSystem,
+  fs: &FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
   let source_path = patch.source_file();
@@ -427,7 +427,7 @@ fn handle_metadata_change(
 }
 
 fn handle_content_change(
-  fs: &mut impl FileSystem,
+  fs: &FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
   let source_path = patch.source_file();
@@ -445,10 +445,7 @@ fn handle_content_change(
   Ok(())
 }
 
-fn patch_file_worker(
-  fs: &mut impl FileSystem,
-  patch: &Patch<'_>,
-) -> Result<(), Error> {
+fn patch_file_worker(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
   if patch.binary && !patch.hunks.is_empty() {
     return Err(Error {
       line: None,
@@ -476,7 +473,7 @@ fn patch_file_worker(
 }
 
 pub fn patch_file(
-  fs: &mut impl FileSystem,
+  fs: &FileSystem,
   patch: Patch<'_>,
   reverse: bool,
 ) -> Result<(), Error> {
