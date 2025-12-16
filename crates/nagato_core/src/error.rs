@@ -18,7 +18,7 @@ pub enum ErrorKind {
   #[error("Failed to persist temporary file")]
   Persist(#[from] PersistError),
 
-  // Parse errors
+  /// Parse errors
   #[error("Invalid hunk range line")]
   InvalidHunkRangeLine,
   #[error("Invalid hunk range span")]
@@ -50,11 +50,11 @@ pub enum ErrorKind {
   #[error("Unexpected end of patch")]
   UnexpectedEof,
 
-  // Apply errors
+  /// Apply errors
   #[error("Could not apply hunk")]
   CouldNotApplyHunk,
 
-  // Other errors
+  /// Other errors
   #[error("Binary patch content is not supported")]
   UnsupportedBinaryPatch,
   #[error("Invalid path")]

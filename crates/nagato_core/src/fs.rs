@@ -23,8 +23,6 @@ impl AtomicWriter {
       )
     })?;
     let tempfile = NamedTempFile::new_in(parent)?;
-    // Increase buffer size to 128KB for better performance with large files.
-    // The default is usually 8KB, which can be too small for heavy I/O.
     let writer = BufWriter::with_capacity(128 * 1024, tempfile);
 
     Ok(Self {
@@ -35,17 +33,16 @@ impl AtomicWriter {
 
   pub fn commit(mut self) -> Result<(), Error> {
     self.writer.flush()?;
-
-    // The `into_inner` method can fail, and its error type doesn't automatically
-    // convert to our custom `Error`. We now explicitly map it to a standard
-    // `io::Error`, which allows the `?` operator to work correctly.
-    let tempfile = self.writer.into_inner().map_err(|e| e.into_error())?;
-    tempfile.persist(&self.dest_path)?;
+    self
+      .writer
+      .into_inner()
+      .map_err(|e| e.into_error())?
+      .persist(&self.dest_path)?;
     Ok(())
   }
 }
 
-impl io::Write for AtomicWriter {
+impl Write for AtomicWriter {
   fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
     self.writer.write(buf)
   }
@@ -70,25 +67,12 @@ pub struct OsFileSystem {
   root: PathBuf,
 }
 
-// This function is being moved out of the `OsFileSystem` implementation because
-// it doesn't depend on the struct's state (`self`). Making it a free function
-// clarifies its role as a general utility for file system operations.
-fn ensure_parent_dir_exists(path: &Path) -> io::Result<()> {
-  if let Some(parent) = path.parent() {
-    fs::create_dir_all(parent)?;
-  }
-  Ok(())
-}
-
 impl OsFileSystem {
   pub fn new(root: impl Into<PathBuf>) -> Self {
     Self { root: root.into() }
   }
 
-  // The path conversion logic is now centralized here. It attempts to convert
-  // a byte slice to a path, returning a specific `InvalidPath` error on failure.
-  // This is more efficient than the previous `io::Error::other` approach.
-  fn absolute_path(&self, path: &[u8]) -> Result<PathBuf, Error> {
+  fn resolve(&self, path: &[u8]) -> Result<PathBuf, Error> {
     use bstr::ByteSlice;
     path
       .to_path()
@@ -99,57 +83,52 @@ impl OsFileSystem {
       })
   }
 
-  fn prepare_destination_path(&self, path: &[u8]) -> Result<PathBuf, Error> {
-    let abs_path = self.absolute_path(path)?;
-    ensure_parent_dir_exists(&abs_path)?;
-    Ok(abs_path)
+  fn resolve_mut(&self, path: &[u8]) -> Result<PathBuf, Error> {
+    let p = self.resolve(path)?;
+    if let Some(parent) = p.parent() {
+      fs::create_dir_all(parent)?;
+    }
+    Ok(p)
   }
 }
 
 impl FileSystem for OsFileSystem {
   fn exists(&self, path: &[u8]) -> bool {
-    self.absolute_path(path).is_ok_and(|p| p.exists())
+    self.resolve(path).is_ok_and(|p| p.exists())
   }
 
   fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
-    let file = File::open(self.absolute_path(path)?)?;
+    let file = File::open(self.resolve(path)?)?;
     unsafe { Mmap::map(&file) }.map_err(Into::into)
   }
 
   fn write(&mut self, path: &[u8]) -> Result<AtomicWriter, Error> {
-    let abs_path = self.prepare_destination_path(path)?;
-    AtomicWriter::new(&abs_path).map_err(Into::into)
+    AtomicWriter::new(&self.resolve_mut(path)?).map_err(Into::into)
   }
 
   fn copy(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error> {
-    let from_abs = self.absolute_path(from)?;
-    let to_abs = self.prepare_destination_path(to)?;
-    fs::copy(from_abs, to_abs)?;
+    fs::copy(self.resolve(from)?, self.resolve_mut(to)?)?;
     Ok(())
   }
 
   fn remove_file(&mut self, path: &[u8]) -> Result<(), Error> {
-    fs::remove_file(self.absolute_path(path)?).map_err(Into::into)
+    fs::remove_file(self.resolve(path)?).map_err(Into::into)
   }
 
   fn rename(&mut self, from: &[u8], to: &[u8]) -> Result<(), Error> {
-    let from_abs = self.absolute_path(from)?;
-    let to_abs = self.prepare_destination_path(to)?;
-    fs::rename(from_abs, to_abs).map_err(Into::into)
+    fs::rename(self.resolve(from)?, self.resolve_mut(to)?).map_err(Into::into)
   }
 
-  fn set_permissions(&mut self, path: &[u8], mode: u32) -> Result<(), Error> {
-    let abs_path = self.absolute_path(path)?;
+  fn set_permissions(&mut self, path: &[u8], _mode: u32) -> Result<(), Error> {
+    let path = self.resolve(path)?;
     #[cfg(unix)]
     {
-      use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-      fs::set_permissions(abs_path, Permissions::from_mode(mode))?;
+      use std::os::unix::fs::PermissionsExt;
+      fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     }
     #[cfg(not(unix))]
     {
-      // On non-unix systems, we just ignore the mode for now.
-      // This prevents errors when applying patches created on Linux to Windows.
-      let _ = (abs_path, mode);
+      let _ = path;
     }
     Ok(())
   }

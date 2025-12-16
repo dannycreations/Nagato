@@ -5,7 +5,6 @@ use nagato_core::error::{Error, ErrorKind};
 use crate::{Hunk, Lexer, LexerItem, Line, LineKind, Patch, TokenKind};
 
 pub struct Parser<'a> {
-  // The parser now consumes `LexerItem`s, giving it access to line numbers for all tokens.
   tokens: Peekable<Lexer<'a>>,
 }
 
@@ -17,7 +16,6 @@ impl<'a> Parser<'a> {
   }
 
   fn parse_header(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
-    // The logic now correctly peeks at `LexerItem.token` to decide whether to continue parsing the header.
     while let Some(Ok(item)) = self.tokens.peek() {
       match &item.token {
         TokenKind::FileHeader { old_file, new_file } => {
@@ -64,8 +62,8 @@ impl<'a> Parser<'a> {
           patch.old_file = old_file;
           patch.new_file = new_file;
           patch.binary = true;
-          self.tokens.next(); // Consume the `Binary` token.
-          return Ok(()); // Binary patches have no hunks, so we're done.
+          self.tokens.next();
+          return Ok(());
         }
         _ => break,
       }
@@ -76,9 +74,6 @@ impl<'a> Parser<'a> {
 
   fn parse_hunks(&mut self, patch: &mut Patch<'a>) -> Result<(), Error> {
     while self.peek_is(|t| matches!(t, TokenKind::HunkHeader { .. })) {
-      // The main `patch` object is now passed down into `parse_hunk`. This ensures
-      // that any "No newline" flags encountered while parsing the hunk's lines
-      // are set on the correct `Patch` instance.
       let hunk = self.parse_hunk(patch)?;
       patch.hunks.push(hunk);
     }
@@ -89,8 +84,6 @@ impl<'a> Parser<'a> {
     &mut self,
     patch: &mut Patch<'a>,
   ) -> Result<(), Error> {
-    // We now get the starting line number from the first token of the hunk.
-    // This is crucial for correctly reporting errors in headerless patches.
     let start_line_num = self
       .tokens
       .peek()
@@ -115,9 +108,6 @@ impl<'a> Parser<'a> {
         old_span,
         new_span,
         lines,
-        // The line number is now correctly sourced from the first line of the hunk content.
-        // We subtract 1 to simulate a "header" line before the content, aligning it with
-        // the error calculation logic in `Applier::find_hunk_match`.
         patch_line_num: start_line_num.saturating_sub(1),
       });
     }
@@ -169,9 +159,6 @@ impl<'a> Parser<'a> {
             text: s,
           });
         }
-        // The logic for handling "No newline" is now much simpler. The parser
-        // just needs to check for the specific tokens and set the corresponding
-        // flag on the patch.
         TokenKind::OldFileNoNewline => {
           patch.old_file_no_newline = true;
         }
@@ -186,7 +173,6 @@ impl<'a> Parser<'a> {
   }
 
   fn parse_hunk(&mut self, patch: &mut Patch<'a>) -> Result<Hunk<'a>, Error> {
-    // The parser now consumes a `LexerItem` and extracts both the token and the line number.
     let (old_line, old_span, new_line, new_span, patch_line_num) =
       match self.tokens.next().ok_or(Error {
         line: None,
@@ -211,9 +197,6 @@ impl<'a> Parser<'a> {
       };
 
     let mut lines = Vec::with_capacity((old_span + new_span) as usize);
-    // The dummy patch is no longer needed. We pass the real `patch` object directly
-    // to `parse_hunk_lines`, ensuring that the `old_file_no_newline` and
-    // `new_file_no_newline` flags are set on the correct instance.
     let (actual_old_span, actual_new_span) =
       self.parse_hunk_lines(&mut lines, patch)?;
 
@@ -242,9 +225,6 @@ impl<'a> Parser<'a> {
     }
   }
 
-  // The `peek_is` function is simplified to return a `bool`. It now only checks
-  // for `Ok` values, letting subsequent calls to `next()` handle any `Err`
-  // variants. This avoids the need to clone an error, which is no longer possible.
   fn peek_is(&mut self, check: impl Fn(&TokenKind<'a>) -> bool) -> bool {
     if let Some(Ok(item)) = self.tokens.peek() {
       check(&item.token)

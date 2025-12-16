@@ -67,18 +67,12 @@ pub enum TokenKind<'a> {
   },
 }
 
-// I'm refactoring the `Line` struct to remove the `line_num` field.
-// This reduces the memory footprint of each `Line` instance.
-// The line number can be calculated dynamically when needed for error reporting.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line<'a> {
   pub kind: LineKind,
   pub text: &'a [u8],
 }
 
-// This new enum represents the type of a line in a hunk.
-// It was previously part of the `Line` enum itself, but has been
-// extracted to be a field within the new `Line` struct.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LineKind {
   Addition,
@@ -99,7 +93,7 @@ pub struct Hunk<'a> {
   pub new_span: u32,
   /// The lines in the hunk.
   pub lines: Vec<Line<'a>>,
-  // This will be populated by the parser using the line number from the LexerItem.
+  /// This will be populated by the parser using the line number from the LexerItem.
   pub patch_line_num: u32,
 }
 

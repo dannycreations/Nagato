@@ -14,23 +14,15 @@ pub struct LexerItem<'a> {
 pub struct Lexer<'a> {
   lines: bstr::Lines<'a>,
   line_num: u32,
-  // This state is required to correctly interpret the "No newline at end of file"
-  // message. The lexer now tracks whether the last content line seen was for the
-  // new file (`+` or context) or the old file (`-`).
   last_line_was_new_file: bool,
 }
 
 fn strip_git_prefix(s: &[u8]) -> &[u8] {
-  // Git diffs often prefix file paths with "a/" or "b/". This function
-  // removes them to get the clean file path. It's more efficient than
-  // multiple `strip_prefix` calls.
   s.strip_prefix(b"a/")
     .or_else(|| s.strip_prefix(b"b/"))
     .unwrap_or(s)
 }
 
-// This is a more efficient implementation that parses a u32 from a byte slice
-// without allocating a string. It's used in parsing hunk headers and percentages.
 fn parse_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
   let mut num = 0u32;
   let mut i = 0;
@@ -47,13 +39,30 @@ fn parse_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
   }
 }
 
+fn parse_octal_mode(s: &[u8]) -> Result<u32, ErrorKind> {
+  if s.is_empty() {
+    return Err(ErrorKind::InvalidFileMode);
+  }
+  let mut mode = 0u32;
+  for &digit in s {
+    if (b'0'..=b'7').contains(&digit) {
+      mode = mode
+        .checked_mul(8)
+        .and_then(|m| m.checked_add(u32::from(digit - b'0')))
+        .ok_or(ErrorKind::InvalidFileMode)?;
+    } else {
+      return Err(ErrorKind::InvalidFileMode);
+    }
+  }
+  Ok(mode)
+}
+
 impl<'a> Lexer<'a> {
   #[doc(hidden)]
   pub fn new(input: &'a [u8]) -> Self {
     Lexer {
       lines: input.lines(),
       line_num: 0,
-      // The initial state is set to `false`. This will be updated as hunk lines are processed.
       last_line_was_new_file: false,
     }
   }
@@ -62,36 +71,7 @@ impl<'a> Lexer<'a> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
-    // Fast path: Check the first byte of the line.
-    // Most lines in a patch are additions (+), deletions (-), or context (space).
-    // Checking this first avoids the more expensive search for these common cases.
-    if let Some(&first_byte) = line.first() {
-      match first_byte {
-        b'+' if !line.starts_with(b"+++ ") => {
-          self.last_line_was_new_file = true;
-          return Some(Ok(LexerItem {
-            token: TokenKind::Addition(&line[1..]),
-            line_num,
-          }));
-        }
-        b'-' if !line.starts_with(b"--- ") => {
-          self.last_line_was_new_file = false;
-          return Some(Ok(LexerItem {
-            token: TokenKind::Deletion(&line[1..]),
-            line_num,
-          }));
-        }
-        b' ' => {
-          self.last_line_was_new_file = true;
-          return Some(Ok(LexerItem {
-            token: TokenKind::Context(&line[1..]),
-            line_num,
-          }));
-        }
-        _ => {}
-      }
-    } else {
-      // Empty line is treated as context
+    if line.is_empty() {
       self.last_line_was_new_file = true;
       return Some(Ok(LexerItem {
         token: TokenKind::Context(&[]),
@@ -99,60 +79,119 @@ impl<'a> Lexer<'a> {
       }));
     }
 
-    // Replace Aho-Corasick with simple prefix matching.
-    // Order matters for overlapping prefixes (longest first).
-    let token_result: Result<TokenKind, ErrorKind> = if let Some(rest) =
-      line.strip_prefix(b"diff --git ")
-    {
-      self.parse_file_header(rest)
-    } else if let Some(rest) = line.strip_prefix(b"index ") {
-      self.parse_index_line(rest)
-    } else if let Some(rest) = line.strip_prefix(b"--- ") {
-      Ok(TokenKind::OldFile(strip_git_prefix(rest)))
-    } else if let Some(rest) = line.strip_prefix(b"+++ ") {
-      Ok(TokenKind::NewFile(strip_git_prefix(rest)))
-    } else if let Some(rest) = line.strip_prefix(b"@@ ") {
-      self.parse_hunk_header(rest)
-    } else if let Some(rest) = line.strip_prefix(b"new file mode ") {
-      self.parse_octal_mode(rest).map(TokenKind::NewFileMode)
-    } else if let Some(rest) = line.strip_prefix(b"new mode ") {
-      self.parse_octal_mode(rest).map(TokenKind::NewFileMode)
-    } else if let Some(rest) = line.strip_prefix(b"old file mode ") {
-      self.parse_octal_mode(rest).map(TokenKind::OldFileMode)
-    } else if let Some(rest) = line.strip_prefix(b"old mode ") {
-      self.parse_octal_mode(rest).map(TokenKind::OldFileMode)
-    } else if let Some(rest) = line.strip_prefix(b"deleted file mode ") {
-      self.parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
-    } else if let Some(rest) = line.strip_prefix(b"deleted mode ") {
-      self.parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
-    } else if let Some(rest) = line.strip_prefix(b"rename from ") {
-      Ok(TokenKind::RenameFrom(rest))
-    } else if let Some(rest) = line.strip_prefix(b"rename to ") {
-      Ok(TokenKind::RenameTo(rest))
-    } else if let Some(rest) = line.strip_prefix(b"copy from ") {
-      Ok(TokenKind::CopyFrom(rest))
-    } else if let Some(rest) = line.strip_prefix(b"copy to ") {
-      Ok(TokenKind::CopyTo(rest))
-    } else if let Some(rest) = line.strip_prefix(b"similarity index ") {
-      self.parse_percentage(rest).map(TokenKind::Similarity)
-    } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
-      self.parse_percentage(rest).map(TokenKind::Dissimilarity)
-    } else if let Some(rest) = line.strip_prefix(b"Binary files ") {
-      if let Some(line_content) = rest.strip_suffix(b" differ") {
-        let mut parts = line_content.split_str(b" and ");
-        if let (Some(old_file), Some(new_file)) = (parts.next(), parts.next()) {
-          Ok(TokenKind::Binary {
-            old_file: strip_git_prefix(old_file),
-            new_file: strip_git_prefix(new_file),
-          })
+    let token_result: Result<TokenKind, ErrorKind> = match line[0] {
+      b'+' => {
+        if let Some(rest) = line.strip_prefix(b"+++ ") {
+          Ok(TokenKind::NewFile(strip_git_prefix(rest)))
         } else {
-          Err(ErrorKind::InvalidBinaryFilesLine)
+          self.last_line_was_new_file = true;
+          Ok(TokenKind::Addition(&line[1..]))
         }
-      } else {
-        Err(ErrorKind::InvalidBinaryFilesLine)
       }
-    } else {
-      self.parse_non_keyword_line(line)
+      b'-' => {
+        if let Some(rest) = line.strip_prefix(b"--- ") {
+          Ok(TokenKind::OldFile(strip_git_prefix(rest)))
+        } else {
+          self.last_line_was_new_file = false;
+          Ok(TokenKind::Deletion(&line[1..]))
+        }
+      }
+      b' ' => {
+        self.last_line_was_new_file = true;
+        Ok(TokenKind::Context(&line[1..]))
+      }
+      b'@' => {
+        if let Some(rest) = line.strip_prefix(b"@@ ") {
+          self.parse_hunk_header(rest)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'd' => {
+        if let Some(rest) = line.strip_prefix(b"diff --git ") {
+          self.parse_file_header(rest)
+        } else if let Some(rest) = line.strip_prefix(b"deleted file mode ") {
+          parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
+        } else if let Some(rest) = line.strip_prefix(b"deleted mode ") {
+          parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
+        } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
+          self.parse_percentage(rest).map(TokenKind::Dissimilarity)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'i' => {
+        if let Some(rest) = line.strip_prefix(b"index ") {
+          self.parse_index_line(rest)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'n' => {
+        if let Some(rest) = line.strip_prefix(b"new file mode ") {
+          parse_octal_mode(rest).map(TokenKind::NewFileMode)
+        } else if let Some(rest) = line.strip_prefix(b"new mode ") {
+          parse_octal_mode(rest).map(TokenKind::NewFileMode)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'o' => {
+        if let Some(rest) = line.strip_prefix(b"old file mode ") {
+          parse_octal_mode(rest).map(TokenKind::OldFileMode)
+        } else if let Some(rest) = line.strip_prefix(b"old mode ") {
+          parse_octal_mode(rest).map(TokenKind::OldFileMode)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'r' => {
+        if let Some(rest) = line.strip_prefix(b"rename from ") {
+          Ok(TokenKind::RenameFrom(rest))
+        } else if let Some(rest) = line.strip_prefix(b"rename to ") {
+          Ok(TokenKind::RenameTo(rest))
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'c' => {
+        if let Some(rest) = line.strip_prefix(b"copy from ") {
+          Ok(TokenKind::CopyFrom(rest))
+        } else if let Some(rest) = line.strip_prefix(b"copy to ") {
+          Ok(TokenKind::CopyTo(rest))
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b's' => {
+        if let Some(rest) = line.strip_prefix(b"similarity index ") {
+          self.parse_percentage(rest).map(TokenKind::Similarity)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'B' => {
+        if let Some(rest) = line.strip_prefix(b"Binary files ") {
+          if let Some(line_content) = rest.strip_suffix(b" differ") {
+            let mut parts = line_content.split_str(b" and ");
+            if let (Some(old_file), Some(new_file)) =
+              (parts.next(), parts.next())
+            {
+              Ok(TokenKind::Binary {
+                old_file: strip_git_prefix(old_file),
+                new_file: strip_git_prefix(new_file),
+              })
+            } else {
+              Err(ErrorKind::InvalidBinaryFilesLine)
+            }
+          } else {
+            Err(ErrorKind::InvalidBinaryFilesLine)
+          }
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      _ => self.parse_non_keyword_line(line),
     };
 
     Some(
@@ -192,14 +231,10 @@ impl<'a> Lexer<'a> {
     Ok((line, span))
   }
 
-  // The hunk header parsing is now more efficient by working directly on byte slices,
-  // which avoids the overhead of string conversion and validation.
   fn parse_hunk_header(
     &mut self,
     header: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    // A hunk header marks the beginning of a new content section, so we reset
-    // the context-tracking state here.
     self.last_line_was_new_file = false;
     let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
     let content = &header[..content_end];
@@ -234,30 +269,10 @@ impl<'a> Lexer<'a> {
     Ok(num)
   }
 
-  fn parse_octal_mode(&self, s: &[u8]) -> Result<u32, ErrorKind> {
-    if s.is_empty() {
-      return Err(ErrorKind::InvalidFileMode);
-    }
-    let mut mode = 0u32;
-    for &digit in s {
-      if (b'0'..=b'7').contains(&digit) {
-        mode = mode
-          .checked_mul(8)
-          .and_then(|m| m.checked_add(u32::from(digit - b'0')))
-          .ok_or(ErrorKind::InvalidFileMode)?;
-      } else {
-        return Err(ErrorKind::InvalidFileMode);
-      }
-    }
-    Ok(mode)
-  }
-
   fn parse_file_header(
     &self,
     rest: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    // The logic is now more robust, using `strip_git_prefix` to handle file
-    // paths that may or may not have the `a/` or `b/` prefixes.
     let mut parts = rest.fields();
     let old_file = parts.next().map(strip_git_prefix);
     let new_file = parts.next().map(strip_git_prefix);
@@ -269,9 +284,6 @@ impl<'a> Lexer<'a> {
     }
   }
 
-  // This function is optimized to parse the index line from a byte slice. It converts
-  // the hash part to a string slice as required by the `Token::Index` struct,
-  // but still avoids string allocation for parsing the mode.
   fn parse_index_line(
     &self,
     rest: &'a [u8],
@@ -281,7 +293,7 @@ impl<'a> Lexer<'a> {
     let (old_hash, new_hash) = hashes_bytes
       .split_once_str(b"..")
       .ok_or(ErrorKind::InvalidIndexHashRange)?;
-    let mode = parts.next().map(|s| self.parse_octal_mode(s)).transpose()?;
+    let mode = parts.next().map(parse_octal_mode).transpose()?;
     Ok(TokenKind::Index {
       old_hash,
       new_hash,
@@ -295,17 +307,12 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     match line.first() {
       Some(b'\\') if line == b"\\ No newline at end of file" => {
-        // The logic is now self-contained in the lexer. Based on the state
-        // of `last_line_was_new_file`, we emit a specific token, which simplifies the parser.
         if self.last_line_was_new_file {
           Ok(TokenKind::NewFileNoNewline)
         } else {
           Ok(TokenKind::OldFileNoNewline)
         }
       }
-      // The fallback logic for parsing a header-less diff is now more memory-efficient.
-      // Instead of collecting parts into a `Vec`, it uses an iterator directly,
-      // avoiding heap allocation for every non-keyword line.
       _ => {
         let mut parts = line.fields();
         match (parts.next(), parts.next(), parts.next()) {
