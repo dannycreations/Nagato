@@ -4,7 +4,7 @@ use std::{
 };
 
 use bstr::ByteSlice;
-use memchr::memmem;
+use memchr::{memchr, memchr_iter, memmem};
 use memmap2::Mmap;
 use nagato_core::{
   error::{Error, ErrorKind},
@@ -56,6 +56,7 @@ impl<'a> Hunk<'a> {
   }
 }
 
+#[inline(always)]
 fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
   if source.is_empty() {
     return None;
@@ -88,6 +89,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
+  #[inline]
   fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
     if !self.is_at_start_of_file {
       self.output.write_all(b"\n")?;
@@ -97,6 +99,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
+  #[inline]
   fn consume_line(&mut self) -> Option<&'s [u8]> {
     let (line, next_source) = get_line(self.source)?;
     self.source = next_source;
@@ -105,6 +108,38 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
     let target_line = hunk.old_line.saturating_sub(1);
+
+    // Bulk skip lines if possible
+    let lines_to_skip = target_line.saturating_sub(self.current_source_line);
+    if lines_to_skip > 0 {
+      let mut count = 0;
+      let mut end_offset = 0;
+      for pos in memchr_iter(b'\n', self.source) {
+        count += 1;
+        end_offset = pos + 1;
+        if count == lines_to_skip {
+          break;
+        }
+      }
+
+      if count == lines_to_skip {
+        let block = &self.source[..end_offset];
+        // Only use bulk write if no CR, to preserve normalization behavior
+        if memchr(b'\r', block).is_none() {
+          if !self.is_at_start_of_file {
+            self.output.write_all(b"\n")?;
+          }
+          // block ends with \n, strip it to match write_line behavior
+          self.output.write_all(&block[..block.len() - 1])?;
+          self.is_at_start_of_file = false;
+
+          self.source = &self.source[end_offset..];
+          self.current_source_line += count;
+          return Ok(());
+        }
+      }
+    }
+
     while self.current_source_line < target_line {
       if let Some(line) = self.consume_line() {
         self.write_line(line)?;
@@ -122,6 +157,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
+  #[inline]
   fn verify_match<'p>(
     &self,
     mut source: &'s [u8],
@@ -129,14 +165,32 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     hunk: &Hunk,
   ) -> Result<&'s [u8], Error> {
     for (offset, hunk_line) in lines_to_match {
-      if let Some((source_line, next_source)) = get_line(source) {
-        if source_line != hunk_line.text {
+      let expected = hunk_line.text;
+      let len = expected.len();
+
+      if source.len() < len || &source[..len] != expected {
+        return Err(Error {
+          line: Some(hunk.patch_line_num + 1 + offset as u32),
+          kind: ErrorKind::CouldNotApplyHunk,
+        });
+      }
+
+      let after = &source[len..];
+      if after.is_empty() {
+        source = after;
+      } else if after[0] == b'\n' {
+        source = &after[1..];
+      } else if after[0] == b'\r' {
+        if after.get(1) == Some(&b'\n') {
+          source = &after[2..];
+        } else if after.len() == 1 {
+          source = &after[1..];
+        } else {
           return Err(Error {
             line: Some(hunk.patch_line_num + 1 + offset as u32),
             kind: ErrorKind::CouldNotApplyHunk,
           });
         }
-        source = next_source;
       } else {
         return Err(Error {
           line: Some(hunk.patch_line_num + 1 + offset as u32),
@@ -216,9 +270,24 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
       if let Ok(final_source) = result {
         let skipped = &self.source[..match_pos];
-        for line in skipped.lines() {
-          self.write_line(line)?;
-          self.current_source_line += 1;
+
+        // Bulk write skipped lines if possible
+        if !skipped.is_empty() && memchr(b'\r', skipped).is_none() {
+          let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
+
+          if !self.is_at_start_of_file {
+            self.output.write_all(b"\n")?;
+          }
+          // skipped ends with \n because match is at line boundary
+          self.output.write_all(&skipped[..skipped.len() - 1])?;
+          self.is_at_start_of_file = false;
+
+          self.current_source_line += lines_skipped;
+        } else {
+          for line in skipped.lines() {
+            self.write_line(line)?;
+            self.current_source_line += 1;
+          }
         }
 
         self.source = final_source;
@@ -309,16 +378,18 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       for fragment in &patch.binary_fragments {
         match fragment.kind {
           BinaryPatchKind::Literal => {
-            let decoded = binary::decode_base85(&fragment.data)?;
-            self.output.write_all(&decoded)?;
+            binary::decode_base85(&fragment.data, &mut self.output)?;
             applied = true;
             break;
           }
           BinaryPatchKind::Delta => {
-            let decoded = binary::decode_base85(&fragment.data)?;
-            match binary::apply_delta(&decoded, self.source) {
-              Ok(result) => {
-                self.output.write_all(&result)?;
+            let mut decoded = binary::new_base85_decoder(&fragment.data);
+            match binary::apply_delta(
+              &mut decoded,
+              self.source,
+              &mut self.output,
+            ) {
+              Ok(_) => {
                 applied = true;
                 break;
               }

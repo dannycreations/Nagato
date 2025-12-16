@@ -23,7 +23,8 @@ impl AtomicWriter {
       )
     })?;
     let tempfile = NamedTempFile::new_in(parent)?;
-    let writer = BufWriter::with_capacity(128 * 1024, tempfile);
+    // Increased buffer size to 1MB for better performance on large writes
+    let writer = BufWriter::with_capacity(1024 * 1024, tempfile);
 
     Ok(Self {
       writer,
@@ -88,16 +89,13 @@ impl FileSystem {
     fs::rename(self.resolve(from)?, self.resolve_mut(to)?).map_err(Into::into)
   }
 
-  pub fn set_permissions(&self, path: &[u8], _mode: u32) -> Result<(), Error> {
-    let path = self.resolve(path)?;
+  #[allow(unused_variables)]
+  pub fn set_permissions(&self, path: &[u8], mode: u32) -> Result<(), Error> {
     #[cfg(unix)]
     {
+      let path = self.resolve(path)?;
       use std::os::unix::fs::PermissionsExt;
       fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
-    }
-    #[cfg(not(unix))]
-    {
-      let _ = path;
     }
     Ok(())
   }

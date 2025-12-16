@@ -25,35 +25,37 @@ fn strip_git_prefix(s: &[u8]) -> &[u8] {
 }
 
 fn parse_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
-  let mut num = 0u32;
+  if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+    return None;
+  }
+  let mut num: u32 = 0;
   let mut i = 0;
-  while i < bytes.len() && bytes[i].is_ascii_digit() {
-    num = num
-      .checked_mul(10)?
-      .checked_add(u32::from(bytes[i] - b'0'))?;
+  while i < bytes.len() {
+    let b = bytes[i];
+    if !b.is_ascii_digit() {
+      break;
+    }
+    num = num.checked_mul(10)?.checked_add((b - b'0') as u32)?;
     i += 1;
   }
-  if i == 0 {
-    None
-  } else {
-    Some((num, &bytes[i..]))
-  }
+  Some((num, &bytes[i..]))
 }
 
 fn parse_u64(bytes: &[u8]) -> Option<(u64, &[u8])> {
-  let mut num = 0u64;
+  if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+    return None;
+  }
+  let mut num: u64 = 0;
   let mut i = 0;
-  while i < bytes.len() && bytes[i].is_ascii_digit() {
-    num = num
-      .checked_mul(10)?
-      .checked_add(u64::from(bytes[i] - b'0'))?;
+  while i < bytes.len() {
+    let b = bytes[i];
+    if !b.is_ascii_digit() {
+      break;
+    }
+    num = num.checked_mul(10)?.checked_add((b - b'0') as u64)?;
     i += 1;
   }
-  if i == 0 {
-    None
-  } else {
-    Some((num, &bytes[i..]))
-  }
+  Some((num, &bytes[i..]))
 }
 
 fn parse_octal_mode(s: &[u8]) -> Result<u32, ErrorKind> {

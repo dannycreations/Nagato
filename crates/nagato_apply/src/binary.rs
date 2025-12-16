@@ -1,9 +1,9 @@
-use std::io::Read;
+use std::io::{self, Read, Write};
 
 use flate2::read::ZlibDecoder;
 use nagato_core::error::{Error, ErrorKind};
 
-// Git's base85 alphabet
+/// Git's base85 alphabet
 const ENCODE_MAP: &[u8; 85] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
 
 fn decode_char(c: u8) -> Option<u8> {
@@ -20,98 +20,160 @@ fn decode_len_char(c: u8) -> Option<usize> {
   }
 }
 
-fn decode_base85_raw(lines: &[&[u8]]) -> Result<Vec<u8>, Error> {
-  let mut output = Vec::new();
+#[derive(Debug)]
+struct InvalidBinaryLineError;
 
-  for line in lines {
-    if line.is_empty() {
-      continue;
-    }
-
-    let len_char = line[0];
-    let len = match decode_len_char(len_char) {
-      Some(l) => l,
-      None => {
-        return Err(Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryFilesLine,
-        })
-      }
-    };
-
-    let data = &line[1..];
-    let mut chunk_out = Vec::new();
-
-    for chunk in data.chunks(5) {
-      if chunk.len() < 5 {
-        break;
-      }
-
-      let mut val: u32 = 0;
-      for &c in chunk {
-        val = val.checked_mul(85).unwrap_or(0);
-        val += match decode_char(c) {
-          Some(v) => v as u32,
-          None => {
-            return Err(Error {
-              line: None,
-              kind: ErrorKind::InvalidBinaryFilesLine,
-            })
-          }
-        };
-      }
-
-      chunk_out.push((val >> 24) as u8);
-      chunk_out.push((val >> 16) as u8);
-      chunk_out.push((val >> 8) as u8);
-      chunk_out.push(val as u8);
-    }
-
-    if chunk_out.len() > len {
-      chunk_out.truncate(len);
-    }
-    output.extend_from_slice(&chunk_out);
+impl std::fmt::Display for InvalidBinaryLineError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "Invalid binary files line")
   }
-
-  Ok(output)
 }
 
-pub fn decode_base85(lines: &[&[u8]]) -> Result<Vec<u8>, Error> {
-  let compressed = decode_base85_raw(lines)?;
-  let mut decoder = ZlibDecoder::new(&compressed[..]);
-  let mut decompressed = Vec::new();
-  decoder.read_to_end(&mut decompressed).map_err(|e| Error {
-    line: None,
-    kind: ErrorKind::Io(e),
+impl std::error::Error for InvalidBinaryLineError {}
+
+pub struct Base85Reader<'a> {
+  lines: std::slice::Iter<'a, &'a [u8]>,
+  buffer: Vec<u8>,
+  pos: usize,
+}
+
+impl<'a> Base85Reader<'a> {
+  pub fn new(lines: &'a [&'a [u8]]) -> Self {
+    Self {
+      lines: lines.iter(),
+      buffer: Vec::new(),
+      pos: 0,
+    }
+  }
+}
+
+impl<'a> Read for Base85Reader<'a> {
+  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    loop {
+      if self.pos < self.buffer.len() {
+        let len = std::cmp::min(buf.len(), self.buffer.len() - self.pos);
+        buf[..len].copy_from_slice(&self.buffer[self.pos..self.pos + len]);
+        self.pos += len;
+        return Ok(len);
+      }
+
+      let line = match self.lines.next() {
+        Some(l) => l,
+        None => return Ok(0),
+      };
+
+      if line.is_empty() {
+        continue;
+      }
+
+      self.buffer.clear();
+      self.pos = 0;
+
+      let len_char = line[0];
+      let len = decode_len_char(len_char).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+      })?;
+
+      let data = &line[1..];
+      for chunk in data.chunks(5) {
+        if chunk.len() < 5 {
+          break;
+        }
+
+        let mut val: u32 = 0;
+        for &c in chunk {
+          val = val.checked_mul(85).unwrap_or(0);
+          val += decode_char(c).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+          })? as u32;
+        }
+
+        self.buffer.push((val >> 24) as u8);
+        self.buffer.push((val >> 16) as u8);
+        self.buffer.push((val >> 8) as u8);
+        self.buffer.push(val as u8);
+      }
+
+      if self.buffer.len() > len {
+        self.buffer.truncate(len);
+      }
+    }
+  }
+}
+
+pub fn new_base85_decoder<'a>(
+  lines: &'a [&'a [u8]],
+) -> ZlibDecoder<Base85Reader<'a>> {
+  ZlibDecoder::new(Base85Reader::new(lines))
+}
+
+pub fn decode_base85(
+  lines: &[&[u8]],
+  writer: &mut impl Write,
+) -> Result<(), Error> {
+  let mut decoder = new_base85_decoder(lines);
+  io::copy(&mut decoder, writer).map_err(|e| {
+    if e
+      .get_ref()
+      .map(|r| r.is::<InvalidBinaryLineError>())
+      .unwrap_or(false)
+    {
+      Error {
+        line: None,
+        kind: ErrorKind::InvalidBinaryFilesLine,
+      }
+    } else {
+      Error {
+        line: None,
+        kind: ErrorKind::Io(e),
+      }
+    }
   })?;
-  Ok(decompressed)
+  Ok(())
 }
 
-fn read_variable_length_int(data: &[u8]) -> Result<(u64, usize), Error> {
+fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
   let mut result: u64 = 0;
   let mut shift = 0;
-  let mut bytes_read = 0;
+  let mut byte_buf = [0u8; 1];
 
-  for &byte in data {
-    bytes_read += 1;
-    result |= ((byte & 0x7f) as u64) << shift;
+  loop {
+    reader.read_exact(&mut byte_buf).map_err(|e| {
+      if e.kind() == io::ErrorKind::UnexpectedEof {
+        Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        }
+      } else {
+        Error {
+          line: None,
+          kind: ErrorKind::Io(e),
+        }
+      }
+    })?;
+
+    let byte = byte_buf[0];
+    let byte_val = (byte & 0x7f) as u64;
+    if shift >= 64 || (byte_val << shift) >> shift != byte_val {
+      return Err(Error {
+        line: None,
+        kind: ErrorKind::InvalidBinaryPatch,
+      });
+    }
+    result |= byte_val << shift;
     shift += 7;
     if (byte & 0x80) == 0 {
-      return Ok((result, bytes_read));
+      return Ok(result);
     }
   }
-
-  Err(Error {
-    line: None,
-    kind: ErrorKind::InvalidBinaryPatch,
-  })
 }
 
-pub fn apply_delta(delta: &[u8], source: &[u8]) -> Result<Vec<u8>, Error> {
-  let mut pos = 0;
-
-  let (source_size, bytes_read) = read_variable_length_int(&delta[pos..])?;
-  pos += bytes_read;
+pub fn apply_delta(
+  mut delta: impl Read,
+  source: &[u8],
+  writer: &mut impl Write,
+) -> Result<(), Error> {
+  let source_size = read_variable_length_int(&mut delta)?;
 
   if source_size != source.len() as u64 {
     return Err(Error {
@@ -120,89 +182,77 @@ pub fn apply_delta(delta: &[u8], source: &[u8]) -> Result<Vec<u8>, Error> {
     });
   }
 
-  let (target_size, bytes_read) = read_variable_length_int(&delta[pos..])?;
-  pos += bytes_read;
+  let target_size = read_variable_length_int(&mut delta)?;
 
-  let mut output = Vec::with_capacity(target_size as usize);
+  let mut written: u64 = 0;
+  let mut cmd_buf = [0u8; 1];
 
-  while pos < delta.len() {
-    let cmd = delta[pos];
-    pos += 1;
+  loop {
+    match delta.read_exact(&mut cmd_buf) {
+      Ok(_) => {}
+      Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+      Err(e) => {
+        return Err(Error {
+          line: None,
+          kind: ErrorKind::Io(e),
+        })
+      }
+    }
+    let cmd = cmd_buf[0];
 
     if (cmd & 0x80) != 0 {
       let mut offset: usize = 0;
       let mut size: usize = 0;
 
       if (cmd & 0x01) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        offset |= delta[pos] as usize;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        offset |= cmd_buf[0] as usize;
       }
       if (cmd & 0x02) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        offset |= (delta[pos] as usize) << 8;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        offset |= (cmd_buf[0] as usize) << 8;
       }
       if (cmd & 0x04) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        offset |= (delta[pos] as usize) << 16;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        offset |= (cmd_buf[0] as usize) << 16;
       }
       if (cmd & 0x08) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        offset |= (delta[pos] as usize) << 24;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        offset |= (cmd_buf[0] as usize) << 24;
       }
 
       if (cmd & 0x10) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        size |= delta[pos] as usize;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        size |= cmd_buf[0] as usize;
       }
       if (cmd & 0x20) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        size |= (delta[pos] as usize) << 8;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        size |= (cmd_buf[0] as usize) << 8;
       }
       if (cmd & 0x40) != 0 {
-        if pos >= delta.len() {
-          return Err(Error {
-            line: None,
-            kind: ErrorKind::InvalidBinaryPatch,
-          });
-        }
-        size |= (delta[pos] as usize) << 16;
-        pos += 1;
+        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+        size |= (cmd_buf[0] as usize) << 16;
       }
 
       if size == 0 {
@@ -219,17 +269,17 @@ pub fn apply_delta(delta: &[u8], source: &[u8]) -> Result<Vec<u8>, Error> {
         });
       }
 
-      output.extend_from_slice(&source[offset..offset + size]);
+      writer.write_all(&source[offset..offset + size])?;
+      written += size as u64;
     } else if cmd != 0 {
       let size = cmd as usize;
-      if pos + size > delta.len() {
-        return Err(Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        });
-      }
-      output.extend_from_slice(&delta[pos..pos + size]);
-      pos += size;
+      let mut buf = vec![0u8; size]; // Small allocation for the literal data chunk
+      delta.read_exact(&mut buf).map_err(|_| Error {
+        line: None,
+        kind: ErrorKind::InvalidBinaryPatch,
+      })?;
+      writer.write_all(&buf)?;
+      written += size as u64;
     } else {
       return Err(Error {
         line: None,
@@ -238,12 +288,12 @@ pub fn apply_delta(delta: &[u8], source: &[u8]) -> Result<Vec<u8>, Error> {
     }
   }
 
-  if output.len() as u64 != target_size {
+  if written != target_size {
     return Err(Error {
       line: None,
       kind: ErrorKind::InvalidBinaryPatch,
     });
   }
 
-  Ok(output)
+  Ok(())
 }
