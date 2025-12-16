@@ -82,10 +82,16 @@ impl<'a> Read for Base85Reader<'a> {
 
         let mut val: u32 = 0;
         for &c in chunk {
-          val = val.checked_mul(85).unwrap_or(0);
-          val += decode_char(c).ok_or_else(|| {
+          val = val.checked_mul(85).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
-          })? as u32;
+          })?;
+          val = val
+            .checked_add(decode_char(c).ok_or_else(|| {
+              io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+            })? as u32)
+            .ok_or_else(|| {
+              io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+            })?;
         }
 
         self.buffer.push((val >> 24) as u8);

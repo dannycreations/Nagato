@@ -130,7 +130,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
             self.output.write_all(b"\n")?;
           }
           // block ends with \n, strip it to match write_line behavior
-          self.output.write_all(&block[..block.len() - 1])?;
+          if !block.is_empty() {
+            self.output.write_all(&block[..block.len() - 1])?;
+          }
           self.is_at_start_of_file = false;
 
           self.source = &self.source[end_offset..];
@@ -279,7 +281,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
             self.output.write_all(b"\n")?;
           }
           // skipped ends with \n because match is at line boundary
-          self.output.write_all(&skipped[..skipped.len() - 1])?;
+          if !skipped.is_empty() {
+            self.output.write_all(&skipped[..skipped.len() - 1])?;
+          }
           self.is_at_start_of_file = false;
 
           self.current_source_line += lines_skipped;
@@ -459,6 +463,9 @@ fn read_source_or_empty(
   fs: &FileSystem,
   path: &[u8],
 ) -> Result<Option<Mmap>, Error> {
+  if path == b"/dev/null" {
+    return Ok(None);
+  }
   match fs.read(path) {
     Ok(mmap) => Ok(Some(mmap)),
     Err(Error {

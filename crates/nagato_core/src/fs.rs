@@ -1,7 +1,7 @@
 use std::{
   fs::{self, File},
   io::{self, BufWriter, Write},
-  path::{Path, PathBuf},
+  path::{Component, Path, PathBuf},
 };
 
 use memmap2::Mmap;
@@ -102,13 +102,26 @@ impl FileSystem {
 
   fn resolve(&self, path: &[u8]) -> Result<PathBuf, Error> {
     use bstr::ByteSlice;
-    path
-      .to_path()
-      .map(|p| self.root.join(p))
-      .map_err(|_| Error {
-        line: None,
-        kind: ErrorKind::InvalidPath,
-      })
+    let path = path.to_path().map_err(|_| Error {
+      line: None,
+      kind: ErrorKind::InvalidPath,
+    })?;
+
+    let mut dest = self.root.clone();
+    for component in path.components() {
+      match component {
+        Component::Normal(c) => dest.push(c),
+        Component::CurDir => {}
+        Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+          return Err(Error {
+            line: None,
+            kind: ErrorKind::InvalidPath,
+          });
+        }
+      }
+    }
+
+    Ok(dest)
   }
 
   fn resolve_mut(&self, path: &[u8]) -> Result<PathBuf, Error> {

@@ -1,5 +1,7 @@
 use std::fs;
 
+use nagato_core::error::ErrorKind;
+
 test_patch_ok!(
   applies_binary_patch_literal,
   initial_fs: {},
@@ -42,3 +44,52 @@ test_patch_ok!(
     );
   }
 );
+
+#[test]
+fn fails_on_base85_overflow() {
+  let diff = indoc::indoc!(
+    r#"
+      diff --git a/binary.dat b/binary.dat
+      new file mode 100644
+      index 0000000000000000000000000000000000000000..ffbe3091410c3be582675805a98a0118af8e6a6d
+      GIT binary patch
+      literal 4
+      ~~~~~
+      
+      literal 0
+      Hc-jL100001
+      "#
+  );
+
+  let dir = tempfile::Builder::new()
+    .prefix("test_overflow")
+    .tempdir()
+    .unwrap();
+  let fs = nagato_core::fs::FileSystem::new(dir.path());
+
+  let patch = nagato_apply::Parser::new(diff.as_bytes())
+    .next()
+    .unwrap()
+    .unwrap();
+
+  let result = nagato_apply::patch_file(&fs, patch, false);
+
+  match result {
+    Err(e) => {
+      let is_invalid_binary =
+        matches!(e.kind, ErrorKind::InvalidBinaryFilesLine);
+      let is_io_invalid_data = if let ErrorKind::Io(io_err) = &e.kind {
+        io_err.kind() == std::io::ErrorKind::InvalidData
+      } else {
+        false
+      };
+
+      assert!(
+        is_invalid_binary || is_io_invalid_data,
+        "Expected InvalidBinaryFilesLine or IO InvalidData, got {:?}",
+        e
+      );
+    }
+    Ok(_) => panic!("Expected overflow error"),
+  }
+}
