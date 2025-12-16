@@ -121,7 +121,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   fn find_hunk_match<'p>(
     &mut self,
     hunk: &Hunk<'p>,
-    lines_to_match: impl Iterator<Item = &'p Line<'p>> + Clone,
+    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
     first_line_to_match: &Line,
   ) -> Result<(), Error> {
     // This is the main search loop. It consumes lines from the source until a
@@ -151,20 +151,23 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       // The `lines_to_match` iterator is cloned here for the speculative match.
       // Since it was already advanced by one, it now represents the rest of the
       // lines that need to be matched.
-      for hunk_line in lines_to_match.clone() {
+      for (offset, hunk_line) in lines_to_match.clone() {
         if let Some(next_source_line) = source_clone.next() {
           if next_source_line != hunk_line.text {
             // HARD FAILURE: A partial match that then fails is a fatal error
             // for this hunk, as per `git apply` behavior.
             return Err(Error {
-              line: Some(hunk_line.line_num),
+              // Calculate the error line number dynamically.
+              // hunk.patch_line_num is the line number of the hunk header.
+              // We add 1 for the header itself, plus the offset of the line in the hunk.
+              line: Some(hunk.patch_line_num + 1 + offset as u32),
               kind: ErrorKind::CouldNotApplyHunk,
             });
           }
         } else {
           // End of source during a speculative match. This is also a hard failure.
           return Err(Error {
-            line: Some(hunk_line.line_num),
+            line: Some(hunk.patch_line_num + 1 + offset as u32),
             kind: ErrorKind::CouldNotApplyHunk,
           });
         }
@@ -187,8 +190,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let mut lines_to_match = hunk
       .lines
       .iter()
-      .filter(|l| !matches!(l.kind, LineKind::Addition));
-    let first_line_to_match = if let Some(line) = lines_to_match.next() {
+      .enumerate()
+      .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
+    let first_line_to_match = if let Some((_, line)) = lines_to_match.next() {
       line
     } else {
       // This is a pure-addition hunk. This case should be handled earlier in `process_hunk`,

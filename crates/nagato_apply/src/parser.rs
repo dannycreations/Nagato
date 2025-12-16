@@ -116,7 +116,9 @@ impl<'a> Parser<'a> {
         new_span,
         lines,
         // The line number is now correctly sourced from the first line of the hunk content.
-        patch_line_num: start_line_num,
+        // We subtract 1 to simulate a "header" line before the content, aligning it with
+        // the error calculation logic in `Applier::find_hunk_match`.
+        patch_line_num: start_line_num.saturating_sub(1),
       });
     }
     Ok(())
@@ -144,14 +146,12 @@ impl<'a> Parser<'a> {
     let mut new_span = 0;
 
     while let Some(Ok(item)) = self.tokens.peek() {
-      let line_num = item.line_num;
       match &item.token {
         TokenKind::Addition(s) => {
           new_span += 1;
           lines.push(Line {
             kind: LineKind::Addition,
             text: s,
-            line_num,
           });
         }
         TokenKind::Deletion(s) => {
@@ -159,7 +159,6 @@ impl<'a> Parser<'a> {
           lines.push(Line {
             kind: LineKind::Deletion,
             text: s,
-            line_num,
           });
         }
         TokenKind::Context(s) => {
@@ -168,7 +167,6 @@ impl<'a> Parser<'a> {
           lines.push(Line {
             kind: LineKind::Context,
             text: s,
-            line_num,
           });
         }
         // The logic for handling "No newline" is now much simpler. The parser

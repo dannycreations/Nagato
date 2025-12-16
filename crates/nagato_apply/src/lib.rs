@@ -67,15 +67,13 @@ pub enum TokenKind<'a> {
   },
 }
 
-// I'm refactoring the `Line` enum into a struct. This is a significant change
-// that allows each line to carry its own contextual information, specifically
-// its original line number from the patch file. This is the key to providing
-// precise, line-level error reporting.
+// I'm refactoring the `Line` struct to remove the `line_num` field.
+// This reduces the memory footprint of each `Line` instance.
+// The line number can be calculated dynamically when needed for error reporting.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line<'a> {
   pub kind: LineKind,
   pub text: &'a [u8],
-  pub line_num: u32,
 }
 
 // This new enum represents the type of a line in a hunk.
