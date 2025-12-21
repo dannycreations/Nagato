@@ -18,7 +18,7 @@ test_patch_err_with_line!(
   fails_with_correct_line_number_for_shortest_header,
   initial_fs: { "a.txt" => "line one\nline two\nline three\n" },
   diff: r#"
-    a/a.txt
+    file a/a.txt
 
     -line one
     -line two

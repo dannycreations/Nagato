@@ -44,10 +44,12 @@ impl AtomicWriter {
 }
 
 impl Write for AtomicWriter {
+  #[inline]
   fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
     self.writer.write(buf)
   }
 
+  #[inline]
   fn flush(&mut self) -> io::Result<()> {
     self.writer.flush()
   }
@@ -69,6 +71,7 @@ impl FileSystem {
 
   pub fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
     let file = File::open(self.resolve(path)?)?;
+    // SAFETY: We map the file into memory. The file must not be concurrently modified.
     unsafe { Mmap::map(&file) }.map_err(Into::into)
   }
 
@@ -107,7 +110,12 @@ impl FileSystem {
       kind: ErrorKind::InvalidPath,
     })?;
 
-    let mut dest = self.root.clone();
+    // Pre-calculate capacity to avoid reallocations
+    let mut dest = PathBuf::with_capacity(
+      self.root.as_os_str().len() + path.as_os_str().len() + 1,
+    );
+    dest.push(&self.root);
+
     for component in path.components() {
       match component {
         Component::Normal(c) => dest.push(c),

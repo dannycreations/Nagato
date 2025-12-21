@@ -12,75 +12,52 @@ pub struct LexerItem<'a> {
 
 #[doc(hidden)]
 pub struct Lexer<'a> {
-  lines: bstr::Lines<'a>,
+  input: &'a [u8],
+  pos: usize,
   line_num: u32,
   last_line_was_new_file: bool,
   in_binary_patch: bool,
 }
 
+#[inline(always)]
 fn strip_git_prefix(s: &[u8]) -> &[u8] {
   s.strip_prefix(b"a/")
     .or_else(|| s.strip_prefix(b"b/"))
     .unwrap_or(s)
 }
 
-fn parse_u32(bytes: &[u8]) -> Option<(u32, &[u8])> {
-  if bytes.is_empty() || !bytes[0].is_ascii_digit() {
-    return None;
-  }
-  let mut num: u32 = 0;
-  let mut i = 0;
-  while i < bytes.len() {
-    let b = bytes[i];
-    if !b.is_ascii_digit() {
-      break;
-    }
-    num = num.checked_mul(10)?.checked_add((b - b'0') as u32)?;
-    i += 1;
-  }
-  Some((num, &bytes[i..]))
-}
-
-fn parse_u64(bytes: &[u8]) -> Option<(u64, &[u8])> {
-  if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+#[inline]
+fn parse_int<T>(bytes: &[u8], radix: u32) -> Option<(T, &[u8])>
+where
+  T: TryFrom<u64> + Default + Copy,
+{
+  if bytes.is_empty() {
     return None;
   }
   let mut num: u64 = 0;
   let mut i = 0;
   while i < bytes.len() {
     let b = bytes[i];
-    if !b.is_ascii_digit() {
-      break;
-    }
-    num = num.checked_mul(10)?.checked_add((b - b'0') as u64)?;
+    let digit = match b {
+      b'0'..=b'9' if radix >= 10 => (b - b'0') as u32,
+      b'0'..=b'7' if radix == 8 => (b - b'0') as u32,
+      _ => break,
+    };
+    num = num.checked_mul(radix as u64)?.checked_add(digit as u64)?;
     i += 1;
   }
-  Some((num, &bytes[i..]))
-}
-
-fn parse_octal_mode(s: &[u8]) -> Result<u32, ErrorKind> {
-  if s.is_empty() {
-    return Err(ErrorKind::InvalidFileMode);
+  if i == 0 {
+    return None;
   }
-  let mut mode = 0u32;
-  for &digit in s {
-    if (b'0'..=b'7').contains(&digit) {
-      mode = mode
-        .checked_mul(8)
-        .and_then(|m| m.checked_add(u32::from(digit - b'0')))
-        .ok_or(ErrorKind::InvalidFileMode)?;
-    } else {
-      return Err(ErrorKind::InvalidFileMode);
-    }
-  }
-  Ok(mode)
+  Some((T::try_from(num).ok()?, &bytes[i..]))
 }
 
 impl<'a> Lexer<'a> {
   #[doc(hidden)]
   pub fn new(input: &'a [u8]) -> Self {
     Lexer {
-      lines: input.lines(),
+      input,
+      pos: 0,
       line_num: 0,
       last_line_was_new_file: false,
       in_binary_patch: false,
@@ -100,7 +77,7 @@ impl<'a> Lexer<'a> {
       }
 
       if let Some(rest) = line.strip_prefix(b"literal ") {
-        if let Some((size, _)) = parse_u64(rest) {
+        if let Some((size, _)) = parse_int::<u64>(rest, 10) {
           return Some(Ok(LexerItem {
             token: TokenKind::BinaryPatchType {
               kind: BinaryPatchKind::Literal,
@@ -110,7 +87,7 @@ impl<'a> Lexer<'a> {
           }));
         }
       } else if let Some(rest) = line.strip_prefix(b"delta ") {
-        if let Some((size, _)) = parse_u64(rest) {
+        if let Some((size, _)) = parse_int::<u64>(rest, 10) {
           return Some(Ok(LexerItem {
             token: TokenKind::BinaryPatchType {
               kind: BinaryPatchKind::Delta,
@@ -174,11 +151,26 @@ impl<'a> Lexer<'a> {
         if let Some(rest) = line.strip_prefix(b"diff --git ") {
           self.parse_file_header(rest)
         } else if let Some(rest) = line.strip_prefix(b"deleted file mode ") {
-          parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
+          parse_int::<u32>(rest, 8)
+            .map(|(m, _)| TokenKind::DeletedFileMode(m))
+            .ok_or(ErrorKind::InvalidFileMode)
         } else if let Some(rest) = line.strip_prefix(b"deleted mode ") {
-          parse_octal_mode(rest).map(TokenKind::DeletedFileMode)
+          parse_int::<u32>(rest, 8)
+            .map(|(m, _)| TokenKind::DeletedFileMode(m))
+            .ok_or(ErrorKind::InvalidFileMode)
         } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
           self.parse_percentage(rest).map(TokenKind::Dissimilarity)
+        } else {
+          self.parse_non_keyword_line(line)
+        }
+      }
+      b'f' => {
+        if let Some(rest) = line.strip_prefix(b"file ") {
+          let file = strip_git_prefix(rest.trim());
+          Ok(TokenKind::FileHeader {
+            old_file: file,
+            new_file: file,
+          })
         } else {
           self.parse_non_keyword_line(line)
         }
@@ -200,18 +192,26 @@ impl<'a> Lexer<'a> {
       }
       b'n' => {
         if let Some(rest) = line.strip_prefix(b"new file mode ") {
-          parse_octal_mode(rest).map(TokenKind::NewFileMode)
+          parse_int::<u32>(rest, 8)
+            .map(|(m, _)| TokenKind::NewFileMode(m))
+            .ok_or(ErrorKind::InvalidFileMode)
         } else if let Some(rest) = line.strip_prefix(b"new mode ") {
-          parse_octal_mode(rest).map(TokenKind::NewFileMode)
+          parse_int::<u32>(rest, 8)
+            .map(|(m, _)| TokenKind::NewFileMode(m))
+            .ok_or(ErrorKind::InvalidFileMode)
         } else {
           self.parse_non_keyword_line(line)
         }
       }
       b'o' => {
         if let Some(rest) = line.strip_prefix(b"old file mode ") {
-          parse_octal_mode(rest).map(TokenKind::OldFileMode)
+          parse_int::<u32>(rest, 8)
+            .map(|(m, _)| TokenKind::OldFileMode(m))
+            .ok_or(ErrorKind::InvalidFileMode)
         } else if let Some(rest) = line.strip_prefix(b"old mode ") {
-          parse_octal_mode(rest).map(TokenKind::OldFileMode)
+          parse_int::<u32>(rest, 8)
+            .map(|(m, _)| TokenKind::OldFileMode(m))
+            .ok_or(ErrorKind::InvalidFileMode)
         } else {
           self.parse_non_keyword_line(line)
         }
@@ -275,14 +275,24 @@ impl<'a> Lexer<'a> {
     )
   }
 
+  #[inline]
   fn next_line(&mut self) -> Option<&'a [u8]> {
+    if self.pos >= self.input.len() {
+      return None;
+    }
     self.line_num += 1;
-    self.lines.next()
+    let remaining = &self.input[self.pos..];
+    let end = memchr::memchr(b'\n', remaining).unwrap_or(remaining.len());
+    let line = &remaining[..end];
+    self.pos += end + 1;
+
+    // Normalize line endings: strip trailing \r
+    Some(line.strip_suffix(b"\r").unwrap_or(line))
   }
 
   fn parse_range(&self, range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
-    let (line, rest) =
-      parse_u32(range_bytes).ok_or(ErrorKind::InvalidHunkRangeLine)?;
+    let (line, rest) = parse_int::<u32>(range_bytes, 10)
+      .ok_or(ErrorKind::InvalidHunkRangeLine)?;
 
     if rest.is_empty() {
       return Ok((line, 1));
@@ -293,7 +303,7 @@ impl<'a> Lexer<'a> {
       .ok_or(ErrorKind::InvalidHunkRangeLine)?;
 
     let (span, rest) =
-      parse_u32(rest).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
+      parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
 
     if !rest.is_empty() {
       return Err(ErrorKind::InvalidHunkRangeSpan);
@@ -333,7 +343,8 @@ impl<'a> Lexer<'a> {
 
   fn parse_percentage(&self, s: &[u8]) -> Result<u32, ErrorKind> {
     let s = s.strip_suffix(b"%").ok_or(ErrorKind::InvalidPercentage)?;
-    let (num, rest) = parse_u32(s).ok_or(ErrorKind::InvalidPercentage)?;
+    let (num, rest) =
+      parse_int::<u32>(s, 10).ok_or(ErrorKind::InvalidPercentage)?;
     if !rest.is_empty() {
       return Err(ErrorKind::InvalidPercentage);
     }
@@ -364,7 +375,9 @@ impl<'a> Lexer<'a> {
     let (old_hash, new_hash) = hashes_bytes
       .split_once_str(b"..")
       .ok_or(ErrorKind::InvalidIndexHashRange)?;
-    let mode = parts.next().map(parse_octal_mode).transpose()?;
+    let mode = parts
+      .next()
+      .and_then(|m| parse_int::<u32>(m, 8).map(|(v, _)| v));
     Ok(TokenKind::Index {
       old_hash,
       new_hash,
@@ -384,24 +397,7 @@ impl<'a> Lexer<'a> {
           Ok(TokenKind::OldFileNoNewline)
         }
       }
-      _ => {
-        let mut parts = line.fields();
-        match (parts.next(), parts.next(), parts.next()) {
-          (Some(part1), None, _) => {
-            let old_file = strip_git_prefix(part1);
-            Ok(TokenKind::FileHeader {
-              old_file,
-              new_file: old_file,
-            })
-          }
-          (Some(part1), Some(part2), None) => {
-            let old_file = strip_git_prefix(part1);
-            let new_file = strip_git_prefix(part2);
-            Ok(TokenKind::FileHeader { old_file, new_file })
-          }
-          _ => Err(ErrorKind::UnexpectedLine),
-        }
-      }
+      _ => Err(ErrorKind::UnexpectedLine),
     }
   }
 }
@@ -409,6 +405,7 @@ impl<'a> Lexer<'a> {
 impl<'a> Iterator for Lexer<'a> {
   type Item = Result<LexerItem<'a>, Error>;
 
+  #[inline]
   fn next(&mut self) -> Option<Self::Item> {
     self.parse_line()
   }

@@ -54,26 +54,10 @@ test_patch_ok!(
 );
 
 test_patch_ok!(
-  applies_short_diff_header,
+  applies_file_header,
   initial_fs: { "file.txt" => "hello\n" },
   diff: r#"
-    a/file.txt b/file.txt
-    -hello
-    +world
-  "#,
-  assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "world\n"
-    );
-  }
-);
-
-test_patch_ok!(
-  applies_even_shorter_diff_header,
-  initial_fs: { "file.txt" => "hello\n" },
-  diff: r#"
-    a/file.txt
+    file a/file.txt
     -hello
     +world
   "#,

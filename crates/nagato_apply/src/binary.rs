@@ -33,7 +33,8 @@ impl std::error::Error for InvalidBinaryLineError {}
 
 pub struct Base85Reader<'a> {
   lines: std::slice::Iter<'a, &'a [u8]>,
-  buffer: Vec<u8>,
+  buffer: [u8; 52], // Git binary lines are at most 52 bytes decoded (Z line is 52)
+  buf_len: usize,
   pos: usize,
 }
 
@@ -41,7 +42,8 @@ impl<'a> Base85Reader<'a> {
   pub fn new(lines: &'a [&'a [u8]]) -> Self {
     Self {
       lines: lines.iter(),
-      buffer: Vec::new(),
+      buffer: [0u8; 52],
+      buf_len: 0,
       pos: 0,
     }
   }
@@ -50,8 +52,8 @@ impl<'a> Base85Reader<'a> {
 impl<'a> Read for Base85Reader<'a> {
   fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
     loop {
-      if self.pos < self.buffer.len() {
-        let len = std::cmp::min(buf.len(), self.buffer.len() - self.pos);
+      if self.pos < self.buf_len {
+        let len = std::cmp::min(buf.len(), self.buf_len - self.pos);
         buf[..len].copy_from_slice(&self.buffer[self.pos..self.pos + len]);
         self.pos += len;
         return Ok(len);
@@ -66,11 +68,11 @@ impl<'a> Read for Base85Reader<'a> {
         continue;
       }
 
-      self.buffer.clear();
+      self.buf_len = 0;
       self.pos = 0;
 
       let len_char = line[0];
-      let len = decode_len_char(len_char).ok_or_else(|| {
+      let expected_len = decode_len_char(len_char).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
       })?;
 
@@ -94,14 +96,17 @@ impl<'a> Read for Base85Reader<'a> {
             })?;
         }
 
-        self.buffer.push((val >> 24) as u8);
-        self.buffer.push((val >> 16) as u8);
-        self.buffer.push((val >> 8) as u8);
-        self.buffer.push(val as u8);
+        if self.buf_len + 4 <= self.buffer.len() {
+          self.buffer[self.buf_len] = (val >> 24) as u8;
+          self.buffer[self.buf_len + 1] = (val >> 16) as u8;
+          self.buffer[self.buf_len + 2] = (val >> 8) as u8;
+          self.buffer[self.buf_len + 3] = val as u8;
+          self.buf_len += 4;
+        }
       }
 
-      if self.buffer.len() > len {
-        self.buffer.truncate(len);
+      if self.buf_len > expected_len {
+        self.buf_len = expected_len;
       }
     }
   }
@@ -192,6 +197,7 @@ pub fn apply_delta(
 
   let mut written: u64 = 0;
   let mut cmd_buf = [0u8; 1];
+  let mut literal_buf = [0u8; 127]; // Max literal size is 127 bytes
 
   loop {
     match delta.read_exact(&mut cmd_buf) {
@@ -279,12 +285,13 @@ pub fn apply_delta(
       written += size as u64;
     } else if cmd != 0 {
       let size = cmd as usize;
-      let mut buf = vec![0u8; size]; // Small allocation for the literal data chunk
-      delta.read_exact(&mut buf).map_err(|_| Error {
-        line: None,
-        kind: ErrorKind::InvalidBinaryPatch,
-      })?;
-      writer.write_all(&buf)?;
+      delta
+        .read_exact(&mut literal_buf[..size])
+        .map_err(|_| Error {
+          line: None,
+          kind: ErrorKind::InvalidBinaryPatch,
+        })?;
+      writer.write_all(&literal_buf[..size])?;
       written += size as u64;
     } else {
       return Err(Error {

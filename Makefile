@@ -1,5 +1,5 @@
 format:
-	cargo +nightly fmt
+	cargo +nightly fmt --all
 
 check: format
 	cargo +nightly clippy --all-features --all-targets --fix --allow-dirty -- -D warnings

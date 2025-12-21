@@ -322,7 +322,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     self.find_hunk_match(hunk, lines_to_match, first_line_to_match)?;
 
-    self.current_source_line += hunk.old_span - 1;
+    self.current_source_line += hunk.old_span.saturating_sub(1);
 
     for line in &hunk.lines {
       match line.kind {
@@ -422,8 +422,25 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       self.process_hunk(hunk)?;
     }
 
-    while let Some(line) = self.consume_line() {
-      self.write_line(line)?;
+    // Bulk write remaining source if possible
+    if !self.source.is_empty() && memchr(b'\r', self.source).is_none() {
+      if !self.is_at_start_of_file {
+        self.output.write_all(b"\n")?;
+      }
+
+      if self.source.ends_with(b"\n") {
+        self
+          .output
+          .write_all(&self.source[..self.source.len() - 1])?;
+      } else {
+        self.output.write_all(self.source)?;
+      }
+      self.is_at_start_of_file = false;
+      self.source = &[];
+    } else {
+      while let Some(line) = self.consume_line() {
+        self.write_line(line)?;
+      }
     }
 
     if !patch.new_file_no_newline && !patch.binary && !self.is_at_start_of_file

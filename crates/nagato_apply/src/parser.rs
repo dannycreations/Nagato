@@ -90,7 +90,8 @@ impl<'a> Parser<'a> {
       match item.token {
         TokenKind::BinaryPatchType { kind, size } => {
           self.tokens.next();
-          let mut data = Vec::new();
+          // Binary data lines are ~70 chars, so size/70 + 2 is a safe estimate
+          let mut data = Vec::with_capacity((size / 70) as usize + 2);
           while let Some(Ok(item)) = self.tokens.peek() {
             if let TokenKind::BinaryData(line) = item.token {
               data.push(line);
@@ -236,7 +237,11 @@ impl<'a> Parser<'a> {
         }
       };
 
-    let mut lines = Vec::with_capacity((old_span + new_span) as usize);
+    // Pre-allocate capacity to avoid reallocations.
+    // Hunk lines are roughly old_span + additions.
+    // We don't know additions yet, but old_span + (new_span - old_span).max(0) is a floor.
+    let cap = (old_span as usize).max(new_span as usize);
+    let mut lines = Vec::with_capacity(cap);
     let (actual_old_span, actual_new_span) =
       self.parse_hunk_lines(&mut lines, patch)?;
 
