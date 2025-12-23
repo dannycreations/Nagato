@@ -8,8 +8,8 @@ fn main() {
     eprintln!("Error: {}", e.kind);
     if let Some(line) = e.line {
       let location: Cow<str> = cli
-        .file
-        .as_deref()
+        .files
+        .first()
         .map_or_else(|| Cow::from("<stdin>"), |f| f.to_string_lossy());
       eprintln!("    at {}:{}", location, line);
     }

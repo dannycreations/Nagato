@@ -14,12 +14,12 @@ use nagato_core::{error::Error, fs::FileSystem};
 #[derive(ClapParser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-  /// The path to the patch file. If not provided, the patch will be read from stdin.
-  pub file: Option<OsString>,
+  /// The path to the patch file(s).
+  pub files: Vec<OsString>,
   /// Apply the patch in reverse.
   #[arg(short, long)]
   reverse: bool,
-  /// The directory to run the patch in. Defaults to the current directory.
+  /// The directory to run the patch in.
   #[arg(short, long)]
   directory: Option<OsString>,
 }
@@ -36,7 +36,7 @@ fn process_patch(
 }
 
 pub fn run(cli: &Cli) -> Result<(), Error> {
-  if cli.file.is_none() && io::stdin().is_terminal() {
+  if cli.files.is_empty() && io::stdin().is_terminal() {
     Cli::command().print_help().unwrap();
     return Ok(());
   }
@@ -48,16 +48,17 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   };
   let fs = FileSystem::new(root);
 
-  match &cli.file {
-    Some(path) => {
+  if cli.files.is_empty() {
+    let mut stdin_content = Vec::new();
+    io::stdin().read_to_end(&mut stdin_content)?;
+    process_patch(&fs, &stdin_content, cli.reverse)?;
+  } else {
+    for path in &cli.files {
       let file = File::open(path)?;
       let mmap = unsafe { Mmap::map(&file)? };
-      process_patch(&fs, &mmap, cli.reverse)
-    }
-    None => {
-      let mut stdin_content = Vec::new();
-      io::stdin().read_to_end(&mut stdin_content)?;
-      process_patch(&fs, &stdin_content, cli.reverse)
+      process_patch(&fs, &mmap, cli.reverse)?;
     }
   }
+
+  Ok(())
 }
