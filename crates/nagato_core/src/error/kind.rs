@@ -4,14 +4,6 @@ use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
 #[derive(ThisError, Debug)]
-#[error("{kind}")]
-pub struct Error {
-  pub line: Option<u32>,
-  #[source]
-  pub kind: ErrorKind,
-}
-
-#[derive(ThisError, Debug)]
 pub enum ErrorKind {
   #[error("I/O error")]
   Io(#[from] io::Error),
@@ -63,31 +55,4 @@ pub enum ErrorKind {
   BinaryPatchSourceMismatch,
   #[error("Invalid path")]
   InvalidPath,
-}
-
-impl Error {
-  /// Create a new error without line information.
-  pub const fn new(kind: ErrorKind) -> Self {
-    Self { kind, line: None }
-  }
-
-  /// Create a new error with specific line information.
-  pub const fn with_line(kind: ErrorKind, line: u32) -> Self {
-    Self {
-      kind,
-      line: Some(line),
-    }
-  }
-}
-
-impl From<io::Error> for Error {
-  fn from(e: io::Error) -> Self {
-    Self::new(ErrorKind::Io(e))
-  }
-}
-
-impl From<PersistError> for Error {
-  fn from(e: PersistError) -> Self {
-    Self::new(ErrorKind::Persist(e))
-  }
 }

@@ -1,64 +1,18 @@
 use std::{
   fs::{self, File},
-  io::{self, BufWriter, Write},
-  path::{Component, Path, PathBuf},
+  path::{Component, PathBuf},
 };
 
+use bstr::ByteSlice;
 use memmap2::Mmap;
-use tempfile::NamedTempFile;
 
-use crate::error::{Error, ErrorKind};
-
-/// Atomic file writer that uses a temporary file and renames it on commit.
-pub struct AtomicWriter {
-  writer: BufWriter<NamedTempFile>,
-  dest_path: PathBuf,
-}
-
-impl AtomicWriter {
-  /// Create a new atomic writer for the given path.
-  pub fn new(path: &Path) -> io::Result<Self> {
-    let parent = path.parent().ok_or_else(|| {
-      io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "Destination path has no parent directory",
-      )
-    })?;
-    let tempfile = NamedTempFile::new_in(parent)?;
-    // 1MB buffer for high-performance writes
-    let writer = BufWriter::with_capacity(1024 * 1024, tempfile);
-
-    Ok(Self {
-      writer,
-      dest_path: path.to_path_buf(),
-    })
-  }
-
-  /// Commit the changes by persisting the temporary file to the destination path.
-  pub fn commit(mut self) -> Result<(), Error> {
-    self.writer.flush()?;
-    self
-      .writer
-      .into_inner()
-      .map_err(|e| e.into_error())?
-      .persist(&self.dest_path)?;
-    Ok(())
-  }
-}
-
-impl Write for AtomicWriter {
-  #[inline]
-  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-    self.writer.write(buf)
-  }
-
-  #[inline]
-  fn flush(&mut self) -> io::Result<()> {
-    self.writer.flush()
-  }
-}
+use crate::{
+  error::{Error, ErrorKind},
+  fs::atomic::AtomicWriter,
+};
 
 /// A virtualized file system abstraction.
+/// Ensures all file operations are relative to a root directory and prevents path traversal.
 #[derive(Debug, Default)]
 pub struct FileSystem {
   root: PathBuf,
@@ -118,7 +72,6 @@ impl FileSystem {
 
   /// Resolve a relative byte path to an absolute PathBuf, preventing traversal.
   fn resolve(&self, path: &[u8]) -> Result<PathBuf, Error> {
-    use bstr::ByteSlice;
     let path = path
       .to_path()
       .map_err(|_| Error::new(ErrorKind::InvalidPath))?;

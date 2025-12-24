@@ -1,88 +1,31 @@
-use std::{
-  io::{self, sink, Write},
-  mem,
-};
+use std::io::Write;
 
 use bstr::ByteSlice;
 use memchr::{memchr, memchr_iter, memmem};
-use memmap2::Mmap;
-use nagato_core::{
-  error::{Error, ErrorKind},
-  fs::FileSystem,
-};
+use nagato_core::error::{Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
-use crate::{binary, BinaryPatchKind, Hunk, Line, LineKind, Patch};
+use super::utils::get_line;
+use crate::{
+  binary,
+  models::{
+    binary::BinaryPatchKind,
+    hunk::Hunk,
+    line::{Line, LineKind},
+    patch::Patch,
+  },
+};
 
-impl<'a> Patch<'a> {
-  /// Invert the patch for reverse application.
-  pub fn invert(mut self) -> Self {
-    let is_creation = self.old_file == b"/dev/null";
-    let is_deletion = self.new_file == b"/dev/null";
-
-    mem::swap(&mut self.old_file, &mut self.new_file);
-    mem::swap(&mut self.rename_from, &mut self.rename_to);
-    mem::swap(&mut self.copy_from, &mut self.copy_to);
-    mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
-    mem::swap(&mut self.old_hash, &mut self.new_hash);
-
-    if is_creation {
-      self.deleted_mode = self.new_mode;
-      self.new_mode = None;
-      self.old_mode = None;
-    } else if is_deletion {
-      self.new_mode = self.deleted_mode.or(self.old_mode);
-      self.old_mode = None;
-      self.deleted_mode = None;
-    } else {
-      mem::swap(&mut self.old_mode, &mut self.new_mode);
-    }
-
-    self.hunks.iter_mut().for_each(Hunk::invert);
-    self
-  }
-}
-
-impl<'a> Hunk<'a> {
-  /// Invert the hunk for reverse application.
-  pub(crate) fn invert(&mut self) {
-    mem::swap(&mut self.old_line, &mut self.new_line);
-    mem::swap(&mut self.old_span, &mut self.new_span);
-    self.lines.iter_mut().for_each(|line| {
-      line.kind = match line.kind {
-        LineKind::Addition => LineKind::Deletion,
-        LineKind::Deletion => LineKind::Addition,
-        LineKind::Context => LineKind::Context,
-      };
-    });
-  }
-}
-
-#[inline(always)]
-fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
-  if source.is_empty() {
-    return None;
-  }
-  let end = source.find_byte(b'\n').unwrap_or(source.len());
-  let full_line = &source[..end];
-  let next_source = if end < source.len() {
-    &source[end + 1..]
-  } else {
-    &[]
-  };
-  let line_content = full_line.strip_suffix(b"\r").unwrap_or(full_line);
-  Some((line_content, next_source))
-}
-
-struct Applier<'s, 'b, W: Write + ?Sized> {
-  output: &'b mut W,
-  source: &'s [u8],
-  is_at_start_of_file: bool,
-  current_source_line: u32,
+/// The Applier engine responsible for applying patches to byte slices.
+pub struct Applier<'s, 'b, W: Write + ?Sized> {
+  pub output: &'b mut W,
+  pub source: &'s [u8],
+  pub is_at_start_of_file: bool,
+  pub current_source_line: u32,
 }
 
 impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
-  fn new(output: &'b mut W, source: &'s [u8]) -> Self {
+  pub fn new(output: &'b mut W, source: &'s [u8]) -> Self {
     Self {
       output,
       source,
@@ -91,8 +34,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
+  /// Write a line to the output, handling line endings.
   #[inline]
-  fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
+  pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
     if !self.is_at_start_of_file {
       self.output.write_all(b"\n")?;
     }
@@ -101,14 +45,16 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
+  /// Consume a single line from the source.
   #[inline]
-  fn consume_line(&mut self) -> Option<&'s [u8]> {
+  pub fn consume_line(&mut self) -> Option<&'s [u8]> {
     let (line, next_source) = get_line(self.source)?;
     self.source = next_source;
     Some(line)
   }
 
-  fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
+  /// Advance the source and output to the start of a hunk.
+  pub fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
     let target_line = hunk.old_line.saturating_sub(1);
     let lines_to_skip = target_line.saturating_sub(self.current_source_line);
 
@@ -157,8 +103,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
+  /// Verify if the source matches the expected hunk lines.
   #[inline]
-  fn verify_match<'p>(
+  pub fn verify_match<'p>(
     &self,
     mut source: &'s [u8],
     lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
@@ -201,7 +148,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(source)
   }
 
-  fn find_hunk_match<'p>(
+  /// Find a match for a hunk in the source, allowing for fuzzing/offset.
+  pub fn find_hunk_match<'p>(
     &mut self,
     hunk: &Hunk<'p>,
     lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
@@ -300,7 +248,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     ))
   }
 
-  fn find_and_apply_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
+  /// Find and apply a single hunk to the source.
+  pub fn find_and_apply_hunk<'p>(
+    &mut self,
+    hunk: &Hunk<'p>,
+  ) -> Result<(), Error> {
     let mut lines_to_match = hunk
       .lines
       .iter()
@@ -325,7 +277,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
+  /// Process a single hunk by advancing to it and applying changes.
+  pub fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
     self.advance_to_hunk(hunk)?;
 
     if hunk.old_span == 0 {
@@ -340,7 +293,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.find_and_apply_hunk(hunk)
   }
 
-  fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
+  /// Verify that the source matches the expected hash for a binary patch.
+  pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
     if let Some(old_hash_bytes) = patch.old_hash {
       if old_hash_bytes.len() >= 7 {
         let mut hasher = Sha1::new();
@@ -364,7 +318,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
+  /// Process a binary patch.
+  pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
     self.verify_binary_source(patch)?;
 
     let mut applied = false;
@@ -401,7 +356,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
+  /// Process the entire patch.
+  pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
     if !patch.binary_fragments.is_empty() {
       return self.process_binary(patch);
     }
@@ -434,132 +390,5 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       self.output.write_all(b"\n")?;
     }
     Ok(())
-  }
-}
-
-/// Apply a patch to the source bytes and write to the output.
-pub fn apply<'a>(
-  output: &mut (impl Write + ?Sized),
-  patch: &Patch<'a>,
-  source: &[u8],
-) -> Result<(), Error> {
-  if patch.hunks.is_empty()
-    && patch.copy_to.is_none()
-    && patch.binary_fragments.is_empty()
-  {
-    output.write_all(source)?;
-    return Ok(());
-  }
-  Applier::new(output, source).process(patch)
-}
-
-fn ignore_not_found(res: Result<(), Error>) -> Result<(), Error> {
-  match res {
-    Err(Error {
-      kind: ErrorKind::Io(e),
-      ..
-    }) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-    res => res,
-  }
-}
-
-fn read_source_or_empty(
-  fs: &FileSystem,
-  path: &[u8],
-) -> Result<Option<Mmap>, Error> {
-  if path == b"/dev/null" {
-    return Ok(None);
-  }
-  match fs.read(path) {
-    Ok(mmap) => Ok(Some(mmap)),
-    Err(Error {
-      kind: ErrorKind::Io(e),
-      ..
-    }) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-    Err(e) => Err(e),
-  }
-}
-
-fn handle_file_deletion(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  let source = read_source_or_empty(fs, source_path)?;
-  let source_slice = source.as_deref().unwrap_or(&[]);
-  apply(&mut sink(), patch, source_slice)?;
-
-  ignore_not_found(fs.remove_file(source_path))?;
-  Ok(())
-}
-
-fn handle_metadata_change(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  if patch.rename_to.is_some() {
-    fs.rename(source_path, patch.new_file)?;
-  } else if patch.copy_to.is_some() {
-    fs.copy(source_path, patch.new_file)?;
-  } else if patch.old_file == b"/dev/null" {
-    fs.write(patch.new_file)?.commit()?;
-  }
-  Ok(())
-}
-
-fn handle_content_change(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  let mut writer = fs.write(patch.new_file)?;
-  {
-    let source = read_source_or_empty(fs, source_path)?;
-    let source_slice = source.as_deref().unwrap_or(&[]);
-    apply(&mut writer, patch, source_slice)?;
-  }
-  writer.commit()?;
-
-  if patch.rename_to.is_some() && source_path != patch.new_file {
-    ignore_not_found(fs.remove_file(source_path))?;
-  }
-  Ok(())
-}
-
-fn patch_file_worker(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
-  if patch.binary && !patch.hunks.is_empty() {
-    return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
-  }
-
-  if !patch.binary_fragments.is_empty() {
-    return handle_content_change(fs, patch);
-  }
-
-  match (patch.new_file, patch.hunks.is_empty()) {
-    (b"/dev/null", _) => handle_file_deletion(fs, patch)?,
-    (_, true) => handle_metadata_change(fs, patch)?,
-    (_, false) => handle_content_change(fs, patch)?,
-  }
-
-  if patch.new_file != b"/dev/null" {
-    if let Some(mode) = patch.new_mode.or(patch.index_mode) {
-      fs.set_permissions(patch.new_file, mode)?;
-    }
-  }
-
-  Ok(())
-}
-
-/// Apply a patch to the file system.
-pub fn patch_file(
-  fs: &FileSystem,
-  patch: Patch<'_>,
-  reverse: bool,
-) -> Result<(), Error> {
-  if reverse {
-    patch_file_worker(fs, &patch.invert())
-  } else {
-    patch_file_worker(fs, &patch)
   }
 }

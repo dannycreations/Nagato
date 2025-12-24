@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use nagato_cli::{ClapParser, Cli};
 
 fn main() {
@@ -7,10 +5,10 @@ fn main() {
   if let Err(e) = nagato_cli::run(&cli) {
     eprintln!("Error: {}", e.kind);
     if let Some(line) = e.line {
-      let location: Cow<str> = cli
-        .files
-        .first()
-        .map_or_else(|| Cow::from("<stdin>"), |f| f.to_string_lossy());
+      let location = cli.files.first().map_or_else(
+        || "<stdin>".to_string(),
+        |f| f.to_string_lossy().to_string(),
+      );
       eprintln!("    at {}:{}", location, line);
     }
     std::process::exit(1);
