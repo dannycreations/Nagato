@@ -18,10 +18,10 @@ pub struct Cli {
   pub files: Vec<OsString>,
   /// Apply the patch in reverse.
   #[arg(short, long)]
-  reverse: bool,
+  pub reverse: bool,
   /// The directory to run the patch in.
   #[arg(short, long)]
-  directory: Option<OsString>,
+  pub directory: Option<OsString>,
 }
 
 fn process_patch(
@@ -35,6 +35,7 @@ fn process_patch(
   Ok(())
 }
 
+/// Run the CLI application.
 pub fn run(cli: &Cli) -> Result<(), Error> {
   if cli.files.is_empty() && io::stdin().is_terminal() {
     Cli::command().print_help().unwrap();

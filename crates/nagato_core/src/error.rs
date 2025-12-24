@@ -65,20 +65,29 @@ pub enum ErrorKind {
   InvalidPath,
 }
 
+impl Error {
+  /// Create a new error without line information.
+  pub const fn new(kind: ErrorKind) -> Self {
+    Self { kind, line: None }
+  }
+
+  /// Create a new error with specific line information.
+  pub const fn with_line(kind: ErrorKind, line: u32) -> Self {
+    Self {
+      kind,
+      line: Some(line),
+    }
+  }
+}
+
 impl From<io::Error> for Error {
   fn from(e: io::Error) -> Self {
-    Error {
-      line: None,
-      kind: e.into(),
-    }
+    Self::new(ErrorKind::Io(e))
   }
 }
 
 impl From<PersistError> for Error {
   fn from(e: PersistError) -> Self {
-    Error {
-      line: None,
-      kind: e.into(),
-    }
+    Self::new(ErrorKind::Persist(e))
   }
 }

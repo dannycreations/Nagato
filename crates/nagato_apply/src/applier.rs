@@ -15,6 +15,7 @@ use sha1::{Digest, Sha1};
 use crate::{binary, BinaryPatchKind, Hunk, Line, LineKind, Patch};
 
 impl<'a> Patch<'a> {
+  /// Invert the patch for reverse application.
   pub fn invert(mut self) -> Self {
     let is_creation = self.old_file == b"/dev/null";
     let is_deletion = self.new_file == b"/dev/null";
@@ -43,6 +44,7 @@ impl<'a> Patch<'a> {
 }
 
 impl<'a> Hunk<'a> {
+  /// Invert the hunk for reverse application.
   pub(crate) fn invert(&mut self) {
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
@@ -108,9 +110,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
     let target_line = hunk.old_line.saturating_sub(1);
-
-    // Bulk skip lines if possible
     let lines_to_skip = target_line.saturating_sub(self.current_source_line);
+
     if lines_to_skip > 0 {
       let mut count = 0;
       let mut end_offset = 0;
@@ -124,17 +125,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
       if count == lines_to_skip {
         let block = &self.source[..end_offset];
-        // Only use bulk write if no CR, to preserve normalization behavior
         if memchr(b'\r', block).is_none() {
           if !self.is_at_start_of_file {
             self.output.write_all(b"\n")?;
           }
-          // block ends with \n, strip it to match write_line behavior
           if !block.is_empty() {
             self.output.write_all(&block[..block.len() - 1])?;
           }
           self.is_at_start_of_file = false;
-
           self.source = &self.source[end_offset..];
           self.current_source_line += count;
           return Ok(());
@@ -148,10 +146,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         self.current_source_line += 1;
       } else {
         if hunk.old_span > 0 {
-          return Err(Error {
-            line: Some(hunk.patch_line_num),
-            kind: ErrorKind::CouldNotApplyHunk,
-          });
+          return Err(Error::with_line(
+            ErrorKind::CouldNotApplyHunk,
+            hunk.patch_line_num,
+          ));
         }
         break;
       }
@@ -171,10 +169,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       let len = expected.len();
 
       if source.len() < len || &source[..len] != expected {
-        return Err(Error {
-          line: Some(hunk.patch_line_num + 1 + offset as u32),
-          kind: ErrorKind::CouldNotApplyHunk,
-        });
+        return Err(Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
+          hunk.patch_line_num + 1 + offset as u32,
+        ));
       }
 
       let after = &source[len..];
@@ -188,16 +186,16 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         } else if after.len() == 1 {
           source = &after[1..];
         } else {
-          return Err(Error {
-            line: Some(hunk.patch_line_num + 1 + offset as u32),
-            kind: ErrorKind::CouldNotApplyHunk,
-          });
+          return Err(Error::with_line(
+            ErrorKind::CouldNotApplyHunk,
+            hunk.patch_line_num + 1 + offset as u32,
+          ));
         }
       } else {
-        return Err(Error {
-          line: Some(hunk.patch_line_num + 1 + offset as u32),
-          kind: ErrorKind::CouldNotApplyHunk,
-        });
+        return Err(Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
+          hunk.patch_line_num + 1 + offset as u32,
+        ));
       }
     }
     Ok(source)
@@ -216,10 +214,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         let (line, next_source) = if let Some(res) = get_line(self.source) {
           res
         } else {
-          return Err(Error {
-            line: Some(hunk.patch_line_num),
-            kind: ErrorKind::CouldNotApplyHunk,
-          });
+          return Err(Error::with_line(
+            ErrorKind::CouldNotApplyHunk,
+            hunk.patch_line_num,
+          ));
         };
 
         if line != needle {
@@ -228,7 +226,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
             self.current_source_line += 1;
             continue;
           } else {
-            unreachable!("We just peeked it");
+            unreachable!("Peeked line should be consumable");
           }
         }
 
@@ -243,7 +241,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     let finder = memmem::Finder::new(needle);
-
     for match_pos in finder.find_iter(self.source) {
       if match_pos > 0 && self.source[match_pos - 1] != b'\n' {
         continue;
@@ -273,19 +270,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       if let Ok(final_source) = result {
         let skipped = &self.source[..match_pos];
 
-        // Bulk write skipped lines if possible
         if !skipped.is_empty() && memchr(b'\r', skipped).is_none() {
           let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
-
           if !self.is_at_start_of_file {
             self.output.write_all(b"\n")?;
           }
-          // skipped ends with \n because match is at line boundary
           if !skipped.is_empty() {
             self.output.write_all(&skipped[..skipped.len() - 1])?;
           }
           self.is_at_start_of_file = false;
-
           self.current_source_line += lines_skipped;
         } else {
           for line in skipped.lines() {
@@ -296,16 +289,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
         self.source = final_source;
         self.current_source_line += 1;
-
         return Ok(());
       }
       return result.map(|_| ());
     }
 
-    Err(Error {
-      line: Some(hunk.patch_line_num),
-      kind: ErrorKind::CouldNotApplyHunk,
-    })
+    Err(Error::with_line(
+      ErrorKind::CouldNotApplyHunk,
+      hunk.patch_line_num,
+    ))
   }
 
   fn find_and_apply_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
@@ -321,7 +313,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     };
 
     self.find_hunk_match(hunk, lines_to_match, first_line_to_match)?;
-
     self.current_source_line += hunk.old_span.saturating_sub(1);
 
     for line in &hunk.lines {
@@ -349,85 +340,80 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.find_and_apply_hunk(hunk)
   }
 
+  fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
+    if let Some(old_hash_bytes) = patch.old_hash {
+      if old_hash_bytes.len() >= 7 {
+        let mut hasher = Sha1::new();
+        hasher.update(b"blob ");
+        hasher.update(self.source.len().to_string().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(self.source);
+        let result = hasher.finalize();
+        let hex_hash = hex::encode(result);
+
+        let old_hash_str = std::str::from_utf8(old_hash_bytes)
+          .map_err(|_| Error::new(ErrorKind::InvalidIndexLine))?;
+
+        if !hex_hash.starts_with(old_hash_str)
+          && old_hash_str.chars().any(|c| c != '0')
+        {
+          return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
+        }
+      }
+    }
+    Ok(())
+  }
+
+  fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
+    self.verify_binary_source(patch)?;
+
+    let mut applied = false;
+    for fragment in &patch.binary_fragments {
+      match fragment.kind {
+        BinaryPatchKind::Literal => {
+          binary::decode_base85(&fragment.data, &mut self.output)?;
+          applied = true;
+          break;
+        }
+        BinaryPatchKind::Delta => {
+          let mut decoded = binary::new_base85_decoder(&fragment.data);
+          match binary::apply_delta(&mut decoded, self.source, &mut self.output)
+          {
+            Ok(_) => {
+              applied = true;
+              break;
+            }
+            Err(Error {
+              kind: ErrorKind::BinaryPatchSourceMismatch,
+              ..
+            }) => {
+              continue;
+            }
+            Err(e) => return Err(e),
+          }
+        }
+      }
+    }
+
+    if !applied {
+      return Err(Error::new(ErrorKind::CouldNotApplyHunk));
+    }
+    Ok(())
+  }
+
   fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
     if !patch.binary_fragments.is_empty() {
-      if let Some(old_hash_bytes) = patch.old_hash {
-        if old_hash_bytes.len() >= 7 {
-          let mut hasher = Sha1::new();
-          hasher.update(b"blob ");
-          hasher.update(self.source.len().to_string().as_bytes());
-          hasher.update(b"\0");
-          hasher.update(self.source);
-          let result = hasher.finalize();
-          let hex_hash = hex::encode(result);
-
-          let old_hash_str =
-            std::str::from_utf8(old_hash_bytes).map_err(|_| Error {
-              line: None,
-              kind: ErrorKind::InvalidIndexLine,
-            })?;
-
-          if !hex_hash.starts_with(old_hash_str)
-            && old_hash_str.chars().any(|c| c != '0')
-          {
-            return Err(Error {
-              line: None,
-              kind: ErrorKind::BinaryPatchSourceMismatch,
-            });
-          }
-        }
-      }
-
-      let mut applied = false;
-      for fragment in &patch.binary_fragments {
-        match fragment.kind {
-          BinaryPatchKind::Literal => {
-            binary::decode_base85(&fragment.data, &mut self.output)?;
-            applied = true;
-            break;
-          }
-          BinaryPatchKind::Delta => {
-            let mut decoded = binary::new_base85_decoder(&fragment.data);
-            match binary::apply_delta(
-              &mut decoded,
-              self.source,
-              &mut self.output,
-            ) {
-              Ok(_) => {
-                applied = true;
-                break;
-              }
-              Err(Error {
-                kind: ErrorKind::BinaryPatchSourceMismatch,
-                ..
-              }) => {
-                continue;
-              }
-              Err(e) => return Err(e),
-            }
-          }
-        }
-      }
-
-      if !applied {
-        return Err(Error {
-          line: None,
-          kind: ErrorKind::CouldNotApplyHunk,
-        });
-      }
-      return Ok(());
+      return self.process_binary(patch);
     }
 
     for hunk in &patch.hunks {
       self.process_hunk(hunk)?;
     }
 
-    // Bulk write remaining source if possible
     if !self.source.is_empty() && memchr(b'\r', self.source).is_none() {
       if !self.is_at_start_of_file {
         self.output.write_all(b"\n")?;
       }
-
       if self.source.ends_with(b"\n") {
         self
           .output
@@ -451,6 +437,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 }
 
+/// Apply a patch to the source bytes and write to the output.
 pub fn apply<'a>(
   output: &mut (impl Write + ?Sized),
   patch: &Patch<'a>,
@@ -542,10 +529,7 @@ fn handle_content_change(
 
 fn patch_file_worker(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
   if patch.binary && !patch.hunks.is_empty() {
-    return Err(Error {
-      line: None,
-      kind: ErrorKind::UnsupportedBinaryPatch,
-    });
+    return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
 
   if !patch.binary_fragments.is_empty() {
@@ -567,6 +551,7 @@ fn patch_file_worker(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
   Ok(())
 }
 
+/// Apply a patch to the file system.
 pub fn patch_file(
   fs: &FileSystem,
   patch: Patch<'_>,

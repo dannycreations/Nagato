@@ -268,10 +268,7 @@ impl<'a> Lexer<'a> {
     Some(
       token_result
         .map(|token| LexerItem { token, line_num })
-        .map_err(|kind| Error {
-          line: Some(line_num),
-          kind,
-        }),
+        .map_err(|kind| Error::with_line(kind, line_num)),
     )
   }
 

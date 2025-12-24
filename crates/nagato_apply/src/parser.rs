@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
       match item.token {
         TokenKind::BinaryPatchType { kind, size } => {
           self.tokens.next();
-          // Binary data lines are ~70 chars, so size/70 + 2 is a safe estimate
+          // Pre-allocate binary data buffer
           let mut data = Vec::with_capacity((size / 70) as usize + 2);
           while let Some(Ok(item)) = self.tokens.peek() {
             if let TokenKind::BinaryData(line) = item.token {
@@ -128,7 +128,7 @@ impl<'a> Parser<'a> {
     let start_line_num = self
       .tokens
       .peek()
-      .and_then(|res: &Result<LexerItem, Error>| res.as_ref().ok())
+      .and_then(|res| res.as_ref().ok())
       .map(|item| item.line_num)
       .unwrap_or(0);
 
@@ -137,10 +137,10 @@ impl<'a> Parser<'a> {
 
     if !lines.is_empty() {
       if patch.old_file.is_empty() && patch.new_file.is_empty() {
-        return Err(Error {
-          line: Some(start_line_num),
-          kind: ErrorKind::PatchHasContentButNoFileInfo,
-        });
+        return Err(Error::with_line(
+          ErrorKind::PatchHasContentButNoFileInfo,
+          start_line_num,
+        ));
       }
 
       patch.hunks.push(Hunk {
@@ -214,54 +214,49 @@ impl<'a> Parser<'a> {
   }
 
   fn parse_hunk(&mut self, patch: &mut Patch<'a>) -> Result<Hunk<'a>, Error> {
-    let (old_line, old_span, new_line, new_span, patch_line_num) =
-      match self.tokens.next().ok_or(Error {
-        line: None,
-        kind: ErrorKind::UnexpectedEof,
-      })?? {
-        LexerItem {
-          token:
-            TokenKind::HunkHeader {
-              old_line,
-              old_span,
-              new_line,
-              new_span,
-            },
-          line_num,
-        } => (old_line, old_span, new_line, new_span, line_num),
-        item => {
-          return Err(Error {
-            line: Some(item.line_num),
-            kind: ErrorKind::ExpectedHunkHeader,
-          })
-        }
-      };
+    let (old_line, old_span, new_line, new_span, patch_line_num) = match self
+      .tokens
+      .next()
+      .ok_or(Error::new(ErrorKind::UnexpectedEof))??
+    {
+      LexerItem {
+        token:
+          TokenKind::HunkHeader {
+            old_line,
+            old_span,
+            new_line,
+            new_span,
+          },
+        line_num,
+      } => (old_line, old_span, new_line, new_span, line_num),
+      item => {
+        return Err(Error::with_line(
+          ErrorKind::ExpectedHunkHeader,
+          item.line_num,
+        ))
+      }
+    };
 
-    // Pre-allocate capacity to avoid reallocations.
-    // Hunk lines are roughly old_span + additions.
-    // We don't know additions yet, but old_span + (new_span - old_span).max(0) is a floor.
     let cap = (old_span as usize).max(new_span as usize);
     let mut lines = Vec::with_capacity(cap);
     let (actual_old_span, actual_new_span) =
       self.parse_hunk_lines(&mut lines, patch)?;
 
     if actual_old_span != old_span || actual_new_span != new_span {
-      return Err(Error {
-        line: Some(patch_line_num),
-        kind: ErrorKind::HunkLineCountMismatch,
-      });
+      return Err(Error::with_line(
+        ErrorKind::HunkLineCountMismatch,
+        patch_line_num,
+      ));
     }
 
-    let hunk = Hunk {
+    Ok(Hunk {
       old_line,
       old_span,
       new_line,
       new_span,
       lines,
       patch_line_num,
-    };
-
-    Ok(hunk)
+    })
   }
 
   fn skip_empty_context_lines(&mut self) {
@@ -284,7 +279,6 @@ impl<'a> Iterator for Parser<'a> {
 
   fn next(&mut self) -> Option<Self::Item> {
     self.skip_empty_context_lines();
-
     self.tokens.peek()?;
 
     let patch_result = self.parse_patch();

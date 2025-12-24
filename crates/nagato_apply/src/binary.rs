@@ -129,15 +129,9 @@ pub fn decode_base85(
       .map(|r| r.is::<InvalidBinaryLineError>())
       .unwrap_or(false)
     {
-      Error {
-        line: None,
-        kind: ErrorKind::InvalidBinaryFilesLine,
-      }
+      Error::new(ErrorKind::InvalidBinaryFilesLine)
     } else {
-      Error {
-        line: None,
-        kind: ErrorKind::Io(e),
-      }
+      Error::new(ErrorKind::Io(e))
     }
   })?;
   Ok(())
@@ -151,25 +145,16 @@ fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
   loop {
     reader.read_exact(&mut byte_buf).map_err(|e| {
       if e.kind() == io::ErrorKind::UnexpectedEof {
-        Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        }
+        Error::new(ErrorKind::InvalidBinaryPatch)
       } else {
-        Error {
-          line: None,
-          kind: ErrorKind::Io(e),
-        }
+        Error::new(ErrorKind::Io(e))
       }
     })?;
 
     let byte = byte_buf[0];
     let byte_val = (byte & 0x7f) as u64;
     if shift >= 64 || (byte_val << shift) >> shift != byte_val {
-      return Err(Error {
-        line: None,
-        kind: ErrorKind::InvalidBinaryPatch,
-      });
+      return Err(Error::new(ErrorKind::InvalidBinaryPatch));
     }
     result |= byte_val << shift;
     shift += 7;
@@ -187,10 +172,7 @@ pub fn apply_delta(
   let source_size = read_variable_length_int(&mut delta)?;
 
   if source_size != source.len() as u64 {
-    return Err(Error {
-      line: None,
-      kind: ErrorKind::BinaryPatchSourceMismatch,
-    });
+    return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
   }
 
   let target_size = read_variable_length_int(&mut delta)?;
@@ -203,12 +185,7 @@ pub fn apply_delta(
     match delta.read_exact(&mut cmd_buf) {
       Ok(_) => {}
       Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-      Err(e) => {
-        return Err(Error {
-          line: None,
-          kind: ErrorKind::Io(e),
-        })
-      }
+      Err(e) => return Err(Error::new(ErrorKind::Io(e))),
     }
     let cmd = cmd_buf[0];
 
@@ -217,53 +194,46 @@ pub fn apply_delta(
       let mut size: usize = 0;
 
       if (cmd & 0x01) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         offset |= cmd_buf[0] as usize;
       }
       if (cmd & 0x02) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         offset |= (cmd_buf[0] as usize) << 8;
       }
       if (cmd & 0x04) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         offset |= (cmd_buf[0] as usize) << 16;
       }
       if (cmd & 0x08) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         offset |= (cmd_buf[0] as usize) << 24;
       }
 
       if (cmd & 0x10) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         size |= cmd_buf[0] as usize;
       }
       if (cmd & 0x20) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         size |= (cmd_buf[0] as usize) << 8;
       }
       if (cmd & 0x40) != 0 {
-        delta.read_exact(&mut cmd_buf).map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        delta
+          .read_exact(&mut cmd_buf)
+          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
         size |= (cmd_buf[0] as usize) << 16;
       }
 
@@ -275,10 +245,7 @@ pub fn apply_delta(
         .checked_add(size)
         .is_none_or(|end| end > source.len())
       {
-        return Err(Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        });
+        return Err(Error::new(ErrorKind::InvalidBinaryPatch));
       }
 
       writer.write_all(&source[offset..offset + size])?;
@@ -287,25 +254,16 @@ pub fn apply_delta(
       let size = cmd as usize;
       delta
         .read_exact(&mut literal_buf[..size])
-        .map_err(|_| Error {
-          line: None,
-          kind: ErrorKind::InvalidBinaryPatch,
-        })?;
+        .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
       writer.write_all(&literal_buf[..size])?;
       written += size as u64;
     } else {
-      return Err(Error {
-        line: None,
-        kind: ErrorKind::InvalidBinaryPatch,
-      });
+      return Err(Error::new(ErrorKind::InvalidBinaryPatch));
     }
   }
 
   if written != target_size {
-    return Err(Error {
-      line: None,
-      kind: ErrorKind::InvalidBinaryPatch,
-    });
+    return Err(Error::new(ErrorKind::InvalidBinaryPatch));
   }
 
   Ok(())
