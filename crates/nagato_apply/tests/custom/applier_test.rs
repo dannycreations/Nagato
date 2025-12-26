@@ -1,7 +1,7 @@
 use std::fs;
 
 test_patch_ok!(
-  applies_without_hunk_header,
+  applies_hunkless,
   initial_fs: { "file.txt" => "hello\n" },
   diff: r#"
     --- a/file.txt
@@ -65,6 +65,27 @@ test_patch_ok!(
     assert_eq!(
       fs::read_to_string(root.join("file.txt")).unwrap(),
       "world\n"
+    );
+  }
+);
+
+test_patch_ok!(
+  applies_multi_hunkless,
+  initial_fs: { "file.txt" => "line1\nline2\nline3\nline4\nline5\n" },
+  diff: r#"
+    file a/file.txt
+     line1
+    -line2
+    +modified2
+
+     line4
+    -line5
+    +modified5
+  "#,
+  assertions: |root| {
+    assert_eq!(
+      fs::read_to_string(root.join("file.txt")).unwrap(),
+      "line1\nmodified2\nline3\nline4\nmodified5\n"
     );
   }
 );

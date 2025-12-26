@@ -1,12 +1,11 @@
-use nagato_core::error::{Error, ErrorKind};
+use std::mem;
 
-use crate::{
-  lexer::{LexerItem, TokenKind},
-  models::{Hunk, Line, LineKind, Patch},
-};
+use nagato_core::{Error, ErrorKind};
+
+use crate::{Hunk, LexerItem, Line, LineKind, Parser, Patch, TokenKind};
 
 pub fn parse_hunks<'a>(
-  parser: &mut crate::parser::Parser<'a>,
+  parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<(), Error> {
   while parser.peek_is(|t| matches!(t, TokenKind::HunkHeader { .. })) {
@@ -17,7 +16,7 @@ pub fn parse_hunks<'a>(
 }
 
 pub fn parse_hunk_lines<'a>(
-  parser: &mut crate::parser::Parser<'a>,
+  parser: &mut Parser<'a>,
   lines: &mut Vec<Line<'a>>,
   patch: &mut Patch<'a>,
 ) -> Result<(u32, u32), Error> {
@@ -62,7 +61,7 @@ pub fn parse_hunk_lines<'a>(
 }
 
 pub fn parse_hunk<'a>(
-  parser: &mut crate::parser::Parser<'a>,
+  parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<Hunk<'a>, Error> {
   let (old_line, old_span, new_line, new_span, patch_line_num) = match parser
@@ -111,35 +110,107 @@ pub fn parse_hunk<'a>(
 }
 
 pub fn parse_headerless_hunk<'a>(
-  parser: &mut crate::parser::Parser<'a>,
+  parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<(), Error> {
-  let start_line_num = parser
+  let initial_start_line = parser
     .tokens
     .peek()
     .and_then(|res| res.as_ref().ok())
     .map(|item| item.line_num)
     .unwrap_or(0);
 
-  let mut lines = Vec::new();
-  let (old_span, new_span) = parse_hunk_lines(parser, &mut lines, patch)?;
+  let mut current_lines = Vec::new();
+  let mut has_changes = false;
+  let mut old_span = 0;
+  let mut new_span = 0;
+  let mut hunk_start_line = initial_start_line;
+  let mut found_any_content = false;
 
-  if !lines.is_empty() {
-    if patch.old_file.is_empty() && patch.new_file.is_empty() {
-      return Err(Error::with_line(
-        ErrorKind::PatchHasContentButNoFileInfo,
-        start_line_num,
-      ));
+  while let Some(Ok(item)) = parser.tokens.peek() {
+    let token = item.token.clone();
+
+    // If we encounter an empty context line and we already have changes in the current hunk,
+    // we treat this as a separator between multiple headerless hunks.
+    if matches!(token, TokenKind::Context(s) if s.is_empty()) && has_changes {
+      patch.hunks.push(Hunk {
+        old_line: u32::from(old_span > 0),
+        new_line: u32::from(new_span > 0),
+        old_span,
+        new_span,
+        lines: mem::take(&mut current_lines),
+        patch_line_num: hunk_start_line.saturating_sub(1),
+      });
+
+      has_changes = false;
+      old_span = 0;
+      new_span = 0;
+
+      // Consume the separator
+      parser.tokens.next();
+
+      if let Some(Ok(next_item)) = parser.tokens.peek() {
+        hunk_start_line = next_item.line_num;
+      }
+      continue;
     }
 
+    match token {
+      TokenKind::Addition(s) => {
+        new_span += 1;
+        has_changes = true;
+        current_lines.push(Line {
+          kind: LineKind::Addition,
+          text: s,
+        });
+      }
+      TokenKind::Deletion(s) => {
+        old_span += 1;
+        has_changes = true;
+        current_lines.push(Line {
+          kind: LineKind::Deletion,
+          text: s,
+        });
+      }
+      TokenKind::Context(s) => {
+        old_span += 1;
+        new_span += 1;
+        current_lines.push(Line {
+          kind: LineKind::Context,
+          text: s,
+        });
+      }
+      TokenKind::OldFileNoNewline => {
+        patch.old_file_no_newline = true;
+      }
+      TokenKind::NewFileNoNewline => {
+        patch.new_file_no_newline = true;
+      }
+      _ => break,
+    }
+
+    found_any_content = true;
+    parser.tokens.next();
+  }
+
+  if !current_lines.is_empty() {
     patch.hunks.push(Hunk {
       old_line: u32::from(old_span > 0),
       new_line: u32::from(new_span > 0),
       old_span,
       new_span,
-      lines,
-      patch_line_num: start_line_num.saturating_sub(1),
+      lines: current_lines,
+      patch_line_num: hunk_start_line.saturating_sub(1),
     });
   }
+
+  if found_any_content && patch.old_file.is_empty() && patch.new_file.is_empty()
+  {
+    return Err(Error::with_line(
+      ErrorKind::PatchHasContentButNoFileInfo,
+      initial_start_line,
+    ));
+  }
+
   Ok(())
 }
