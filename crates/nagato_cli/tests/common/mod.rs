@@ -22,7 +22,7 @@ macro_rules! test_exec_ok {
       let patch_file_path = dir.path().join("test.patch");
       std::fs::write(&patch_file_path, diff).unwrap();
 
-      let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_nagato_cli"));
+      let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_nagato"));
       cmd
         .current_dir(dir.path())
         .arg(patch_file_path.file_name().unwrap())

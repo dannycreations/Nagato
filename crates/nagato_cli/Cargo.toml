@@ -9,6 +9,10 @@ repository.workspace = true
 [lib]
 doctest = false
 
+[[bin]]
+name = "nagato"
+path = "src/main.rs"
+
 [dependencies]
 clap.workspace = true
 memmap2.workspace = true
