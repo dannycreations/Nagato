@@ -1,11 +1,13 @@
 mod applier;
 mod binary;
 mod lexer;
-mod models;
+mod model;
 mod parser;
+mod utils;
 
 pub use applier::*;
 pub use binary::*;
 pub use lexer::*;
-pub use models::*;
+pub use model::*;
 pub use parser::*;
+pub use utils::*;

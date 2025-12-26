@@ -10,7 +10,8 @@ macro_rules! create_test_fs {
         if let Some(parent) = file_path.parent() {
           std::fs::create_dir_all(parent).unwrap();
         }
-        std::fs::write(file_path, $content).unwrap();
+        let content: &[u8] = $content.as_ref();
+        std::fs::write(file_path, content).unwrap();
       )*
       dir
     }

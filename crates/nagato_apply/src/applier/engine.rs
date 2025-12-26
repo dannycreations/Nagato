@@ -6,7 +6,7 @@ use memmem::Finder;
 use nagato_core::{Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
-use crate::{binary, BinaryPatchKind, Hunk, Line, LineKind, Patch};
+use crate::{binary, get_line, BinaryKind, Hunk, Line, LineKind, Patch};
 
 /// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
@@ -27,6 +27,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   /// Write a line to the output, handling line endings.
+  /// We prepend a newline for every line except the first to ensure correct formatting.
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
     if !self.is_at_start_of_file {
@@ -34,6 +35,34 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
     self.is_at_start_of_file = false;
     self.output.write_all(line)?;
+    Ok(())
+  }
+
+  /// Helper to write a block of data that may contain multiple lines.
+  /// This centralizes the logic for handling skipped content during hunk matching.
+  /// Centralized block writer that handles line endings and updates tracking.
+  fn write_block(&mut self, block: &[u8], lines: u32) -> Result<(), Error> {
+    if block.is_empty() {
+      return Ok(());
+    }
+
+    // Efficiently write blocks without CRs by avoiding line-by-line iteration.
+    // We strip the trailing newline because write_line/write_block logic
+    // prepends newlines for subsequent content.
+    if memchr(b'\r', block).is_none() {
+      if !self.is_at_start_of_file {
+        self.output.write_all(b"\n")?;
+      }
+      self
+        .output
+        .write_all(block.strip_suffix(b"\n").unwrap_or(block))?;
+      self.is_at_start_of_file = false;
+    } else {
+      for line in block.lines() {
+        self.write_line(line)?;
+      }
+    }
+    self.current_source_line += lines;
     Ok(())
   }
 
@@ -63,18 +92,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
       if count == lines_to_skip {
         let block = &self.source[..end_offset];
-        if memchr(b'\r', block).is_none() {
-          if !self.is_at_start_of_file {
-            self.output.write_all(b"\n")?;
-          }
-          if !block.is_empty() {
-            self.output.write_all(&block[..block.len() - 1])?;
-          }
-          self.is_at_start_of_file = false;
-          self.source = &self.source[end_offset..];
-          self.current_source_line += count;
-          return Ok(());
-        }
+        self.write_block(block, count)?;
+        self.source = &self.source[end_offset..];
+        return Ok(());
       }
     }
 
@@ -104,38 +124,20 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     hunk: &Hunk,
   ) -> Result<&'s [u8], Error> {
     for (offset, hunk_line) in lines_to_match {
-      let expected = hunk_line.text;
-      let len = expected.len();
+      let (line, next_source) = get_line(source).ok_or_else(|| {
+        Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
+          hunk.patch_line_num + 1 + offset as u32,
+        )
+      })?;
 
-      if source.len() < len || &source[..len] != expected {
+      if line != hunk_line.text {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
         ));
       }
-
-      let after = &source[len..];
-      if after.is_empty() {
-        source = after;
-      } else if after[0] == b'\n' {
-        source = &after[1..];
-      } else if after[0] == b'\r' {
-        if after.get(1) == Some(&b'\n') {
-          source = &after[2..];
-        } else if after.len() == 1 {
-          source = &after[1..];
-        } else {
-          return Err(Error::with_line(
-            ErrorKind::CouldNotApplyHunk,
-            hunk.patch_line_num + 1 + offset as u32,
-          ));
-        }
-      } else {
-        return Err(Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + offset as u32,
-        ));
-      }
+      source = next_source;
     }
     Ok(source)
   }
@@ -150,82 +152,52 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let needle = first_line_to_match.text;
 
     if needle.is_empty() {
-      loop {
-        let (line, next_source) = if let Some(res) = get_line(self.source) {
-          res
-        } else {
-          return Err(Error::with_line(
-            ErrorKind::CouldNotApplyHunk,
-            hunk.patch_line_num,
-          ));
-        };
-
-        if line != needle {
-          if let Some(line) = self.consume_line() {
-            self.write_line(line)?;
-            self.current_source_line += 1;
-            continue;
-          } else {
-            unreachable!("Peeked line should be consumable");
+      while let Some((line, next_source)) = get_line(self.source) {
+        if line == needle {
+          let result =
+            self.verify_match(next_source, lines_to_match.clone(), hunk);
+          if let Ok(final_source) = result {
+            self.source = final_source;
+            return Ok(());
           }
+          return result.map(|_| ());
         }
 
-        let result =
-          self.verify_match(next_source, lines_to_match.clone(), hunk);
-        if let Ok(final_source) = result {
-          self.source = final_source;
-          return Ok(());
-        }
-        return result.map(|_| ());
+        self.write_line(line)?;
+        self.source = next_source;
+        self.current_source_line += 1;
       }
+      return Err(Error::with_line(
+        ErrorKind::CouldNotApplyHunk,
+        hunk.patch_line_num,
+      ));
     }
 
     let finder = Finder::new(needle);
     for match_pos in finder.find_iter(self.source) {
+      // Ensure match is at the start of a line and ends at a line boundary.
       if match_pos > 0 && self.source[match_pos - 1] != b'\n' {
         continue;
       }
 
       let end_pos = match_pos + needle.len();
-      let (is_end, next_start) = if end_pos == self.source.len() {
-        (true, end_pos)
+      let next_source = if end_pos == self.source.len() {
+        &self.source[end_pos..]
       } else if self.source[end_pos] == b'\n' {
-        (true, end_pos + 1)
+        &self.source[end_pos + 1..]
       } else if self.source[end_pos] == b'\r'
-        && end_pos + 1 < self.source.len()
-        && self.source[end_pos + 1] == b'\n'
+        && self.source.get(end_pos + 1) == Some(&b'\n')
       {
-        (true, end_pos + 2)
+        &self.source[end_pos + 2..]
       } else {
-        (false, 0)
-      };
-
-      if !is_end {
         continue;
-      }
-
-      let next_source = &self.source[next_start..];
+      };
       let result = self.verify_match(next_source, lines_to_match.clone(), hunk);
 
       if let Ok(final_source) = result {
         let skipped = &self.source[..match_pos];
-
-        if !skipped.is_empty() && memchr(b'\r', skipped).is_none() {
-          let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
-          if !self.is_at_start_of_file {
-            self.output.write_all(b"\n")?;
-          }
-          if !skipped.is_empty() {
-            self.output.write_all(&skipped[..skipped.len() - 1])?;
-          }
-          self.is_at_start_of_file = false;
-          self.current_source_line += lines_skipped;
-        } else {
-          for line in skipped.lines() {
-            self.write_line(line)?;
-            self.current_source_line += 1;
-          }
-        }
+        let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
+        self.write_block(skipped, lines_skipped)?;
 
         self.source = final_source;
         self.current_source_line += 1;
@@ -271,17 +243,18 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   /// Process a single hunk by advancing to it and applying changes.
   pub fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
-    self.advance_to_hunk(hunk)?;
-
     if hunk.old_span == 0 {
-      for line in &hunk.lines {
-        if matches!(line.kind, LineKind::Addition) {
-          self.write_line(line.text)?;
-        }
-      }
+      hunk
+        .lines
+        .iter()
+        .filter(|l| matches!(l.kind, LineKind::Addition))
+        .try_for_each(|l| self.write_line(l.text))?;
       return Ok(());
     }
 
+    if hunk.old_line > 0 {
+      self.advance_to_hunk(hunk)?;
+    }
     self.find_and_apply_hunk(hunk)
   }
 
@@ -314,38 +287,27 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
     self.verify_binary_source(patch)?;
 
-    let mut applied = false;
     for fragment in &patch.binary_fragments {
       match fragment.kind {
-        BinaryPatchKind::Literal => {
-          binary::decode_base85(&fragment.data, &mut self.output)?;
-          applied = true;
-          break;
+        BinaryKind::Literal => {
+          return binary::decode_base85(&fragment.data, &mut self.output);
         }
-        BinaryPatchKind::Delta => {
+        BinaryKind::Delta => {
           let mut decoded = binary::new_base85_decoder(&fragment.data);
           match binary::apply_delta(&mut decoded, self.source, &mut self.output)
           {
-            Ok(_) => {
-              applied = true;
-              break;
-            }
+            Ok(_) => return Ok(()),
             Err(Error {
               kind: ErrorKind::BinaryPatchSourceMismatch,
               ..
-            }) => {
-              continue;
-            }
+            }) => continue,
             Err(e) => return Err(e),
           }
         }
       }
     }
 
-    if !applied {
-      return Err(Error::new(ErrorKind::CouldNotApplyHunk));
-    }
-    Ok(())
+    Err(ErrorKind::CouldNotApplyHunk.into())
   }
 
   /// Process the entire patch.
@@ -358,45 +320,27 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       self.process_hunk(hunk)?;
     }
 
-    if !self.source.is_empty() && memchr(b'\r', self.source).is_none() {
-      if !self.is_at_start_of_file {
-        self.output.write_all(b"\n")?;
-      }
-      if self.source.ends_with(b"\n") {
-        self
-          .output
-          .write_all(&self.source[..self.source.len() - 1])?;
-      } else {
-        self.output.write_all(self.source)?;
-      }
-      self.is_at_start_of_file = false;
-      self.source = &[];
-    } else {
-      while let Some(line) = self.consume_line() {
-        self.write_line(line)?;
-      }
-    }
+    // Write any remaining source content to the output.
+    self.flush_remaining_source()?;
 
+    // Ensure final newline unless suppressed by patch metadata.
     if !patch.new_file_no_newline && !patch.binary && !self.is_at_start_of_file
     {
       self.output.write_all(b"\n")?;
     }
     Ok(())
   }
-}
 
-#[inline(always)]
-fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
-  if source.is_empty() {
-    return None;
+  /// Write remaining source lines to the output.
+  fn flush_remaining_source(&mut self) -> Result<(), Error> {
+    let source = self.source;
+    if source.is_empty() {
+      return Ok(());
+    }
+
+    let lines = memchr_iter(b'\n', source).count() as u32;
+    self.write_block(source, lines)?;
+    self.source = &[];
+    Ok(())
   }
-  let end = source.find_byte(b'\n').unwrap_or(source.len());
-  let full_line = &source[..end];
-  let next_source = if end < source.len() {
-    &source[end + 1..]
-  } else {
-    &[]
-  };
-  let line_content = full_line.strip_suffix(b"\r").unwrap_or(full_line);
-  Some((line_content, next_source))
 }

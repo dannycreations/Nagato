@@ -32,6 +32,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   let fs = FileSystem::new(root);
 
   // Process patches from stdin or specified files.
+  // We unify the input source into a collection of byte buffers.
   if cli.files.is_empty() {
     let mut stdin_content = Vec::new();
     io::stdin().read_to_end(&mut stdin_content)?;

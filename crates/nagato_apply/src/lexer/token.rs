@@ -1,4 +1,4 @@
-use crate::BinaryPatchKind;
+use crate::BinaryKind;
 
 /// Represents a single token from a diff file.
 #[doc(hidden)]
@@ -62,7 +62,7 @@ pub enum TokenKind<'a> {
   /// The header of a git binary patch.
   GitBinaryPatchHeader,
   /// The type and size of a binary patch fragment.
-  BinaryPatchType { kind: BinaryPatchKind, size: u64 },
+  BinaryPatchType { kind: BinaryKind, size: u64 },
   /// A line of binary data.
   BinaryData(&'a [u8]),
 }

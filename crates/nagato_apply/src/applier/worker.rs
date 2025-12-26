@@ -1,18 +1,24 @@
-use std::io::{self, sink};
+use std::io::{self, sink, ErrorKind as IoErrorKind};
 
 use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind, FileSystem};
 
 use crate::{apply, Patch};
 
-/// Ignore I/O "Not Found" errors.
-pub fn ignore_not_found(res: Result<(), Error>) -> Result<(), Error> {
-  match res {
-    Err(Error {
-      kind: ErrorKind::Io(e),
-      ..
-    }) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-    res => res,
+/// Extension trait for Result to easily ignore "Not Found" I/O errors.
+trait IgnoreNotFound {
+  fn ignore_not_found(self) -> Self;
+}
+
+impl IgnoreNotFound for Result<(), Error> {
+  fn ignore_not_found(self) -> Self {
+    match self {
+      Err(Error {
+        kind: ErrorKind::Io(e),
+        ..
+      }) if e.kind() == IoErrorKind::NotFound => Ok(()),
+      res => res,
+    }
   }
 }
 
@@ -34,18 +40,23 @@ pub fn read_source_or_empty(
   }
 }
 
+/// Helper to apply patch to a writer and handle source reading.
+fn apply_to_writer(
+  fs: &FileSystem,
+  patch: &Patch<'_>,
+  writer: &mut impl io::Write,
+) -> Result<(), Error> {
+  let source = read_source_or_empty(fs, patch.source_file())?;
+  apply(writer, patch, source.as_deref().unwrap_or(&[]))
+}
+
 /// Handle file deletion by applying the patch to a sink and removing the file.
 pub fn handle_file_deletion(
   fs: &FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  let source = read_source_or_empty(fs, source_path)?;
-  let source_slice = source.as_deref().unwrap_or(&[]);
-  apply(&mut sink(), patch, source_slice)?;
-
-  ignore_not_found(fs.remove_file(source_path))?;
-  Ok(())
+  apply_to_writer(fs, patch, &mut sink())?;
+  fs.remove_file(patch.source_file()).ignore_not_found()
 }
 
 /// Handle metadata-only changes (renames, copies, or creating empty files).
@@ -69,17 +80,13 @@ pub fn handle_content_change(
   fs: &FileSystem,
   patch: &Patch<'_>,
 ) -> Result<(), Error> {
-  let source_path = patch.source_file();
   let mut writer = fs.write(patch.new_file)?;
-  {
-    let source = read_source_or_empty(fs, source_path)?;
-    let source_slice = source.as_deref().unwrap_or(&[]);
-    apply(&mut writer, patch, source_slice)?;
-  }
+  apply_to_writer(fs, patch, &mut writer)?;
   writer.commit()?;
 
+  let source_path = patch.source_file();
   if patch.rename_to.is_some() && source_path != patch.new_file {
-    ignore_not_found(fs.remove_file(source_path))?;
+    fs.remove_file(source_path).ignore_not_found()?;
   }
   Ok(())
 }
@@ -97,10 +104,12 @@ pub fn patch_file_worker(
     return handle_content_change(fs, patch);
   }
 
-  match (patch.new_file, patch.hunks.is_empty()) {
-    (b"/dev/null", _) => handle_file_deletion(fs, patch)?,
-    (_, true) => handle_metadata_change(fs, patch)?,
-    (_, false) => handle_content_change(fs, patch)?,
+  if patch.new_file == b"/dev/null" {
+    handle_file_deletion(fs, patch)?;
+  } else if patch.hunks.is_empty() {
+    handle_metadata_change(fs, patch)?;
+  } else {
+    handle_content_change(fs, patch)?;
   }
 
   if patch.new_file != b"/dev/null" {

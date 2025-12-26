@@ -1,3 +1,6 @@
+use bstr::ByteSlice;
+
+/// Strip common git prefixes "a/" and "b/" from a path.
 #[inline(always)]
 pub fn strip_git_prefix(s: &[u8]) -> &[u8] {
   s.strip_prefix(b"a/")
@@ -5,6 +8,7 @@ pub fn strip_git_prefix(s: &[u8]) -> &[u8] {
     .unwrap_or(s)
 }
 
+/// Parse an integer from a byte slice.
 #[inline]
 pub fn parse_int<T>(bytes: &[u8], radix: u32) -> Option<(T, &[u8])>
 where
@@ -29,4 +33,21 @@ where
     return None;
   }
   Some((T::try_from(num).ok()?, &bytes[i..]))
+}
+
+/// Get the next line from a source, handling \n and \r\n.
+/// Returns (line_content_without_newline, remaining_source).
+#[inline(always)]
+pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
+  if source.is_empty() {
+    return None;
+  }
+  let end = source.find_byte(b'\n').unwrap_or(source.len());
+  let (full_line, next_source) = if end < source.len() {
+    (&source[..end], &source[end + 1..])
+  } else {
+    (source, &[][..])
+  };
+  let line_content = full_line.strip_suffix(b"\r").unwrap_or(full_line);
+  Some((line_content, next_source))
 }
