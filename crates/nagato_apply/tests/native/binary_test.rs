@@ -1,6 +1,8 @@
 use std::fs;
 
-use nagato_core::error::ErrorKind;
+use nagato_apply::Parser;
+use nagato_core::{ErrorKind, FileSystem};
+use tempfile::Builder;
 
 test_patch_ok!(
   applies_binary_patch_literal,
@@ -61,16 +63,10 @@ fn fails_on_base85_overflow() {
       "#
   );
 
-  let dir = tempfile::Builder::new()
-    .prefix("test_overflow")
-    .tempdir()
-    .unwrap();
-  let fs = nagato_core::fs::FileSystem::new(dir.path());
+  let dir = Builder::new().prefix("test_overflow").tempdir().unwrap();
+  let fs = FileSystem::new(dir.path());
 
-  let patch = nagato_apply::Parser::new(diff.as_bytes())
-    .next()
-    .unwrap()
-    .unwrap();
+  let patch = Parser::new(diff.as_bytes()).next().unwrap().unwrap();
 
   let result = nagato_apply::patch_file(&fs, patch, false);
 

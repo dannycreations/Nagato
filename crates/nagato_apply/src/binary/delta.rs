@@ -1,6 +1,6 @@
-use std::io::{self, Read, Write};
+use std::io::{ErrorKind as IoErrorKind, Read, Write};
 
-use nagato_core::error::{Error, ErrorKind};
+use nagato_core::{Error, ErrorKind};
 
 fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
   let mut result: u64 = 0;
@@ -9,7 +9,7 @@ fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
 
   loop {
     reader.read_exact(&mut byte_buf).map_err(|e| {
-      if e.kind() == io::ErrorKind::UnexpectedEof {
+      if e.kind() == IoErrorKind::UnexpectedEof {
         Error::new(ErrorKind::InvalidBinaryPatch)
       } else {
         Error::new(ErrorKind::Io(e))
@@ -49,7 +49,7 @@ pub fn apply_delta(
   loop {
     match delta.read_exact(&mut cmd_buf) {
       Ok(_) => {}
-      Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+      Err(e) if e.kind() == IoErrorKind::UnexpectedEof => break,
       Err(e) => return Err(Error::new(ErrorKind::Io(e))),
     }
     let cmd = cmd_buf[0];

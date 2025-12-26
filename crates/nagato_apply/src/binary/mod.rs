@@ -1,9 +1,10 @@
-pub mod base85;
-pub mod delta;
-
-pub use base85::{decode_base85, Base85Reader};
-pub use delta::apply_delta;
 use flate2::read::ZlibDecoder;
+
+mod base85;
+mod delta;
+
+pub use base85::*;
+pub use delta::*;
 
 pub fn new_base85_decoder<'a>(
   lines: &'a [&'a [u8]],

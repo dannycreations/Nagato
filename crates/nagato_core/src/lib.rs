@@ -1,2 +1,5 @@
-pub mod error;
-pub mod fs;
+mod error;
+mod fs;
+
+pub use error::*;
+pub use fs::*;

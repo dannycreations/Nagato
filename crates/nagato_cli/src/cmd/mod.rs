@@ -5,14 +5,15 @@ use std::{
   path::PathBuf,
 };
 
-pub mod args;
-pub mod processor;
-
-pub use args::Cli;
-pub use clap::CommandFactory;
 use memmap2::Mmap;
-use nagato_core::{error::Error, fs::FileSystem};
+use nagato_core::{Error, FileSystem};
 use processor::process_patch;
+
+mod args;
+mod processor;
+
+pub use args::*;
+pub use clap::*;
 
 /// Main entry point for the CLI logic.
 pub fn run(cli: &Cli) -> Result<(), Error> {

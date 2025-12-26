@@ -1,14 +1,14 @@
 use bstr::ByteSlice;
 use memchr::memmem;
-use nagato_core::error::{Error, ErrorKind};
-
-pub mod token;
-pub mod utils;
-
-pub use token::TokenKind;
+use nagato_core::{Error, ErrorKind};
 use utils::{parse_int, strip_git_prefix};
 
-use crate::models::binary::BinaryPatchKind;
+use crate::BinaryPatchKind;
+
+mod token;
+mod utils;
+
+pub use token::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexerItem<'a> {

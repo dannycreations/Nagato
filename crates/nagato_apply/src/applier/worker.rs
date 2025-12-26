@@ -1,12 +1,9 @@
 use std::io::{self, sink};
 
 use memmap2::Mmap;
-use nagato_core::{
-  error::{Error, ErrorKind},
-  fs::FileSystem,
-};
+use nagato_core::{Error, ErrorKind, FileSystem};
 
-use crate::{applier::apply, models::patch::Patch};
+use crate::{apply, Patch};
 
 /// Ignore I/O "Not Found" errors.
 pub fn ignore_not_found(res: Result<(), Error>) -> Result<(), Error> {

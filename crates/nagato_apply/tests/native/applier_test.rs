@@ -1,6 +1,6 @@
 use std::fs;
 
-use nagato_core::error::ErrorKind;
+use nagato_core::ErrorKind;
 
 test_patch_ok!(
   matches_whitespace,

@@ -1,5 +1,5 @@
-pub mod atomic;
-pub mod virtuals;
+mod atomic;
+mod virtuals;
 
-pub use atomic::AtomicWriter;
-pub use virtuals::FileSystem;
+pub use atomic::*;
+pub use virtuals::*;

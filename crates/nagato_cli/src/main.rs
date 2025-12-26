@@ -1,3 +1,5 @@
+use std::process;
+
 use nagato_cli::{ClapParser, Cli};
 
 fn main() {
@@ -11,6 +13,6 @@ fn main() {
       );
       eprintln!("    at {}:{}", location, line);
     }
-    std::process::exit(1);
+    process::exit(1);
   }
 }

@@ -1,20 +1,12 @@
-use std::io::Write;
+use std::{io::Write, str};
 
 use bstr::ByteSlice;
 use memchr::{memchr, memchr_iter, memmem};
-use nagato_core::error::{Error, ErrorKind};
+use memmem::Finder;
+use nagato_core::{Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
-use super::utils::get_line;
-use crate::{
-  binary,
-  models::{
-    binary::BinaryPatchKind,
-    hunk::Hunk,
-    line::{Line, LineKind},
-    patch::Patch,
-  },
-};
+use crate::{binary, BinaryPatchKind, Hunk, Line, LineKind, Patch};
 
 /// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
@@ -188,7 +180,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
     }
 
-    let finder = memmem::Finder::new(needle);
+    let finder = Finder::new(needle);
     for match_pos in finder.find_iter(self.source) {
       if match_pos > 0 && self.source[match_pos - 1] != b'\n' {
         continue;
@@ -305,7 +297,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         let result = hasher.finalize();
         let hex_hash = hex::encode(result);
 
-        let old_hash_str = std::str::from_utf8(old_hash_bytes)
+        let old_hash_str = str::from_utf8(old_hash_bytes)
           .map_err(|_| Error::new(ErrorKind::InvalidIndexLine))?;
 
         if !hex_hash.starts_with(old_hash_str)
@@ -391,4 +383,20 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
     Ok(())
   }
+}
+
+#[inline(always)]
+fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
+  if source.is_empty() {
+    return None;
+  }
+  let end = source.find_byte(b'\n').unwrap_or(source.len());
+  let full_line = &source[..end];
+  let next_source = if end < source.len() {
+    &source[end + 1..]
+  } else {
+    &[]
+  };
+  let line_content = full_line.strip_suffix(b"\r").unwrap_or(full_line);
+  Some((line_content, next_source))
 }

@@ -1,10 +1,11 @@
-pub mod applier;
-pub mod binary;
-pub mod lexer;
-pub mod models;
-pub mod parser;
+mod applier;
+mod binary;
+mod lexer;
+mod models;
+mod parser;
 
-pub use applier::{apply, patch_file};
-pub use lexer::{Lexer, LexerItem, TokenKind};
+pub use applier::*;
+pub use binary::*;
+pub use lexer::*;
 pub use models::*;
-pub use parser::Parser;
+pub use parser::*;

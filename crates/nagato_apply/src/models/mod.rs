@@ -1,9 +1,9 @@
-pub mod binary;
-pub mod hunk;
-pub mod line;
-pub mod patch;
+mod binary;
+mod hunk;
+mod line;
+mod patch;
 
-pub use binary::{BinaryFragment, BinaryPatchKind};
-pub use hunk::Hunk;
-pub use line::{Line, LineKind};
-pub use patch::Patch;
+pub use binary::*;
+pub use hunk::*;
+pub use line::*;
+pub use patch::*;

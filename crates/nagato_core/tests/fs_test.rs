@@ -1,4 +1,4 @@
-use nagato_core::fs::FileSystem;
+use nagato_core::FileSystem;
 use tempfile::tempdir;
 
 #[test]

@@ -1,4 +1,4 @@
-use nagato_core::error::ErrorKind;
+use nagato_core::ErrorKind;
 
 test_patch_err_with_line!(
   fails_with_correct_line_number_on_hunk_apply_error,

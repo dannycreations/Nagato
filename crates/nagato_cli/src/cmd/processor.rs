@@ -1,5 +1,5 @@
 use nagato_apply::{patch_file, Parser};
-use nagato_core::{error::Error, fs::FileSystem};
+use nagato_core::{Error, FileSystem};
 
 pub fn process_patch(
   fs: &FileSystem,

@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::models::{binary::BinaryFragment, hunk::Hunk};
+use crate::{BinaryFragment, Hunk};
 
 /// Represents a single patch, which can contain multiple hunks.
 #[derive(Debug, PartialEq, Default, Clone)]

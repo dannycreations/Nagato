@@ -1,6 +1,15 @@
-use std::io::{self, Read, Write};
+use std::{
+  cmp,
+  error::Error as StdError,
+  fmt::{Display, Formatter, Result as FmtResult},
+  io::{
+    self, Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult,
+    Write,
+  },
+  slice::Iter,
+};
 
-use nagato_core::error::{Error, ErrorKind};
+use nagato_core::{Error, ErrorKind};
 
 /// Git's base85 alphabet
 const ENCODE_MAP: &[u8; 85] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
@@ -22,16 +31,16 @@ fn decode_len_char(c: u8) -> Option<usize> {
 #[derive(Debug)]
 pub struct InvalidBinaryLineError;
 
-impl std::fmt::Display for InvalidBinaryLineError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for InvalidBinaryLineError {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     write!(f, "Invalid binary files line")
   }
 }
 
-impl std::error::Error for InvalidBinaryLineError {}
+impl StdError for InvalidBinaryLineError {}
 
 pub struct Base85Reader<'a> {
-  lines: std::slice::Iter<'a, &'a [u8]>,
+  lines: Iter<'a, &'a [u8]>,
   buffer: [u8; 52], // Git binary lines are at most 52 bytes decoded (Z line is 52)
   buf_len: usize,
   pos: usize,
@@ -49,10 +58,10 @@ impl<'a> Base85Reader<'a> {
 }
 
 impl<'a> Read for Base85Reader<'a> {
-  fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+  fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
     loop {
       if self.pos < self.buf_len {
-        let len = std::cmp::min(buf.len(), self.buf_len - self.pos);
+        let len = cmp::min(buf.len(), self.buf_len - self.pos);
         buf[..len].copy_from_slice(&self.buffer[self.pos..self.pos + len]);
         self.pos += len;
         return Ok(len);
@@ -72,7 +81,7 @@ impl<'a> Read for Base85Reader<'a> {
 
       let len_char = line[0];
       let expected_len = decode_len_char(len_char).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+        IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
       })?;
 
       let data = &line[1..];
@@ -84,14 +93,14 @@ impl<'a> Read for Base85Reader<'a> {
         let mut val: u32 = 0;
         for &c in chunk {
           val = val.checked_mul(85).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+            IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
           })?;
           val = val
             .checked_add(decode_char(c).ok_or_else(|| {
-              io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+              IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
             })? as u32)
             .ok_or_else(|| {
-              io::Error::new(io::ErrorKind::InvalidData, InvalidBinaryLineError)
+              IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
             })?;
         }
 

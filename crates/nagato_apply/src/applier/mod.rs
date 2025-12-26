@@ -1,13 +1,13 @@
-pub mod engine;
-pub mod utils;
-pub mod worker;
-
 use std::io::Write;
 
-pub use engine::Applier;
-use nagato_core::{error::Error, fs::FileSystem};
+use nagato_core::{Error, FileSystem};
 
-use crate::models::patch::Patch;
+use crate::Patch;
+
+mod engine;
+mod worker;
+
+pub use engine::*;
 
 /// Apply a patch to the source bytes and write to the output.
 /// This is the core application logic that works on byte slices.

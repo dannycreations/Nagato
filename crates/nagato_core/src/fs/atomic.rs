@@ -1,11 +1,11 @@
 use std::{
-  io::{self, BufWriter, Write},
+  io::{self, BufWriter, Error as IoError, ErrorKind as IoErrorKind, Write},
   path::{Path, PathBuf},
 };
 
 use tempfile::NamedTempFile;
 
-use crate::error::Error;
+use crate::Error;
 
 /// Atomic file writer that uses a temporary file and renames it on commit.
 /// This ensures that the destination file is only updated if the write succeeds.
@@ -19,8 +19,8 @@ impl AtomicWriter {
   /// The temporary file is created in the same directory as the destination file.
   pub fn new(path: &Path) -> io::Result<Self> {
     let parent = path.parent().ok_or_else(|| {
-      io::Error::new(
-        io::ErrorKind::InvalidInput,
+      IoError::new(
+        IoErrorKind::InvalidInput,
         "Destination path has no parent directory",
       )
     })?;

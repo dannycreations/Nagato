@@ -6,10 +6,7 @@ use std::{
 use bstr::ByteSlice;
 use memmap2::Mmap;
 
-use crate::{
-  error::{Error, ErrorKind},
-  fs::atomic::AtomicWriter,
-};
+use crate::{AtomicWriter, Error, ErrorKind};
 
 /// A virtualized file system abstraction.
 /// Ensures all file operations are relative to a root directory and prevents path traversal.

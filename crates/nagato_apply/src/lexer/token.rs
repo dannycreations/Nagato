@@ -1,4 +1,4 @@
-use crate::models::binary::BinaryPatchKind;
+use crate::BinaryPatchKind;
 
 /// Represents a single token from a diff file.
 #[doc(hidden)]

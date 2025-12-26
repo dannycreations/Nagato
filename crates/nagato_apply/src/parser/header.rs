@@ -1,9 +1,10 @@
-use nagato_core::error::Error;
+use nagato_core::Error;
 
-use crate::{lexer::TokenKind, models::Patch};
+use super::binary::parse_binary_patch;
+use crate::{Parser, Patch, TokenKind};
 
 pub fn parse_header<'a>(
-  parser: &mut crate::parser::Parser<'a>,
+  parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<(), Error> {
   while let Some(Ok(item)) = parser.tokens.peek() {
@@ -62,7 +63,7 @@ pub fn parse_header<'a>(
       }
       TokenKind::GitBinaryPatchHeader => {
         parser.tokens.next();
-        crate::parser::binary::parse_binary_patch(parser, patch)?;
+        parse_binary_patch(parser, patch)?;
         return Ok(());
       }
       _ => break,

@@ -3,8 +3,9 @@ use std::io;
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
-pub mod kind;
-pub use kind::ErrorKind;
+mod kind;
+
+pub use kind::*;
 
 /// Core error type for Nagato.
 #[derive(ThisError, Debug)]

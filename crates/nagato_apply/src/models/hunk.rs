@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::models::line::{Line, LineKind};
+use crate::{Line, LineKind};
 
 /// Represents a single hunk in a patch.
 #[derive(Debug, PartialEq, Default, Clone)]
@@ -21,7 +21,7 @@ pub struct Hunk<'a> {
 
 impl<'a> Hunk<'a> {
   /// Invert the hunk for reverse application.
-  pub(crate) fn invert(&mut self) {
+  pub fn invert(&mut self) {
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
     self.lines.iter_mut().for_each(|line| {
