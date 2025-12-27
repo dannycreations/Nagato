@@ -6,6 +6,7 @@ use std::{
 };
 
 use memmap2::Mmap;
+use nagato_core::ErrorKind;
 use nagato_core::{Error, FileSystem};
 use processor::process_patch;
 
@@ -39,7 +40,12 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
     process_patch(&fs, &stdin_content, cli.reverse, cli.check)?;
   } else {
     for path in &cli.files {
-      let file = File::open(path)?;
+      let file = File::open(path).map_err(|e| {
+        Error::new(ErrorKind::CantOpenPatch(
+          path.to_string_lossy().to_string(),
+          e,
+        ))
+      })?;
       // SAFETY: Mmap is used for efficient reading of large patch files.
       let mmap = unsafe { Mmap::map(&file)? };
       process_patch(&fs, &mmap, cli.reverse, cli.check)?;

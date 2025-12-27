@@ -55,4 +55,6 @@ pub enum ErrorKind {
   BinaryPatchSourceMismatch,
   #[error("Invalid path")]
   InvalidPath,
+  #[error("Can't open patch '{0}'\n  {1}")]
+  CantOpenPatch(String, io::Error),
 }
