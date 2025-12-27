@@ -420,3 +420,26 @@ test_parser_err!(
   "#,
   ErrorKind::HunkLineCountMismatch
 );
+
+test_patch_ok!(
+  applies_empty_line_needle_and_continues_search,
+  initial_fs: { "file.txt" => "line1\n\nline2\n\nline3\n" },
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -2,2 +2,2 @@
+     
+    -line2
+    +modified2
+    @@ -4,2 +4,2 @@
+     
+    -line3
+    +modified3
+  "#,
+  assertions: |root| {
+    assert_eq!(
+      fs::read_to_string(root.join("file.txt")).unwrap(),
+      "line1\n\nmodified2\n\nmodified3\n"
+    );
+  }
+);

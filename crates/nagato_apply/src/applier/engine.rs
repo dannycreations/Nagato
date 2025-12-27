@@ -154,13 +154,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     if needle.is_empty() {
       while let Some((line, next_source)) = get_line(self.source) {
         if line == needle {
-          let result =
-            self.verify_match(next_source, lines_to_match.clone(), hunk);
-          if let Ok(final_source) = result {
-            self.source = final_source;
-            return Ok(());
+          match self.verify_match(next_source, lines_to_match.clone(), hunk) {
+            Ok(final_source) => {
+              self.source = final_source;
+              self.current_source_line += 1;
+              return Ok(());
+            }
+            Err(e) => return Err(e),
           }
-          return result.map(|_| ());
         }
 
         self.write_line(line)?;
@@ -192,18 +193,26 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       } else {
         continue;
       };
-      let result = self.verify_match(next_source, lines_to_match.clone(), hunk);
 
-      if let Ok(final_source) = result {
-        let skipped = &self.source[..match_pos];
-        let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
-        self.write_block(skipped, lines_skipped)?;
+      match self.verify_match(next_source, lines_to_match.clone(), hunk) {
+        Ok(final_source) => {
+          let skipped = &self.source[..match_pos];
+          let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
+          self.write_block(skipped, lines_skipped)?;
 
-        self.source = final_source;
-        self.current_source_line += 1;
-        return Ok(());
+          self.source = final_source;
+          self.current_source_line += 1;
+          return Ok(());
+        }
+        Err(e) => {
+          // If this was the expected position, return the error immediately.
+          // Otherwise, continue searching.
+          let target_line = hunk.old_line.saturating_sub(1);
+          if self.current_source_line == target_line {
+            return Err(e);
+          }
+        }
       }
-      return result.map(|_| ());
     }
 
     Err(Error::with_line(
