@@ -23,3 +23,16 @@ test_exec_ok!(
   args: ["--reverse"],
   assert_file: ("file.txt", "hello\n")
 );
+
+test_exec_ok!(
+  exec_check_argument,
+  initial_fs: { "file.txt" => "hello\n" },
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    -hello
+    +world
+  "#,
+  args: ["--check"],
+  assert_file: ("file.txt", "hello\n")
+);

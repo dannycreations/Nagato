@@ -68,7 +68,7 @@ fn fails_on_base85_overflow() {
 
   let patch = Parser::new(diff.as_bytes()).next().unwrap().unwrap();
 
-  let result = nagato_apply::patch_file(&fs, patch, false);
+  let result = nagato_apply::patch_file(&fs, patch, false, false);
 
   match result {
     Err(e) => {

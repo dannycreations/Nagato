@@ -10,6 +10,9 @@ pub struct Cli {
   /// Apply the patch in reverse.
   #[arg(short, long)]
   pub reverse: bool,
+  /// Check if the patch is applicable.
+  #[arg(long)]
+  pub check: bool,
   /// The directory to run the patch in.
   #[arg(short, long)]
   pub directory: Option<OsString>,

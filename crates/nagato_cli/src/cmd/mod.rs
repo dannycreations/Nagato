@@ -36,13 +36,13 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   if cli.files.is_empty() {
     let mut stdin_content = Vec::new();
     io::stdin().read_to_end(&mut stdin_content)?;
-    process_patch(&fs, &stdin_content, cli.reverse)?;
+    process_patch(&fs, &stdin_content, cli.reverse, cli.check)?;
   } else {
     for path in &cli.files {
       let file = File::open(path)?;
       // SAFETY: Mmap is used for efficient reading of large patch files.
       let mmap = unsafe { Mmap::map(&file)? };
-      process_patch(&fs, &mmap, cli.reverse)?;
+      process_patch(&fs, &mmap, cli.reverse, cli.check)?;
     }
   }
 

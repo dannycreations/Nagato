@@ -32,10 +32,11 @@ pub fn patch_file(
   fs: &FileSystem,
   patch: Patch<'_>,
   reverse: bool,
+  check: bool,
 ) -> Result<(), Error> {
   if reverse {
-    worker::patch_file_worker(fs, &patch.invert())
+    worker::patch_file_worker(fs, &patch.invert(), check)
   } else {
-    worker::patch_file_worker(fs, &patch)
+    worker::patch_file_worker(fs, &patch, check)
   }
 }

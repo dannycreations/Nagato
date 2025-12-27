@@ -54,16 +54,24 @@ fn apply_to_writer(
 pub fn handle_file_deletion(
   fs: &FileSystem,
   patch: &Patch<'_>,
+  check: bool,
 ) -> Result<(), Error> {
   apply_to_writer(fs, patch, &mut sink())?;
-  fs.remove_file(patch.source_file()).ignore_not_found()
+  if !check {
+    fs.remove_file(patch.source_file()).ignore_not_found()?;
+  }
+  Ok(())
 }
 
 /// Handle metadata-only changes (renames, copies, or creating empty files).
 pub fn handle_metadata_change(
   fs: &FileSystem,
   patch: &Patch<'_>,
+  check: bool,
 ) -> Result<(), Error> {
+  if check {
+    return Ok(());
+  }
   let source_path = patch.source_file();
   if patch.rename_to.is_some() {
     fs.rename(source_path, patch.new_file)?;
@@ -79,7 +87,12 @@ pub fn handle_metadata_change(
 pub fn handle_content_change(
   fs: &FileSystem,
   patch: &Patch<'_>,
+  check: bool,
 ) -> Result<(), Error> {
+  if check {
+    return apply_to_writer(fs, patch, &mut sink());
+  }
+
   let mut writer = fs.write(patch.new_file)?;
   apply_to_writer(fs, patch, &mut writer)?;
   writer.commit()?;
@@ -95,24 +108,25 @@ pub fn handle_content_change(
 pub fn patch_file_worker(
   fs: &FileSystem,
   patch: &Patch<'_>,
+  check: bool,
 ) -> Result<(), Error> {
   if patch.binary && !patch.hunks.is_empty() {
     return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
 
   if !patch.binary_fragments.is_empty() {
-    return handle_content_change(fs, patch);
+    return handle_content_change(fs, patch, check);
   }
 
   if patch.new_file == b"/dev/null" {
-    handle_file_deletion(fs, patch)?;
+    handle_file_deletion(fs, patch, check)?;
   } else if patch.hunks.is_empty() {
-    handle_metadata_change(fs, patch)?;
+    handle_metadata_change(fs, patch, check)?;
   } else {
-    handle_content_change(fs, patch)?;
+    handle_content_change(fs, patch, check)?;
   }
 
-  if patch.new_file != b"/dev/null" {
+  if !check && patch.new_file != b"/dev/null" {
     if let Some(mode) = patch.new_mode.or(patch.index_mode) {
       fs.set_permissions(patch.new_file, mode)?;
     }

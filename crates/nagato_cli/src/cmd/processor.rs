@@ -5,9 +5,10 @@ pub fn process_patch(
   fs: &FileSystem,
   patch_content: &[u8],
   reverse: bool,
+  check: bool,
 ) -> Result<(), Error> {
   for patch in Parser::new(patch_content) {
-    patch_file(fs, patch?, reverse)?;
+    patch_file(fs, patch?, reverse, check)?;
   }
   Ok(())
 }
