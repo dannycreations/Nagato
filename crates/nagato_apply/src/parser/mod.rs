@@ -21,12 +21,28 @@ impl<'a> Parser<'a> {
 
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
     let mut patch = Patch::default();
+    let _start_line = self
+      .tokens
+      .peek()
+      .and_then(|r| r.as_ref().ok())
+      .map(|i| i.line_num)
+      .unwrap_or(0);
+
     header::parse_header(self, &mut patch)?;
     self.skip_empty_context_lines();
     hunk::parse_hunks(self, &mut patch)?;
 
     if patch.hunks.is_empty() && patch.binary_fragments.is_empty() {
       hunk::parse_headerless_hunk(self, &mut patch)?;
+    }
+
+    if patch.hunks.is_empty()
+      && patch.binary_fragments.is_empty()
+      && patch.old_file.is_empty()
+      && patch.new_file.is_empty()
+    {
+      // If we parsed nothing, it's not an error yet, the iterator handles completion.
+      return Ok(patch);
     }
 
     Ok(patch)

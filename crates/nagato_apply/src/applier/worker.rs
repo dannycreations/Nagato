@@ -44,27 +44,14 @@ pub fn read_source_or_empty(
 fn apply_to_writer(
   fs: &FileSystem,
   patch: &Patch<'_>,
-  writer: &mut impl io::Write,
+  writer: &mut (impl io::Write + ?Sized),
 ) -> Result<(), Error> {
   let source = read_source_or_empty(fs, patch.source_file())?;
   apply(writer, patch, source.as_deref().unwrap_or(&[]))
 }
 
-/// Handle file deletion by applying the patch to a sink and removing the file.
-pub fn handle_file_deletion(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-  check: bool,
-) -> Result<(), Error> {
-  apply_to_writer(fs, patch, &mut sink())?;
-  if !check {
-    fs.remove_file(patch.source_file()).ignore_not_found()?;
-  }
-  Ok(())
-}
-
 /// Handle metadata-only changes (renames, copies, or creating empty files).
-pub fn handle_metadata_change(
+fn handle_metadata_change(
   fs: &FileSystem,
   patch: &Patch<'_>,
   check: bool,
@@ -83,25 +70,29 @@ pub fn handle_metadata_change(
   Ok(())
 }
 
-/// Handle content changes by applying the patch to a new file.
-pub fn handle_content_change(
+/// Handle content changes (including deletions) by applying the patch.
+fn handle_application(
   fs: &FileSystem,
   patch: &Patch<'_>,
   check: bool,
 ) -> Result<(), Error> {
-  if check {
-    return apply_to_writer(fs, patch, &mut sink());
-  }
+  if check || patch.new_file == b"/dev/null" {
+    apply_to_writer(fs, patch, &mut sink())?;
+    if !check && patch.new_file == b"/dev/null" {
+      fs.remove_file(patch.source_file()).ignore_not_found()?;
+    }
+    Ok(())
+  } else {
+    let mut writer = fs.write(patch.new_file)?;
+    apply_to_writer(fs, patch, &mut writer)?;
+    writer.commit()?;
 
-  let mut writer = fs.write(patch.new_file)?;
-  apply_to_writer(fs, patch, &mut writer)?;
-  writer.commit()?;
-
-  let source_path = patch.source_file();
-  if patch.rename_to.is_some() && source_path != patch.new_file {
-    fs.remove_file(source_path).ignore_not_found()?;
+    let source_path = patch.source_file();
+    if patch.rename_to.is_some() && source_path != patch.new_file {
+      fs.remove_file(source_path).ignore_not_found()?;
+    }
+    Ok(())
   }
-  Ok(())
 }
 
 /// The main worker for applying a patch to the file system.
@@ -115,15 +106,16 @@ pub fn patch_file_worker(
   }
 
   if !patch.binary_fragments.is_empty() {
-    return handle_content_change(fs, patch, check);
+    return handle_application(fs, patch, check);
   }
 
-  if patch.new_file == b"/dev/null" {
-    handle_file_deletion(fs, patch, check)?;
-  } else if patch.hunks.is_empty() {
-    handle_metadata_change(fs, patch, check)?;
+  if patch.new_file == b"/dev/null"
+    || !patch.hunks.is_empty()
+    || !patch.binary_fragments.is_empty()
+  {
+    handle_application(fs, patch, check)?;
   } else {
-    handle_content_change(fs, patch, check)?;
+    handle_metadata_change(fs, patch, check)?;
   }
 
   if !check && patch.new_file != b"/dev/null" {

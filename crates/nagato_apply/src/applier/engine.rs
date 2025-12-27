@@ -3,16 +3,16 @@ use std::{io::Write, str};
 use bstr::ByteSlice;
 use memchr::{memchr, memchr_iter, memmem};
 use memmem::Finder;
-use nagato_core::{Error, ErrorKind};
+use nagato_core::{get_line, Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
-use crate::{binary, get_line, BinaryKind, Hunk, Line, LineKind, Patch};
+use crate::{binary, BinaryKind, Hunk, Line, LineKind, Patch};
 
 /// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
   pub output: &'b mut W,
   pub source: &'s [u8],
-  pub is_at_start_of_file: bool,
+  pub first_line: bool,
   pub current_source_line: u32,
 }
 
@@ -21,7 +21,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Self {
       output,
       source,
-      is_at_start_of_file: true,
+      first_line: true,
       current_source_line: 0,
     }
   }
@@ -30,10 +30,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// We prepend a newline for every line except the first to ensure correct formatting.
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
-    if !self.is_at_start_of_file {
+    if !self.first_line {
       self.output.write_all(b"\n")?;
     }
-    self.is_at_start_of_file = false;
+    self.first_line = false;
     self.output.write_all(line)?;
     Ok(())
   }
@@ -46,22 +46,31 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return Ok(());
     }
 
-    // Efficiently write blocks without CRs by avoiding line-by-line iteration.
+    // Efficiently write blocks by avoiding line-by-line iteration when possible.
     // We strip the trailing newline because write_line/write_block logic
     // prepends newlines for subsequent content.
-    if memchr(b'\r', block).is_none() {
-      if !self.is_at_start_of_file {
-        self.output.write_all(b"\n")?;
+    if !self.first_line {
+      self.output.write_all(b"\n")?;
+    }
+
+    // If block has CRs, we must normalize to \n for our internal processing
+    // which assumes \n as the separator and prepends it.
+    if memchr(b'\r', block).is_some() {
+      let mut lines_iter = block.lines();
+      if let Some(first) = lines_iter.next() {
+        self.output.write_all(first)?;
+        for line in lines_iter {
+          self.output.write_all(b"\n")?;
+          self.output.write_all(line)?;
+        }
       }
+    } else {
       self
         .output
         .write_all(block.strip_suffix(b"\n").unwrap_or(block))?;
-      self.is_at_start_of_file = false;
-    } else {
-      for line in block.lines() {
-        self.write_line(line)?;
-      }
     }
+
+    self.first_line = false;
     self.current_source_line += lines;
     Ok(())
   }
@@ -77,7 +86,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Advance the source and output to the start of a hunk.
   pub fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
     let target_line = hunk.old_line.saturating_sub(1);
-    let lines_to_skip = target_line.saturating_sub(self.current_source_line);
+    let mut lines_to_skip =
+      target_line.saturating_sub(self.current_source_line);
 
     if lines_to_skip > 0 {
       let mut count = 0;
@@ -90,25 +100,25 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         }
       }
 
-      if count == lines_to_skip {
+      if count > 0 {
         let block = &self.source[..end_offset];
         self.write_block(block, count)?;
         self.source = &self.source[end_offset..];
-        return Ok(());
+        lines_to_skip -= count;
       }
     }
 
-    while self.current_source_line < target_line {
+    // Fallback or handle remaining lines
+    for _ in 0..lines_to_skip {
       if let Some(line) = self.consume_line() {
         self.write_line(line)?;
         self.current_source_line += 1;
+      } else if hunk.old_span > 0 {
+        return Err(Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
+          hunk.patch_line_num,
+        ));
       } else {
-        if hunk.old_span > 0 {
-          return Err(Error::with_line(
-            ErrorKind::CouldNotApplyHunk,
-            hunk.patch_line_num,
-          ));
-        }
         break;
       }
     }
@@ -333,8 +343,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.flush_remaining_source()?;
 
     // Ensure final newline unless suppressed by patch metadata.
-    if !patch.new_file_no_newline && !patch.binary && !self.is_at_start_of_file
-    {
+    if !patch.new_file_no_newline && !patch.binary && !self.first_line {
       self.output.write_all(b"\n")?;
     }
     Ok(())
