@@ -1,14 +1,14 @@
-use std::io;
+use std::{io, sync::Arc};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
-#[derive(ThisError, Debug)]
+#[derive(ThisError, Debug, Clone)]
 pub enum ErrorKind {
   #[error("I/O error")]
-  Io(#[from] io::Error),
+  Io(#[from] ArcIoError),
   #[error("Failed to persist temporary file")]
-  Persist(#[from] PersistError),
+  Persist(#[from] ArcPersistError),
 
   /// Parse errors
   #[error("Invalid hunk range line")]
@@ -56,5 +56,25 @@ pub enum ErrorKind {
   #[error("Invalid path")]
   InvalidPath,
   #[error("Can't open patch '{0}'\n  {1}")]
-  CantOpenPatch(String, io::Error),
+  CantOpenPatch(String, ArcIoError),
+}
+
+#[derive(Debug, Clone, ThisError)]
+#[error(transparent)]
+pub struct ArcIoError(pub Arc<io::Error>);
+
+impl From<io::Error> for ArcIoError {
+  fn from(e: io::Error) -> Self {
+    Self(Arc::new(e))
+  }
+}
+
+#[derive(Debug, Clone, ThisError)]
+#[error(transparent)]
+pub struct ArcPersistError(pub Arc<PersistError>);
+
+impl From<PersistError> for ArcPersistError {
+  fn from(e: PersistError) -> Self {
+    Self(Arc::new(e))
+  }
 }

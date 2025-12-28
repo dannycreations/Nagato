@@ -42,7 +42,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
     for path in &cli.files {
       let file_name = path.to_string_lossy().to_string();
       let file = File::open(path).map_err(|e| {
-        Error::new(ErrorKind::CantOpenPatch(file_name.clone(), e))
+        Error::new(ErrorKind::CantOpenPatch(file_name.clone(), e.into()))
       })?;
       // SAFETY: Mmap is used for efficient reading of large patch files.
       let mmap = unsafe { Mmap::map(&file)? };

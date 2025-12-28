@@ -7,7 +7,11 @@ pub fn parse_header<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<(), Error> {
-  while let Some(Ok(item)) = parser.tokens.peek() {
+  while let Some(res) = parser.tokens.peek() {
+    let item = match res {
+      Ok(i) => i,
+      Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
+    };
     match &item.token {
       TokenKind::FileHeader { old_file, new_file } => {
         patch.old_file = old_file;

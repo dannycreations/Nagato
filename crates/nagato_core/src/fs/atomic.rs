@@ -3,9 +3,10 @@ use std::{
   path::{Path, PathBuf},
 };
 
+use anyhow::Context;
 use tempfile::NamedTempFile;
 
-use crate::Error;
+use crate::{Error, ErrorKind};
 
 /// Atomic file writer that uses a temporary file and renames it on commit.
 /// This ensures that the destination file is only updated if the write succeeds.
@@ -17,14 +18,18 @@ pub struct AtomicWriter {
 impl AtomicWriter {
   /// Create a new atomic writer for the given path.
   /// The temporary file is created in the same directory as the destination file.
-  pub fn new(path: &Path) -> io::Result<Self> {
+  pub fn new(path: &Path) -> Result<Self, Error> {
     let parent = path.parent().ok_or_else(|| {
-      IoError::new(
-        IoErrorKind::InvalidInput,
-        "Destination path has no parent directory",
-      )
+      Error::new(ErrorKind::Io(
+        IoError::new(
+          IoErrorKind::InvalidInput,
+          "Destination path has no parent directory",
+        )
+        .into(),
+      ))
     })?;
-    let tempfile = NamedTempFile::new_in(parent)?;
+    let tempfile = NamedTempFile::new_in(parent)
+      .with_context(|| format!("failed to create tempfile in {:?}", parent))?;
     // 1MB buffer for high-performance writes
     let writer = BufWriter::with_capacity(1024 * 1024, tempfile);
 
@@ -36,12 +41,17 @@ impl AtomicWriter {
 
   /// Commit the changes by persisting the temporary file to the destination path.
   pub fn commit(mut self) -> Result<(), Error> {
-    self.writer.flush()?;
+    self
+      .writer
+      .flush()
+      .context("failed to flush atomic writer")?;
     self
       .writer
       .into_inner()
-      .map_err(|e| e.into_error())?
-      .persist(&self.dest_path)?;
+      .map_err(|e| e.into_error())
+      .context("failed to get inner writer from BufWriter")?
+      .persist(&self.dest_path)
+      .context("failed to persist temporary file")?;
     Ok(())
   }
 }

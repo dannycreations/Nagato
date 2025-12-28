@@ -14,25 +14,33 @@ pub fn parse_int<T>(bytes: &[u8], radix: u32) -> Option<(T, &[u8])>
 where
   T: TryFrom<u64> + Default + Copy,
 {
-  if bytes.is_empty() {
-    return None;
-  }
-  let mut num: u64 = 0;
-  let mut i = 0;
-  while i < bytes.len() {
-    let b = bytes[i];
-    let digit = match b {
-      b'0'..=b'9' if radix >= 10 => (b - b'0') as u32,
-      b'0'..=b'7' if radix == 8 => (b - b'0') as u32,
-      _ => break,
+  let mut len = 0;
+  let mut num = 0u64;
+
+  for &b in bytes {
+    let digit = if b.is_ascii_digit() {
+      (b - b'0') as u32
+    } else if b.is_ascii_lowercase() {
+      (b - b'a') as u32 + 10
+    } else if b.is_ascii_uppercase() {
+      (b - b'A') as u32 + 10
+    } else {
+      break;
     };
+
+    if digit >= radix {
+      break;
+    }
+
     num = num.checked_mul(radix as u64)?.checked_add(digit as u64)?;
-    i += 1;
+    len += 1;
   }
-  if i == 0 {
+
+  if len == 0 {
     return None;
   }
-  Some((T::try_from(num).ok()?, &bytes[i..]))
+
+  Some((T::try_from(num).ok()?, &bytes[len..]))
 }
 
 /// Get the next line from a source, handling \n and \r\n.
@@ -42,12 +50,7 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
   if source.is_empty() {
     return None;
   }
-  let end = source.find_byte(b'\n').unwrap_or(source.len());
-  let (full_line, next_source) = if end < source.len() {
-    (&source[..end], &source[end + 1..])
-  } else {
-    (source, &[][..])
-  };
-  let line_content = full_line.strip_suffix(b"\r").unwrap_or(full_line);
-  Some((line_content, next_source))
+
+  let (line, rest) = source.split_once_str(b"\n").unwrap_or((source, &[]));
+  Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
 }

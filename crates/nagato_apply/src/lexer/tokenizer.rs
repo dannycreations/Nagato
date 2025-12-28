@@ -2,7 +2,7 @@ use bstr::ByteSlice;
 use memchr::memmem;
 use nagato_core::{parse_int, strip_git_prefix, Error, ErrorKind};
 
-use crate::{BinaryKind, Lexer, LexerItem, TokenKind};
+use crate::{lexer::LexerMode, BinaryKind, Lexer, LexerItem, TokenKind};
 
 impl<'a> Lexer<'a> {
   pub fn parse_binary_line(
@@ -39,7 +39,7 @@ impl<'a> Lexer<'a> {
       || line.starts_with(b"--- ")
       || line.starts_with(b"+++ ")
     {
-      self.is_in_binary_patch = false;
+      self.mode = LexerMode::Text;
       // Re-parse current line as normal text
       // Note: We can't easily "push back" the line in this structure without
       // changing the iterator logic or recursion.
@@ -64,106 +64,159 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    match line[0] {
-      b'+' => {
-        if let Some(rest) = line.strip_prefix(b"+++ ") {
-          Ok(TokenKind::NewFile(strip_git_prefix(rest)))
-        } else {
-          self.is_new_file_context = true;
-          Ok(TokenKind::Addition(&line[1..]))
-        }
-      }
-      b'-' => {
-        if let Some(rest) = line.strip_prefix(b"--- ") {
-          Ok(TokenKind::OldFile(strip_git_prefix(rest)))
-        } else {
-          self.is_new_file_context = false;
-          Ok(TokenKind::Deletion(&line[1..]))
-        }
-      }
-      b' ' => {
+    match line.first() {
+      Some(b'+') => self.parse_plus_line(line),
+      Some(b'-') => self.parse_minus_line(line),
+      Some(b' ') => {
         self.is_new_file_context = true;
         Ok(TokenKind::Context(&line[1..]))
       }
-      b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(&line[3..]),
-      b'd' if line.starts_with(b"diff --git ") => {
-        self.parse_file_header(&line[11..])
+      Some(b'@') if line.starts_with(b"@@ ") => {
+        self.parse_hunk_header(&line[3..])
       }
-      b'd' if line.starts_with(b"deleted ") => {
-        if let Some(rest) = self.parse_mode_rest(line, b"deleted ") {
-          parse_int::<u32>(rest, 8)
-            .map(|(m, _)| TokenKind::DeletedFileMode(m))
-            .ok_or(ErrorKind::InvalidFileMode)
-        } else {
-          self.parse_non_keyword_line(line)
-        }
+      Some(b'd') => self.parse_d_line(line),
+      Some(b'f') => self.parse_f_line(line),
+      Some(b'G') => self.parse_g_line(line),
+      Some(b'i') if line.starts_with(b"index ") => {
+        self.parse_index_line(&line[6..])
       }
-      b'd' if line.starts_with(b"dissimilarity index ") => self
-        .parse_percentage(&line[20..])
-        .map(TokenKind::Dissimilarity),
-      b'f' if line.starts_with(b"file ") => {
-        let file = strip_git_prefix(line[5..].trim());
-        Ok(TokenKind::FileHeader {
-          old_file: file,
-          new_file: file,
-        })
-      }
-      b'G' if line == b"GIT binary patch" => {
-        self.is_in_binary_patch = true;
-        Ok(TokenKind::GitBinaryPatchHeader)
-      }
-      b'i' if line.starts_with(b"index ") => self.parse_index_line(&line[6..]),
-      b'n' if line.starts_with(b"new ") => {
-        if let Some(rest) = self.parse_mode_rest(line, b"new ") {
-          parse_int::<u32>(rest, 8)
-            .map(|(m, _)| TokenKind::NewFileMode(m))
-            .ok_or(ErrorKind::InvalidFileMode)
-        } else {
-          self.parse_non_keyword_line(line)
-        }
-      }
-      b'o' if line.starts_with(b"old ") => {
-        if let Some(rest) = self.parse_mode_rest(line, b"old ") {
-          parse_int::<u32>(rest, 8)
-            .map(|(m, _)| TokenKind::OldFileMode(m))
-            .ok_or(ErrorKind::InvalidFileMode)
-        } else {
-          self.parse_non_keyword_line(line)
-        }
-      }
-      b'r' if line.starts_with(b"rename from ") => {
-        Ok(TokenKind::RenameFrom(&line[12..]))
-      }
-      b'r' if line.starts_with(b"rename to ") => {
-        Ok(TokenKind::RenameTo(&line[10..]))
-      }
-      b'c' if line.starts_with(b"copy from ") => {
-        Ok(TokenKind::CopyFrom(&line[10..]))
-      }
-      b'c' if line.starts_with(b"copy to ") => {
-        Ok(TokenKind::CopyTo(&line[8..]))
-      }
-      b's' if line.starts_with(b"similarity index ") => self
+      Some(b'n') => self.parse_n_line(line),
+      Some(b'o') => self.parse_o_line(line),
+      Some(b'r') => self.parse_r_line(line),
+      Some(b'c') => self.parse_c_line(line),
+      Some(b's') if line.starts_with(b"similarity index ") => self
         .parse_percentage(&line[17..])
         .map(TokenKind::Similarity),
-      b'B' if line.starts_with(b"Binary files ") => {
-        if let Some(line_content) = line[13..].strip_suffix(b" differ") {
-          let mut parts = line_content.split_str(b" and ");
-          if let (Some(old_file), Some(new_file)) = (parts.next(), parts.next())
-          {
-            Ok(TokenKind::Binary {
-              old_file: strip_git_prefix(old_file),
-              new_file: strip_git_prefix(new_file),
-            })
-          } else {
-            Err(ErrorKind::InvalidBinaryFilesLine)
-          }
-        } else {
-          Err(ErrorKind::InvalidBinaryFilesLine)
-        }
-      }
+      Some(b'B') => self.parse_b_line(line),
       _ => self.parse_non_keyword_line(line),
     }
+  }
+
+  fn parse_plus_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"+++ ") {
+      Ok(TokenKind::NewFile(strip_git_prefix(rest)))
+    } else {
+      self.is_new_file_context = true;
+      Ok(TokenKind::Addition(&line[1..]))
+    }
+  }
+
+  fn parse_minus_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"--- ") {
+      Ok(TokenKind::OldFile(strip_git_prefix(rest)))
+    } else {
+      self.is_new_file_context = false;
+      Ok(TokenKind::Deletion(&line[1..]))
+    }
+  }
+
+  fn parse_d_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"diff --git ") {
+      return self.parse_file_header(rest);
+    }
+    if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
+      return self.parse_percentage(rest).map(TokenKind::Dissimilarity);
+    }
+    self
+      .parse_mode(line, b"deleted ", TokenKind::DeletedFileMode)
+      .or_else(|_| self.parse_non_keyword_line(line))
+  }
+
+  fn parse_f_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"file ") {
+      let file = strip_git_prefix(rest.trim());
+      return Ok(TokenKind::FileHeader {
+        old_file: file,
+        new_file: file,
+      });
+    }
+    self.parse_non_keyword_line(line)
+  }
+
+  fn parse_g_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if line == b"GIT binary patch" {
+      self.mode = LexerMode::Binary;
+      return Ok(TokenKind::GitBinaryPatchHeader);
+    }
+    self.parse_non_keyword_line(line)
+  }
+
+  fn parse_n_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    self
+      .parse_mode(line, b"new ", TokenKind::NewFileMode)
+      .or_else(|_| self.parse_non_keyword_line(line))
+  }
+
+  fn parse_o_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    self
+      .parse_mode(line, b"old ", TokenKind::OldFileMode)
+      .or_else(|_| self.parse_non_keyword_line(line))
+  }
+
+  fn parse_r_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"rename from ") {
+      return Ok(TokenKind::RenameFrom(rest));
+    }
+    if let Some(rest) = line.strip_prefix(b"rename to ") {
+      return Ok(TokenKind::RenameTo(rest));
+    }
+    self.parse_non_keyword_line(line)
+  }
+
+  fn parse_c_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"copy from ") {
+      return Ok(TokenKind::CopyFrom(rest));
+    }
+    if let Some(rest) = line.strip_prefix(b"copy to ") {
+      return Ok(TokenKind::CopyTo(rest));
+    }
+    self.parse_non_keyword_line(line)
+  }
+
+  fn parse_b_line(
+    &mut self,
+    line: &'a [u8],
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    if let Some(rest) = line.strip_prefix(b"Binary files ") {
+      let line_content = rest
+        .strip_suffix(b" differ")
+        .ok_or(ErrorKind::InvalidBinaryFilesLine)?;
+      let mut parts = line_content.split_str(b" and ");
+      let old_file = parts.next().ok_or(ErrorKind::InvalidBinaryFilesLine)?;
+      let new_file = parts.next().ok_or(ErrorKind::InvalidBinaryFilesLine)?;
+      return Ok(TokenKind::Binary {
+        old_file: strip_git_prefix(old_file),
+        new_file: strip_git_prefix(new_file),
+      });
+    }
+    self.parse_non_keyword_line(line)
   }
 
   pub fn parse_range(
@@ -279,9 +332,17 @@ impl<'a> Lexer<'a> {
   }
 
   /// Helper to parse mode lines with various prefixes.
-  fn parse_mode_rest(&self, line: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
+  fn parse_mode(
+    &self,
+    line: &'a [u8],
+    prefix: &[u8],
+    f: impl FnOnce(u32) -> TokenKind<'a>,
+  ) -> Result<TokenKind<'a>, ErrorKind> {
     line
       .strip_prefix(prefix)
       .and_then(|r| r.strip_prefix(b"file mode ").or(r.strip_prefix(b"mode ")))
+      .and_then(|rest| parse_int::<u32>(rest, 8))
+      .map(|(m, _)| f(m))
+      .ok_or(ErrorKind::InvalidFileMode)
   }
 }

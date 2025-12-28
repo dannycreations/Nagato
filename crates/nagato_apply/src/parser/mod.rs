@@ -29,7 +29,7 @@ impl<'a> Parser<'a> {
       .unwrap_or(0);
 
     header::parse_header(self, &mut patch)?;
-    self.skip_empty_context_lines();
+    self.skip_empty_context_lines()?;
     hunk::parse_hunks(self, &mut patch)?;
 
     if patch.hunks.is_empty() && patch.binary_fragments.is_empty() {
@@ -48,17 +48,26 @@ impl<'a> Parser<'a> {
     Ok(patch)
   }
 
-  pub fn skip_empty_context_lines(&mut self) {
-    while self.peek_is(|t| matches!(t, TokenKind::Context(s) if s.is_empty())) {
+  pub fn skip_empty_context_lines(&mut self) -> Result<(), Error> {
+    while self
+      .peek_is(|t| matches!(t, TokenKind::Context(s) if s.is_empty()))?
+    {
       self.tokens.next();
     }
+    Ok(())
   }
 
-  pub fn peek_is(&mut self, check: impl Fn(&TokenKind<'a>) -> bool) -> bool {
-    if let Some(Ok(item)) = self.tokens.peek() {
-      check(&item.token)
-    } else {
-      false
+  pub fn peek_is(
+    &mut self,
+    check: impl Fn(&TokenKind<'a>) -> bool,
+  ) -> Result<bool, Error> {
+    match self.tokens.peek() {
+      Some(Ok(item)) => Ok(check(&item.token)),
+      Some(Err(_)) => {
+        let err = self.tokens.next().unwrap().unwrap_err();
+        Err(err)
+      }
+      None => Ok(false),
     }
   }
 }
@@ -67,7 +76,9 @@ impl<'a> Iterator for Parser<'a> {
   type Item = Result<Patch<'a>, Error>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    self.skip_empty_context_lines();
+    if let Err(e) = self.skip_empty_context_lines() {
+      return Some(Err(e));
+    }
     self.tokens.peek()?;
 
     let patch_result = self.parse_patch();

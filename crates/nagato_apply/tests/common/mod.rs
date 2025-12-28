@@ -18,6 +18,13 @@ macro_rules! create_test_fs {
   };
 }
 
+macro_rules! parse_diff {
+  ($diff:expr) => {{
+    let diff = indoc::indoc!($diff);
+    nagato_apply::Parser::new(diff.as_bytes())
+  }};
+}
+
 macro_rules! test_apply_ok {
   (
     $test_name:ident,
@@ -27,11 +34,7 @@ macro_rules! test_apply_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let diff = indoc::indoc!($diff);
-      let patch = nagato_apply::Parser::new(diff.as_bytes())
-        .next()
-        .unwrap()
-        .unwrap();
+      let patch = parse_diff!($diff).next().unwrap().unwrap();
       let mut output = Vec::new();
       nagato_apply::apply(&mut output, &patch, $source.as_bytes()).unwrap();
       assert_eq!(String::from_utf8(output).unwrap(), $expected);
@@ -47,11 +50,7 @@ macro_rules! test_apply_err {
   ) => {
     #[test]
     fn $test_name() {
-      let diff = indoc::indoc!($diff);
-      let patch = nagato_apply::Parser::new(diff.as_bytes())
-        .next()
-        .unwrap()
-        .unwrap();
+      let patch = parse_diff!($diff).next().unwrap().unwrap();
       let mut sink = std::io::sink();
       assert!(
         nagato_apply::apply(&mut sink, &patch, $source.as_bytes()).is_err()
@@ -72,8 +71,7 @@ macro_rules! test_patch_ok {
     fn $test_name() {
       let dir = create_test_fs! { $($initial_path => $initial_content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path());
-      let diff = indoc::indoc!($diff);
-      for patch in nagato_apply::Parser::new(diff.as_bytes()) {
+      for patch in parse_diff!($diff) {
         nagato_apply::patch_file(&mut fs, patch.unwrap(), $reverse, false)
           .unwrap();
       }
@@ -109,8 +107,7 @@ macro_rules! test_patch_err {
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path());
-      let diff = indoc::indoc!($diff);
-      let mut parser = nagato_apply::Parser::new(diff.as_bytes());
+      let mut parser = parse_diff!($diff);
       assert!(nagato_apply::patch_file(
         &mut fs,
         parser.next().unwrap().unwrap(),
@@ -142,8 +139,7 @@ macro_rules! test_parser_err {
   ) => {
     #[test]
     fn $test_name() {
-      let diff = indoc::indoc!($diff);
-      let mut parser = nagato_apply::Parser::new(diff.as_bytes());
+      let mut parser = parse_diff!($diff);
       let result = parser.next().unwrap();
       match result {
         Err(e) => {
@@ -184,11 +180,7 @@ macro_rules! test_patch_err_with_line {
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path());
-      let diff = indoc::indoc!($diff);
-      let patch = nagato_apply::Parser::new(diff.as_bytes())
-        .next()
-        .unwrap()
-        .unwrap();
+      let patch = parse_diff!($diff).next().unwrap().unwrap();
       let result = nagato_apply::patch_file(&mut fs, patch, false, false);
       match result {
         Err(e) => {

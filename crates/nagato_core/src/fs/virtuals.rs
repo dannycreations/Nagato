@@ -1,4 +1,5 @@
 use std::{
+  env,
   fs::{self, File},
   path::{Component, PathBuf},
 };
@@ -18,7 +19,18 @@ pub struct FileSystem {
 impl FileSystem {
   /// Create a new file system rooted at the given path.
   pub fn new(root: impl Into<PathBuf>) -> Self {
-    Self { root: root.into() }
+    let root = root.into();
+    // We try to make the root absolute to ensure consistent behavior.
+    let root = env::current_dir()
+      .map(|cwd| {
+        if root.is_absolute() {
+          root.clone()
+        } else {
+          cwd.join(&root)
+        }
+      })
+      .unwrap_or(root);
+    Self { root }
   }
 
   /// Check if a file exists at the given relative path.
@@ -37,7 +49,7 @@ impl FileSystem {
 
   /// Create an atomic writer for the given relative path.
   pub fn write(&self, path: &[u8]) -> Result<AtomicWriter, Error> {
-    AtomicWriter::new(&self.resolve_mut(path)?).map_err(Into::into)
+    AtomicWriter::new(&self.resolve_mut(path)?)
   }
 
   /// Copy a file from one relative path to another.
@@ -77,7 +89,21 @@ impl FileSystem {
       .map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
     let mut dest = self.root.clone();
-    for component in path.components() {
+    let mut components = path.components().peekable();
+
+    // If the path starts with a root or prefix, we skip it to treat the path as relative.
+    // This is safer than rejecting it, as some patches might use absolute-looking paths
+    // that should still be relative to the project root.
+    while let Some(c) = components.peek() {
+      match c {
+        Component::RootDir | Component::Prefix(_) => {
+          components.next();
+        }
+        _ => break,
+      }
+    }
+
+    for component in components {
       match component {
         Component::Normal(c) => dest.push(c),
         Component::CurDir => {}

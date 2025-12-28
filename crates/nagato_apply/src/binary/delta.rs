@@ -12,7 +12,7 @@ fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
       if e.kind() == IoErrorKind::UnexpectedEof {
         Error::new(ErrorKind::InvalidBinaryPatch)
       } else {
-        Error::new(ErrorKind::Io(e))
+        Error::new(ErrorKind::Io(e.into()))
       }
     })?;
 
@@ -50,7 +50,7 @@ pub fn apply_delta(
     match delta.read_exact(&mut cmd_buf) {
       Ok(_) => {}
       Err(e) if e.kind() == IoErrorKind::UnexpectedEof => break,
-      Err(e) => return Err(Error::new(ErrorKind::Io(e))),
+      Err(e) => return Err(Error::new(ErrorKind::Io(e.into()))),
     }
     let cmd = cmd_buf[0];
 

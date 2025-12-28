@@ -16,7 +16,7 @@ impl IgnoreNotFound for Result<(), Error> {
       Err(Error {
         kind: ErrorKind::Io(e),
         ..
-      }) if e.kind() == IoErrorKind::NotFound => Ok(()),
+      }) if e.0.kind() == IoErrorKind::NotFound => Ok(()),
       res => res,
     }
   }
@@ -35,7 +35,7 @@ pub fn read_source_or_empty(
     Err(Error {
       kind: ErrorKind::Io(e),
       ..
-    }) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+    }) if e.0.kind() == io::ErrorKind::NotFound => Ok(None),
     Err(e) => Err(e),
   }
 }
@@ -113,9 +113,13 @@ pub fn patch_file_worker(
     || !patch.hunks.is_empty()
     || !patch.binary_fragments.is_empty()
   {
-    handle_application(fs, patch, check)?;
+    handle_application(fs, patch, check).map_err(|e| {
+      e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
+    })?;
   } else {
-    handle_metadata_change(fs, patch, check)?;
+    handle_metadata_change(fs, patch, check).map_err(|e| {
+      e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
+    })?;
   }
 
   if !check && patch.new_file != b"/dev/null" {

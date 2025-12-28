@@ -1,7 +1,7 @@
 use std::{io::Write, str};
 
 use bstr::ByteSlice;
-use memchr::{memchr, memchr_iter, memmem};
+use memchr::{memchr_iter, memmem};
 use memmem::Finder;
 use nagato_core::{get_line, Error, ErrorKind};
 use sha1::{Digest, Sha1};
@@ -41,36 +41,20 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Helper to write a block of data that may contain multiple lines.
   /// This centralizes the logic for handling skipped content during hunk matching.
   /// Centralized block writer that handles line endings and updates tracking.
-  fn write_block(&mut self, block: &[u8], lines: u32) -> Result<(), Error> {
+  /// Write a block of data, splitting it into lines and prepending newlines as needed.
+  /// This ensures consistent line endings and updates the source line counter.
+  fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
     if block.is_empty() {
       return Ok(());
     }
 
-    // Efficiently write blocks by avoiding line-by-line iteration when possible.
-    // We strip the trailing newline because write_line/write_block logic
-    // prepends newlines for subsequent content.
-    if !self.first_line {
-      self.output.write_all(b"\n")?;
-    }
+    let mut lines = 0;
+    block.lines().try_for_each(|line| {
+      self.write_line(line)?;
+      lines += 1;
+      Ok::<(), Error>(())
+    })?;
 
-    // If block has CRs, we must normalize to \n for our internal processing
-    // which assumes \n as the separator and prepends it.
-    if memchr(b'\r', block).is_some() {
-      let mut lines_iter = block.lines();
-      if let Some(first) = lines_iter.next() {
-        self.output.write_all(first)?;
-        for line in lines_iter {
-          self.output.write_all(b"\n")?;
-          self.output.write_all(line)?;
-        }
-      }
-    } else {
-      self
-        .output
-        .write_all(block.strip_suffix(b"\n").unwrap_or(block))?;
-    }
-
-    self.first_line = false;
     self.current_source_line += lines;
     Ok(())
   }
@@ -86,40 +70,34 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Advance the source and output to the start of a hunk.
   pub fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
     let target_line = hunk.old_line.saturating_sub(1);
-    let mut lines_to_skip =
-      target_line.saturating_sub(self.current_source_line);
+    let lines_to_skip = target_line.saturating_sub(self.current_source_line);
 
-    if lines_to_skip > 0 {
-      let mut count = 0;
-      let mut end_offset = 0;
-      for pos in memchr_iter(b'\n', self.source) {
-        count += 1;
-        end_offset = pos + 1;
-        if count == lines_to_skip {
-          break;
-        }
-      }
-
-      if count > 0 {
-        let block = &self.source[..end_offset];
-        self.write_block(block, count)?;
-        self.source = &self.source[end_offset..];
-        lines_to_skip -= count;
-      }
+    if lines_to_skip == 0 {
+      return Ok(());
     }
 
-    // Fallback or handle remaining lines
-    for _ in 0..lines_to_skip {
-      if let Some(line) = self.consume_line() {
+    let end_offset = memchr_iter(b'\n', self.source)
+      .nth(lines_to_skip as usize - 1)
+      .map(|pos| pos + 1);
+
+    if let Some(offset) = end_offset {
+      self.write_block(&self.source[..offset])?;
+      self.source = &self.source[offset..];
+    } else {
+      // Fallback for cases where \n is not found as expected
+      for _ in 0..lines_to_skip {
+        let line = self.consume_line().ok_or_else(|| {
+          if hunk.old_span > 0 {
+            Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num)
+          } else {
+            // This is a bit of an edge case, but if we're skipping lines
+            // and hit EOF, and the hunk doesn't expect to match anything (span 0),
+            // we just stop skipping.
+            ErrorKind::UnexpectedEof.into()
+          }
+        })?;
         self.write_line(line)?;
         self.current_source_line += 1;
-      } else if hunk.old_span > 0 {
-        return Err(Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num,
-        ));
-      } else {
-        break;
       }
     }
     Ok(())
@@ -159,31 +137,61 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
     first_line_to_match: &Line,
   ) -> Result<(), Error> {
+    let (match_pos, final_source) =
+      self.search_match(hunk, lines_to_match, first_line_to_match)?;
+
+    let skipped = &self.source[..match_pos];
+    self.write_block(skipped)?;
+    self.source = final_source;
+    self.current_source_line += 1;
+    Ok(())
+  }
+
+  fn search_match<'p>(
+    &self,
+    hunk: &Hunk<'p>,
+    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
+    first_line_to_match: &Line,
+  ) -> Result<(usize, &'s [u8]), Error> {
     let needle = first_line_to_match.text;
 
     if needle.is_empty() {
-      while let Some((line, next_source)) = get_line(self.source) {
-        if line == needle {
-          match self.verify_match(next_source, lines_to_match.clone(), hunk) {
-            Ok(final_source) => {
-              self.source = final_source;
-              self.current_source_line += 1;
-              return Ok(());
-            }
-            Err(e) => return Err(e),
-          }
-        }
-
-        self.write_line(line)?;
-        self.source = next_source;
-        self.current_source_line += 1;
-      }
-      return Err(Error::with_line(
-        ErrorKind::CouldNotApplyHunk,
-        hunk.patch_line_num,
-      ));
+      self.search_match_empty_needle(hunk, lines_to_match)
+    } else {
+      self.search_match_text_needle(hunk, lines_to_match, needle)
     }
+  }
 
+  fn search_match_empty_needle<'p>(
+    &self,
+    hunk: &Hunk<'p>,
+    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
+  ) -> Result<(usize, &'s [u8]), Error> {
+    let mut pos = 0;
+    let mut source = self.source;
+    while let Some((line, next_source)) = get_line(source) {
+      if line.is_empty() {
+        if let Ok(final_source) =
+          self.verify_match(next_source, lines_to_match.clone(), hunk)
+        {
+          return Ok((pos, final_source));
+        }
+      }
+      pos += source.len() - next_source.len();
+      source = next_source;
+    }
+    Err(Error::with_line(
+      ErrorKind::CouldNotApplyHunk,
+      hunk.patch_line_num,
+    ))
+  }
+
+  fn search_match_text_needle<'p>(
+    &self,
+    hunk: &Hunk<'p>,
+    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
+    needle: &[u8],
+  ) -> Result<(usize, &'s [u8]), Error> {
     let finder = Finder::new(needle);
     for match_pos in finder.find_iter(self.source) {
       // Ensure match is at the start of a line and ends at a line boundary.
@@ -192,36 +200,24 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
 
       let end_pos = match_pos + needle.len();
-      let next_source = if end_pos == self.source.len() {
-        &self.source[end_pos..]
-      } else if self.source[end_pos] == b'\n' {
-        &self.source[end_pos + 1..]
-      } else if self.source[end_pos] == b'\r'
-        && self.source.get(end_pos + 1) == Some(&b'\n')
+      let remaining = &self.source[end_pos..];
+      let next_source = match remaining
+        .strip_prefix(b"\n")
+        .or_else(|| remaining.strip_prefix(b"\r\n"))
       {
-        &self.source[end_pos + 2..]
-      } else {
-        continue;
+        Some(rest) => rest,
+        None if remaining.is_empty() => remaining,
+        None => continue,
       };
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {
-        Ok(final_source) => {
-          let skipped = &self.source[..match_pos];
-          let lines_skipped = memchr_iter(b'\n', skipped).count() as u32;
-          self.write_block(skipped, lines_skipped)?;
-
-          self.source = final_source;
-          self.current_source_line += 1;
-          return Ok(());
+        Ok(final_source) => return Ok((match_pos, final_source)),
+        Err(e)
+          if self.current_source_line == hunk.old_line.saturating_sub(1) =>
+        {
+          return Err(e)
         }
-        Err(e) => {
-          // If this was the expected position, return the error immediately.
-          // Otherwise, continue searching.
-          let target_line = hunk.old_line.saturating_sub(1);
-          if self.current_source_line == target_line {
-            return Err(e);
-          }
-        }
+        _ => continue,
       }
     }
 
@@ -282,9 +278,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     if let Some(old_hash_bytes) = patch.old_hash {
       if old_hash_bytes.len() >= 7 {
         let mut hasher = Sha1::new();
-        hasher.update(b"blob ");
-        hasher.update(self.source.len().to_string().as_bytes());
-        hasher.update(b"\0");
+        write!(hasher, "blob {}\0", self.source.len()).unwrap();
         hasher.update(self.source);
         let result = hasher.finalize();
         let hex_hash = hex::encode(result);
@@ -356,8 +350,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return Ok(());
     }
 
-    let lines = memchr_iter(b'\n', source).count() as u32;
-    self.write_block(source, lines)?;
+    self.write_block(source)?;
     self.source = &[];
     Ok(())
   }

@@ -11,13 +11,19 @@ pub struct LexerItem<'a> {
   pub line_num: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LexerMode {
+  Text,
+  Binary,
+}
+
 #[doc(hidden)]
 pub struct Lexer<'a> {
   input: &'a [u8],
   pos: usize,
   line_num: u32,
   is_new_file_context: bool,
-  is_in_binary_patch: bool,
+  mode: LexerMode,
 }
 
 impl<'a> Lexer<'a> {
@@ -28,7 +34,7 @@ impl<'a> Lexer<'a> {
       pos: 0,
       line_num: 0,
       is_new_file_context: false,
-      is_in_binary_patch: false,
+      mode: LexerMode::Text,
     }
   }
 
@@ -36,25 +42,26 @@ impl<'a> Lexer<'a> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
-    if self.is_in_binary_patch {
-      return self.parse_binary_line(line, line_num);
+    match self.mode {
+      LexerMode::Binary => self.parse_binary_line(line, line_num),
+      LexerMode::Text => {
+        if line.is_empty() {
+          self.is_new_file_context = true;
+          return Some(Ok(LexerItem {
+            token: TokenKind::Context(&[]),
+            line_num,
+          }));
+        }
+
+        let token_result = self.dispatch_line(line);
+
+        Some(
+          token_result
+            .map(|token| LexerItem { token, line_num })
+            .map_err(|kind| Error::with_line(kind, line_num)),
+        )
+      }
     }
-
-    if line.is_empty() {
-      self.is_new_file_context = true;
-      return Some(Ok(LexerItem {
-        token: TokenKind::Context(&[]),
-        line_num,
-      }));
-    }
-
-    let token_result = self.dispatch_line(line);
-
-    Some(
-      token_result
-        .map(|token| LexerItem { token, line_num })
-        .map_err(|kind| Error::with_line(kind, line_num)),
-    )
   }
 
   /// Advance to the next line and return it, normalized.

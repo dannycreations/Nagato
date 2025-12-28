@@ -1,5 +1,6 @@
 use std::{fmt, io};
 
+use anyhow::Error as AnyhowError;
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
@@ -15,13 +16,17 @@ pub struct Error {
   /// Optional file name where the error occurred.
   pub file: Option<String>,
   /// The specific kind of error.
-  #[source]
   pub kind: ErrorKind,
+  /// Wrapped context error.
+  pub context: Option<AnyhowError>,
 }
 
 impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.kind)?;
+    if let Some(ctx) = &self.context {
+      write!(f, ": {ctx:?}")?;
+    }
     if let Some(line) = self.line {
       write!(f, "\n  at ")?;
       if let Some(file) = &self.file {
@@ -45,6 +50,7 @@ impl Error {
       kind,
       line: None,
       file: None,
+      context: None,
     }
   }
 
@@ -55,6 +61,7 @@ impl Error {
       kind,
       line: Some(line),
       file: None,
+      context: None,
     }
   }
 
@@ -62,6 +69,30 @@ impl Error {
   pub fn with_file(mut self, file: String) -> Self {
     self.file = Some(file);
     self
+  }
+
+  /// Attach an anyhow context to the error.
+  pub fn with_context(mut self, context: AnyhowError) -> Self {
+    self.context = Some(context);
+    self
+  }
+}
+
+impl From<AnyhowError> for Error {
+  fn from(e: AnyhowError) -> Self {
+    if let Some(err) = e.downcast_ref::<Error>() {
+      return Error {
+        line: err.line,
+        file: err.file.clone(),
+        kind: err.kind.clone(),
+        context: err
+          .context
+          .as_ref()
+          .map(|c| AnyhowError::msg(c.to_string())),
+      };
+    }
+    Self::new(ErrorKind::Io(io::Error::other(e.to_string()).into()))
+      .with_context(e)
   }
 }
 
@@ -76,13 +107,13 @@ impl From<ErrorKind> for Error {
 impl From<io::Error> for Error {
   /// Automatically wrap I/O errors into the core Error type.
   fn from(e: io::Error) -> Self {
-    Self::new(ErrorKind::Io(e))
+    Self::new(ErrorKind::Io(e.into()))
   }
 }
 
 impl From<PersistError> for Error {
   /// Automatically wrap persistence errors into the core Error type.
   fn from(e: PersistError) -> Self {
-    Self::new(ErrorKind::Persist(e))
+    Self::new(ErrorKind::Persist(e.into()))
   }
 }
