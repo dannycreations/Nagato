@@ -3,8 +3,8 @@ use std::{
   error::Error as StdError,
   fmt::{Display, Formatter, Result as FmtResult},
   io::{
-    self, Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult,
-    Write,
+    copy as io_copy, Error as IoError, ErrorKind as IoErrorKind, Read,
+    Result as IoResult, Write,
   },
   slice::Iter,
 };
@@ -126,7 +126,7 @@ pub fn decode_base85(
 ) -> Result<(), Error> {
   use flate2::read::ZlibDecoder;
   let mut decoder = ZlibDecoder::new(Base85Reader::new(lines));
-  io::copy(&mut decoder, writer).map_err(|e| {
+  io_copy(&mut decoder, writer).map_err(|e| {
     if e
       .get_ref()
       .map(|r| r.is::<InvalidBinaryLineError>())

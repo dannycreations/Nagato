@@ -1,7 +1,7 @@
 use std::{
   env,
   fs::File,
-  io::{self, IsTerminal, Read},
+  io::{stdin, IsTerminal, Read},
   path::PathBuf,
 };
 
@@ -18,7 +18,7 @@ pub use clap::*;
 /// Main entry point for the CLI logic.
 pub fn run(cli: &Cli) -> Result<(), Error> {
   // If no files are provided and stdin is a terminal, print help.
-  if cli.files.is_empty() && io::stdin().is_terminal() {
+  if cli.files.is_empty() && stdin().is_terminal() {
     Cli::command().print_help().unwrap();
     return Ok(());
   }
@@ -35,7 +35,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   // We unify the input source into a collection of byte buffers.
   if cli.files.is_empty() {
     let mut stdin_content = Vec::new();
-    io::stdin().read_to_end(&mut stdin_content)?;
+    stdin().read_to_end(&mut stdin_content)?;
     process_patch(&fs, &stdin_content, cli.reverse, cli.check)
       .map_err(|e| e.with_file("<stdin>".into()))?;
   } else {

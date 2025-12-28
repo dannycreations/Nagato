@@ -2,6 +2,17 @@ use std::mem;
 
 use crate::{BinaryFragment, Hunk};
 
+/// Extension trait for byte slices to check for /dev/null.
+pub trait IsDevNull {
+  fn is_dev_null(&self) -> bool;
+}
+
+impl IsDevNull for [u8] {
+  fn is_dev_null(&self) -> bool {
+    self == b"/dev/null"
+  }
+}
+
 /// Represents a single patch, which can contain multiple hunks.
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Patch<'a> {
@@ -51,16 +62,6 @@ impl<'a> Patch<'a> {
     self.copy_from.unwrap_or(self.old_file)
   }
 
-  /// Returns true if this patch creates a new file.
-  pub fn is_creation(&self) -> bool {
-    self.old_file == b"/dev/null"
-  }
-
-  /// Returns true if this patch deletes an existing file.
-  pub fn is_deletion(&self) -> bool {
-    self.new_file == b"/dev/null"
-  }
-
   /// Returns true if this patch contains content changes (hunks or binary fragments).
   pub fn has_content_changes(&self) -> bool {
     !self.hunks.is_empty() || !self.binary_fragments.is_empty()
@@ -68,8 +69,8 @@ impl<'a> Patch<'a> {
 
   /// Invert the patch for reverse application.
   pub fn invert(mut self) -> Self {
-    let is_creation = self.is_creation();
-    let is_deletion = self.is_deletion();
+    let is_creation = self.old_file.is_dev_null();
+    let is_deletion = self.new_file.is_dev_null();
 
     mem::swap(&mut self.old_file, &mut self.new_file);
     mem::swap(&mut self.rename_from, &mut self.rename_to);

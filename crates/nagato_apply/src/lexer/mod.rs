@@ -42,26 +42,16 @@ impl<'a> Lexer<'a> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
-    match self.mode {
-      LexerMode::Binary => self.parse_binary_line(line, line_num),
-      LexerMode::Text => {
-        if line.is_empty() {
-          self.is_new_file_context = true;
-          return Some(Ok(LexerItem {
-            token: TokenKind::Context(&[]),
-            line_num,
-          }));
-        }
+    let res = match self.mode {
+      LexerMode::Binary => self.tokenize_binary(line),
+      LexerMode::Text => self.tokenize_text(line),
+    };
 
-        let token_result = self.dispatch_line(line);
-
-        Some(
-          token_result
-            .map(|token| LexerItem { token, line_num })
-            .map_err(|kind| Error::with_line(kind, line_num)),
-        )
-      }
-    }
+    Some(
+      res
+        .map(|token| LexerItem { token, line_num })
+        .map_err(|kind| Error::with_line(kind, line_num)),
+    )
   }
 
   /// Advance to the next line and return it, normalized.

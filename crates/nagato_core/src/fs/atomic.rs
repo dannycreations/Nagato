@@ -1,5 +1,8 @@
 use std::{
-  io::{self, BufWriter, Error as IoError, ErrorKind as IoErrorKind, Write},
+  io::{
+    BufWriter, Error as IoError, ErrorKind as IoErrorKind, Result as IoResult,
+    Write,
+  },
   path::{Path, PathBuf},
 };
 
@@ -58,12 +61,12 @@ impl AtomicWriter {
 
 impl Write for AtomicWriter {
   #[inline]
-  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+  fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
     self.writer.write(buf)
   }
 
   #[inline]
-  fn flush(&mut self) -> io::Result<()> {
+  fn flush(&mut self) -> IoResult<()> {
     self.writer.flush()
   }
 }

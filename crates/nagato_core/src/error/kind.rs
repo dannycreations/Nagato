@@ -1,4 +1,4 @@
-use std::{io, sync::Arc};
+use std::{io::Error as IoError, sync::Arc};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
@@ -61,10 +61,10 @@ pub enum ErrorKind {
 
 #[derive(Debug, Clone, ThisError)]
 #[error(transparent)]
-pub struct ArcIoError(pub Arc<io::Error>);
+pub struct ArcIoError(pub Arc<IoError>);
 
-impl From<io::Error> for ArcIoError {
-  fn from(e: io::Error) -> Self {
+impl From<IoError> for ArcIoError {
+  fn from(e: IoError) -> Self {
     Self(Arc::new(e))
   }
 }

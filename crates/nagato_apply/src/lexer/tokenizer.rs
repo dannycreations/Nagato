@@ -1,20 +1,16 @@
 use bstr::ByteSlice;
 use memchr::memmem;
-use nagato_core::{parse_int, strip_git_prefix, Error, ErrorKind};
+use nagato_core::{parse_int, strip_git_prefix, ErrorKind};
 
-use crate::{lexer::LexerMode, BinaryKind, Lexer, LexerItem, TokenKind};
+use crate::{lexer::LexerMode, BinaryKind, Lexer, TokenKind};
 
 impl<'a> Lexer<'a> {
-  pub fn parse_binary_line(
+  pub fn tokenize_binary(
     &mut self,
     line: &'a [u8],
-    line_num: u32,
-  ) -> Option<Result<LexerItem<'a>, Error>> {
+  ) -> Result<TokenKind<'a>, ErrorKind> {
     if line.is_empty() {
-      return Some(Ok(LexerItem {
-        token: TokenKind::Context(&[]),
-        line_num,
-      }));
+      return Ok(TokenKind::Context(&[]));
     }
 
     // Helper to parse binary patch type lines (literal/delta)
@@ -28,10 +24,7 @@ impl<'a> Lexer<'a> {
 
     if let Some((kind, rest)) = binary_type {
       if let Some((size, _)) = parse_int::<u64>(rest, 10) {
-        return Some(Ok(LexerItem {
-          token: TokenKind::BinaryPatchType { kind, size },
-          line_num,
-        }));
+        return Ok(TokenKind::BinaryPatchType { kind, size });
       }
     }
 
@@ -40,30 +33,22 @@ impl<'a> Lexer<'a> {
       || line.starts_with(b"+++ ")
     {
       self.mode = LexerMode::Text;
-      // Re-parse current line as normal text
-      // Note: We can't easily "push back" the line in this structure without
-      // changing the iterator logic or recursion.
-      // However, seeing "diff --git" inside binary patch mode means we exited it.
-      // We should return the token for this line.
-      let token_result = self.dispatch_line(line);
-      Some(
-        token_result
-          .map(|token| LexerItem { token, line_num })
-          .map_err(|kind| Error::with_line(kind, line_num)),
-      )
-    } else {
-      Some(Ok(LexerItem {
-        token: TokenKind::BinaryData(line),
-        line_num,
-      }))
+      return self.tokenize_text(line);
     }
+
+    Ok(TokenKind::BinaryData(line))
   }
 
   /// Dispatches line parsing based on the first character.
-  pub fn dispatch_line(
+  pub fn tokenize_text(
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
+    if line.is_empty() {
+      self.is_new_file_context = true;
+      return Ok(TokenKind::Context(&[]));
+    }
+
     match line.first() {
       Some(b'+') => self.parse_plus_line(line),
       Some(b'-') => self.parse_minus_line(line),

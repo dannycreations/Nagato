@@ -1,4 +1,4 @@
-use std::{fmt, io};
+use std::{fmt, io::Error as IoError};
 
 use anyhow::Error as AnyhowError;
 use tempfile::PersistError;
@@ -29,12 +29,10 @@ impl fmt::Display for Error {
     }
     if let Some(line) = self.line {
       write!(f, "\n  at ")?;
-      if let Some(file) = &self.file {
-        write!(f, "{file}:")?;
-      } else {
-        write!(f, "<stdin>:")?;
-      }
-      write!(f, "{line}")?;
+      match &self.file {
+        Some(file) => write!(f, "{file}:{line}"),
+        None => write!(f, "<stdin>:{line}"),
+      }?;
     } else if let Some(file) = &self.file {
       write!(f, "\n  in {file}")?;
     }
@@ -82,13 +80,10 @@ impl From<AnyhowError> for Error {
   /// Convert an anyhow error to our core Error.
   /// If it's already an Error, we downcast it to avoid double-wrapping.
   fn from(e: AnyhowError) -> Self {
-    match e.downcast::<Self>() {
-      Ok(err) => err,
-      Err(e) => {
-        Self::new(ErrorKind::Io(io::Error::other(e.to_string()).into()))
-          .with_context(e)
-      }
-    }
+    e.downcast::<Self>().unwrap_or_else(|e| {
+      Self::new(ErrorKind::Io(IoError::other(e.to_string()).into()))
+        .with_context(e)
+    })
   }
 }
 
@@ -100,9 +95,9 @@ impl From<ErrorKind> for Error {
   }
 }
 
-impl From<io::Error> for Error {
+impl From<IoError> for Error {
   /// Automatically wrap I/O errors into the core Error type.
-  fn from(e: io::Error) -> Self {
+  fn from(e: IoError) -> Self {
     Self::new(ErrorKind::Io(e.into()))
   }
 }

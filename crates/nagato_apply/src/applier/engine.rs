@@ -1,8 +1,7 @@
 use std::{io::Write, str};
 
 use bstr::ByteSlice;
-use memchr::memmem;
-use memmem::Finder;
+use memchr::memmem::Finder;
 use nagato_core::{get_line, Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
@@ -132,6 +131,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         rest
       } else if let Some(rest) = remaining.strip_prefix(b"\r\n") {
         rest
+      } else if remaining.starts_with(b"\r") {
+        // Handle cases where we might have a \r without \n, or just skip it
+        &remaining[1..]
       } else {
         continue;
       };

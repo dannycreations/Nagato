@@ -1,9 +1,9 @@
-use std::io::{self, sink, ErrorKind as IoErrorKind};
+use std::io::{sink, ErrorKind as IoErrorKind, Write as IoWrite};
 
 use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind, FileSystem};
 
-use crate::{apply, Patch};
+use crate::{apply, IsDevNull, Patch};
 
 /// Extension trait for Result to easily ignore "Not Found" I/O errors.
 trait IgnoreNotFound {
@@ -30,7 +30,7 @@ pub fn read_source_or_empty(
   fs: &FileSystem,
   path: &[u8],
 ) -> Result<Option<Mmap>, Error> {
-  if path == b"/dev/null" {
+  if path.is_dev_null() {
     return Ok(None);
   }
   fs.read(path).map(Some).ignore_not_found()
@@ -40,7 +40,7 @@ pub fn read_source_or_empty(
 fn apply_to_writer(
   fs: &FileSystem,
   patch: &Patch<'_>,
-  writer: &mut (impl io::Write + ?Sized),
+  writer: &mut (impl IoWrite + ?Sized),
 ) -> Result<(), Error> {
   let source = read_source_or_empty(fs, patch.source_file())?;
   apply(writer, patch, source.as_deref().unwrap_or(&[]))
@@ -60,7 +60,7 @@ fn handle_metadata_change(
     fs.rename(source_path, patch.new_file)?;
   } else if patch.copy_to.is_some() {
     fs.copy(source_path, patch.new_file)?;
-  } else if patch.is_creation() {
+  } else if patch.old_file.is_dev_null() {
     fs.write(patch.new_file)?.commit()?;
   }
   Ok(())
@@ -72,9 +72,10 @@ fn handle_application(
   patch: &Patch<'_>,
   check: bool,
 ) -> Result<(), Error> {
-  if check || patch.is_deletion() {
+  let is_deletion = patch.new_file.is_dev_null();
+  if check || is_deletion {
     apply_to_writer(fs, patch, &mut sink())?;
-    if !check && patch.is_deletion() {
+    if !check && is_deletion {
       fs.remove_file(patch.source_file()).ignore_not_found()?;
     }
     Ok(())
@@ -101,7 +102,8 @@ pub fn patch_file_worker(
     return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
 
-  let result = if patch.is_deletion() || patch.has_content_changes() {
+  let is_deletion = patch.new_file.is_dev_null();
+  let result = if is_deletion || patch.has_content_changes() {
     handle_application(fs, patch, check)
   } else {
     handle_metadata_change(fs, patch, check)
@@ -111,7 +113,7 @@ pub fn patch_file_worker(
     e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
   })?;
 
-  if !check && !patch.is_deletion() {
+  if !check && !patch.new_file.is_dev_null() {
     if let Some(mode) = patch.new_mode.or(patch.index_mode) {
       fs.set_permissions(patch.new_file, mode)?;
     }
