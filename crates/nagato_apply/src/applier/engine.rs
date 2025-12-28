@@ -1,7 +1,7 @@
 use std::{io::Write, str};
 
 use bstr::ByteSlice;
-use memchr::{memchr_iter, memmem};
+use memchr::memmem;
 use memmem::Finder;
 use nagato_core::{get_line, Error, ErrorKind};
 use sha1::{Digest, Sha1};
@@ -38,33 +38,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  /// Helper to write a block of data that may contain multiple lines.
-  /// This centralizes the logic for handling skipped content during hunk matching.
-  /// Centralized block writer that handles line endings and updates tracking.
   /// Write a block of data, splitting it into lines and prepending newlines as needed.
   /// This ensures consistent line endings and updates the source line counter.
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
-    if block.is_empty() {
-      return Ok(());
-    }
-
-    let mut lines = 0;
-    block.lines().try_for_each(|line| {
+    for line in block.lines() {
       self.write_line(line)?;
-      lines += 1;
-      Ok::<(), Error>(())
-    })?;
-
-    self.current_source_line += lines;
+      self.current_source_line += 1;
+    }
     Ok(())
-  }
-
-  /// Consume a single line from the source.
-  #[inline]
-  pub fn consume_line(&mut self) -> Option<&'s [u8]> {
-    let (line, next_source) = get_line(self.source)?;
-    self.source = next_source;
-    Some(line)
   }
 
   /// Advance the source and output to the start of a hunk.
@@ -72,33 +53,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let target_line = hunk.old_line.saturating_sub(1);
     let lines_to_skip = target_line.saturating_sub(self.current_source_line);
 
-    if lines_to_skip == 0 {
-      return Ok(());
-    }
-
-    let end_offset = memchr_iter(b'\n', self.source)
-      .nth(lines_to_skip as usize - 1)
-      .map(|pos| pos + 1);
-
-    if let Some(offset) = end_offset {
-      self.write_block(&self.source[..offset])?;
-      self.source = &self.source[offset..];
-    } else {
-      // Fallback for cases where \n is not found as expected
-      for _ in 0..lines_to_skip {
-        let line = self.consume_line().ok_or_else(|| {
-          if hunk.old_span > 0 {
-            Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num)
-          } else {
-            // This is a bit of an edge case, but if we're skipping lines
-            // and hit EOF, and the hunk doesn't expect to match anything (span 0),
-            // we just stop skipping.
-            ErrorKind::UnexpectedEof.into()
-          }
-        })?;
-        self.write_line(line)?;
-        self.current_source_line += 1;
-      }
+    for _ in 0..lines_to_skip {
+      let (line, next_source) = get_line(self.source).ok_or_else(|| {
+        Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num)
+      })?;
+      self.write_line(line)?;
+      self.source = next_source;
+      self.current_source_line += 1;
     }
     Ok(())
   }
@@ -108,7 +69,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   pub fn verify_match<'p>(
     &self,
     mut source: &'s [u8],
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
+    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
     hunk: &Hunk,
   ) -> Result<&'s [u8], Error> {
     for (offset, hunk_line) in lines_to_match {
@@ -154,60 +115,25 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     first_line_to_match: &Line,
   ) -> Result<(usize, &'s [u8]), Error> {
     let needle = first_line_to_match.text;
-
-    if needle.is_empty() {
-      self.search_match_empty_needle(hunk, lines_to_match)
-    } else {
-      self.search_match_text_needle(hunk, lines_to_match, needle)
-    }
-  }
-
-  fn search_match_empty_needle<'p>(
-    &self,
-    hunk: &Hunk<'p>,
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
-  ) -> Result<(usize, &'s [u8]), Error> {
-    let mut pos = 0;
-    let mut source = self.source;
-    while let Some((line, next_source)) = get_line(source) {
-      if line.is_empty() {
-        if let Ok(final_source) =
-          self.verify_match(next_source, lines_to_match.clone(), hunk)
-        {
-          return Ok((pos, final_source));
-        }
-      }
-      pos += source.len() - next_source.len();
-      source = next_source;
-    }
-    Err(Error::with_line(
-      ErrorKind::CouldNotApplyHunk,
-      hunk.patch_line_num,
-    ))
-  }
-
-  fn search_match_text_needle<'p>(
-    &self,
-    hunk: &Hunk<'p>,
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
-    needle: &[u8],
-  ) -> Result<(usize, &'s [u8]), Error> {
     let finder = Finder::new(needle);
+
     for match_pos in finder.find_iter(self.source) {
-      // Ensure match is at the start of a line and ends at a line boundary.
+      // Ensure match is at the start of a line.
       if match_pos > 0 && self.source[match_pos - 1] != b'\n' {
         continue;
       }
 
+      // Ensure match ends at a line boundary.
       let end_pos = match_pos + needle.len();
       let remaining = &self.source[end_pos..];
-      let next_source = match remaining
-        .strip_prefix(b"\n")
-        .or_else(|| remaining.strip_prefix(b"\r\n"))
-      {
-        Some(rest) => rest,
-        None if remaining.is_empty() => remaining,
-        None => continue,
+      let next_source = if remaining.is_empty() {
+        remaining
+      } else if let Some(rest) = remaining.strip_prefix(b"\n") {
+        rest
+      } else if let Some(rest) = remaining.strip_prefix(b"\r\n") {
+        rest
+      } else {
+        continue;
       };
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {

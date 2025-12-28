@@ -10,13 +10,16 @@ trait IgnoreNotFound {
   fn ignore_not_found(self) -> Self;
 }
 
-impl IgnoreNotFound for Result<(), Error> {
+impl<T> IgnoreNotFound for Result<T, Error>
+where
+  T: Default,
+{
   fn ignore_not_found(self) -> Self {
     match self {
       Err(Error {
         kind: ErrorKind::Io(e),
         ..
-      }) if e.0.kind() == IoErrorKind::NotFound => Ok(()),
+      }) if e.0.kind() == IoErrorKind::NotFound => Ok(T::default()),
       res => res,
     }
   }
@@ -30,14 +33,7 @@ pub fn read_source_or_empty(
   if path == b"/dev/null" {
     return Ok(None);
   }
-  match fs.read(path) {
-    Ok(mmap) => Ok(Some(mmap)),
-    Err(Error {
-      kind: ErrorKind::Io(e),
-      ..
-    }) if e.0.kind() == io::ErrorKind::NotFound => Ok(None),
-    Err(e) => Err(e),
-  }
+  fs.read(path).map(Some).ignore_not_found()
 }
 
 /// Helper to apply patch to a writer and handle source reading.
@@ -64,7 +60,7 @@ fn handle_metadata_change(
     fs.rename(source_path, patch.new_file)?;
   } else if patch.copy_to.is_some() {
     fs.copy(source_path, patch.new_file)?;
-  } else if patch.old_file == b"/dev/null" {
+  } else if patch.is_creation() {
     fs.write(patch.new_file)?.commit()?;
   }
   Ok(())
@@ -76,9 +72,9 @@ fn handle_application(
   patch: &Patch<'_>,
   check: bool,
 ) -> Result<(), Error> {
-  if check || patch.new_file == b"/dev/null" {
+  if check || patch.is_deletion() {
     apply_to_writer(fs, patch, &mut sink())?;
-    if !check && patch.new_file == b"/dev/null" {
+    if !check && patch.is_deletion() {
       fs.remove_file(patch.source_file()).ignore_not_found()?;
     }
     Ok(())
@@ -105,24 +101,17 @@ pub fn patch_file_worker(
     return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
 
-  if !patch.binary_fragments.is_empty() {
-    return handle_application(fs, patch, check);
-  }
-
-  if patch.new_file == b"/dev/null"
-    || !patch.hunks.is_empty()
-    || !patch.binary_fragments.is_empty()
-  {
-    handle_application(fs, patch, check).map_err(|e| {
-      e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
-    })?;
+  let result = if patch.is_deletion() || patch.has_content_changes() {
+    handle_application(fs, patch, check)
   } else {
-    handle_metadata_change(fs, patch, check).map_err(|e| {
-      e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
-    })?;
-  }
+    handle_metadata_change(fs, patch, check)
+  };
 
-  if !check && patch.new_file != b"/dev/null" {
+  result.map_err(|e| {
+    e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
+  })?;
+
+  if !check && !patch.is_deletion() {
     if let Some(mode) = patch.new_mode.or(patch.index_mode) {
       fs.set_permissions(patch.new_file, mode)?;
     }

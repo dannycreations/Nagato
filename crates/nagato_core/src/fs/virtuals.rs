@@ -21,15 +21,13 @@ impl FileSystem {
   pub fn new(root: impl Into<PathBuf>) -> Self {
     let root = root.into();
     // We try to make the root absolute to ensure consistent behavior.
-    let root = env::current_dir()
-      .map(|cwd| {
-        if root.is_absolute() {
-          root.clone()
-        } else {
-          cwd.join(&root)
-        }
-      })
-      .unwrap_or(root);
+    let root = if root.is_absolute() {
+      root
+    } else {
+      env::current_dir()
+        .map(|cwd| cwd.join(&root))
+        .unwrap_or(root)
+    };
     Self { root }
   }
 

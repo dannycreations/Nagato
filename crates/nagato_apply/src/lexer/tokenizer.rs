@@ -121,14 +121,14 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"diff --git ") {
-      return self.parse_file_header(rest);
+      self.parse_file_header(rest)
+    } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
+      self.parse_percentage(rest).map(TokenKind::Dissimilarity)
+    } else {
+      self
+        .parse_mode(line, b"deleted ", TokenKind::DeletedFileMode)
+        .or_else(|_| self.parse_non_keyword_line(line))
     }
-    if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
-      return self.parse_percentage(rest).map(TokenKind::Dissimilarity);
-    }
-    self
-      .parse_mode(line, b"deleted ", TokenKind::DeletedFileMode)
-      .or_else(|_| self.parse_non_keyword_line(line))
   }
 
   fn parse_f_line(
@@ -137,12 +137,13 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"file ") {
       let file = strip_git_prefix(rest.trim());
-      return Ok(TokenKind::FileHeader {
+      Ok(TokenKind::FileHeader {
         old_file: file,
         new_file: file,
-      });
+      })
+    } else {
+      self.parse_non_keyword_line(line)
     }
-    self.parse_non_keyword_line(line)
   }
 
   fn parse_g_line(
@@ -151,9 +152,10 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line == b"GIT binary patch" {
       self.mode = LexerMode::Binary;
-      return Ok(TokenKind::GitBinaryPatchHeader);
+      Ok(TokenKind::GitBinaryPatchHeader)
+    } else {
+      self.parse_non_keyword_line(line)
     }
-    self.parse_non_keyword_line(line)
   }
 
   fn parse_n_line(
@@ -179,12 +181,12 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"rename from ") {
-      return Ok(TokenKind::RenameFrom(rest));
+      Ok(TokenKind::RenameFrom(rest))
+    } else if let Some(rest) = line.strip_prefix(b"rename to ") {
+      Ok(TokenKind::RenameTo(rest))
+    } else {
+      self.parse_non_keyword_line(line)
     }
-    if let Some(rest) = line.strip_prefix(b"rename to ") {
-      return Ok(TokenKind::RenameTo(rest));
-    }
-    self.parse_non_keyword_line(line)
   }
 
   fn parse_c_line(
@@ -192,12 +194,12 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"copy from ") {
-      return Ok(TokenKind::CopyFrom(rest));
+      Ok(TokenKind::CopyFrom(rest))
+    } else if let Some(rest) = line.strip_prefix(b"copy to ") {
+      Ok(TokenKind::CopyTo(rest))
+    } else {
+      self.parse_non_keyword_line(line)
     }
-    if let Some(rest) = line.strip_prefix(b"copy to ") {
-      return Ok(TokenKind::CopyTo(rest));
-    }
-    self.parse_non_keyword_line(line)
   }
 
   fn parse_b_line(

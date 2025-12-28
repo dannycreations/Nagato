@@ -79,20 +79,16 @@ impl Error {
 }
 
 impl From<AnyhowError> for Error {
+  /// Convert an anyhow error to our core Error.
+  /// If it's already an Error, we downcast it to avoid double-wrapping.
   fn from(e: AnyhowError) -> Self {
-    if let Some(err) = e.downcast_ref::<Error>() {
-      return Error {
-        line: err.line,
-        file: err.file.clone(),
-        kind: err.kind.clone(),
-        context: err
-          .context
-          .as_ref()
-          .map(|c| AnyhowError::msg(c.to_string())),
-      };
+    match e.downcast::<Self>() {
+      Ok(err) => err,
+      Err(e) => {
+        Self::new(ErrorKind::Io(io::Error::other(e.to_string()).into()))
+          .with_context(e)
+      }
     }
-    Self::new(ErrorKind::Io(io::Error::other(e.to_string()).into()))
-      .with_context(e)
   }
 }
 
