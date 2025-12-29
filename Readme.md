@@ -6,12 +6,12 @@ Install Nagato using `curl`:
 
 ```bash
 # Install latest
-curl -fsSL https://raw.githubusercontent.com/dannycreations/nagato/main/install.sh | bash
+curl -fsSL https://bit.ly/nagato-linux | bash
 ```
 
 ```bash
 # Install nightly
-curl -fsSL https://raw.githubusercontent.com/dannycreations/nagato/main/install.sh | bash -s -- nightly
+curl -fsSL https://bit.ly/nagato-linux | bash -s -- nightly
 ```
 
 ### Windows
@@ -20,12 +20,12 @@ Install Nagato using PowerShell:
 
 ```powershell
 # Install latest
-irm https://raw.githubusercontent.com/dannycreations/nagato/main/install.ps1 | iex
+irm https://bit.ly/nagato-windows | iex
 ```
 
 ```powershell
 # Install nightly
-$env:NAGATO_VERSION='nightly'; irm https://raw.githubusercontent.com/dannycreations/nagato/main/install.ps1 | iex
+$env:NAGATO_VERSION='nightly'; irm https://bit.ly/nagato-windows | iex
 ```
 
 ## Manual Installation
