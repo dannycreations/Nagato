@@ -54,7 +54,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     for _ in 0..lines_to_skip {
       let (line, next_source) = get_line(self.source).ok_or_else(|| {
-        Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num)
+        Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num + 1)
       })?;
       self.write_line(line)?;
       self.source = next_source;
@@ -115,6 +115,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   ) -> Result<(usize, &'s [u8]), Error> {
     let needle = first_line_to_match.text;
     let finder = Finder::new(needle);
+    let mut best_error = None;
+    let mut max_offset = 0;
 
     for match_pos in finder.find_iter(self.source) {
       // Ensure match is at the start of a line.
@@ -140,19 +142,27 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {
         Ok(final_source) => return Ok((match_pos, final_source)),
-        Err(e)
-          if self.current_source_line == hunk.old_line.saturating_sub(1) =>
-        {
-          return Err(e)
+        Err(e) => {
+          // If we have a specific line expectation, return the error immediately.
+          if hunk.old_line > 0
+            && self.current_source_line == hunk.old_line.saturating_sub(1)
+          {
+            return Err(e);
+          }
+
+          // Otherwise, track the "best" match (the one that went furthest).
+          let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
+          if offset >= max_offset {
+            max_offset = offset;
+            best_error = Some(e);
+          }
         }
-        _ => continue,
       }
     }
 
-    Err(Error::with_line(
-      ErrorKind::CouldNotApplyHunk,
-      hunk.patch_line_num,
-    ))
+    Err(best_error.unwrap_or_else(|| {
+      Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num)
+    }))
   }
 
   /// Find and apply a single hunk to the source.
