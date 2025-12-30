@@ -2,6 +2,10 @@ name: Build
 
 on:
   workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
 
 jobs:
   build:
@@ -43,6 +47,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
+        env:
+          NAGATO_VERSION: ${{ inputs.version }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare artifact

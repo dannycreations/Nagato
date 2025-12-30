@@ -1,19 +1,16 @@
 $ErrorActionPreference = 'Stop'
 
-# --- Configuration ---
 $Owner = "dannycreations"
 $Repo = "nagato"
 $AssetName = "nagato-windows-amd64.exe"
 $BinaryName = "nagato.exe"
 
-# --- Arch Detection ---
 $Arch = if ($Is64BitProcess -or $env:PROCESSOR_ARCHITECTURE -eq 'AMD64') { "amd64" } else { "386" }
 if ($Arch -ne "amd64") {
   Write-Error "Unsupported Architecture: $Arch. Only amd64 is supported for Windows."
   exit 1
 }
 
-# --- Versioning ---
 $Version = if ($args[0]) { $args[0] } elseif ($env:NAGATO_VERSION) { $env:NAGATO_VERSION } else { "latest" }
 $Url = if ($Version -eq "latest") {
   "https://api.github.com/repos/$Owner/$Repo/releases/latest"
@@ -22,7 +19,6 @@ else {
   "https://api.github.com/repos/$Owner/$Repo/releases/tags/$Version"
 }
 
-# --- Download ---
 Write-Host "Fetching $Version release info..."
 
 try {
@@ -50,7 +46,6 @@ $DestPath = Join-Path $InstallDir $BinaryName
 Write-Host "Downloading $AssetName..."
 Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestPath -UseBasicParsing
 
-# --- PATH check ---
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($UserPath -notlike "*$InstallDir*") {
   Write-Host "Adding $InstallDir to User PATH..."

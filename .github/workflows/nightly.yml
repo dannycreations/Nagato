@@ -7,8 +7,20 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Generate Version
+        id: version
+        run: echo "version=nightly $(date -u +'%Y.%m.%d %H%M%S')" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
 
   release:
     name: Release
