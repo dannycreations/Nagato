@@ -124,6 +124,7 @@ pub fn parse_hunk<'a>(
     new_span,
     lines,
     patch_line_num,
+    has_header: true,
   })
 }
 
@@ -153,6 +154,7 @@ pub fn parse_headerless_hunk<'a>(
         new_span,
         lines,
         patch_line_num: hunk_start_line.saturating_sub(1),
+        has_header: false,
       });
     }
 

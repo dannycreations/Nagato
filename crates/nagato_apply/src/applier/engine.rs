@@ -161,7 +161,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     Err(best_error.unwrap_or_else(|| {
-      Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num)
+      let error_line = if hunk.has_header {
+        hunk.patch_line_num
+      } else {
+        hunk.patch_line_num + 1
+      };
+      Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
     }))
   }
 
