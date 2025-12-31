@@ -10,6 +10,7 @@ repository.workspace = true
 doctest = false
 
 [dependencies]
+anyhow.workspace = true
 bstr.workspace = true
 flate2.workspace = true
 hex.workspace = true

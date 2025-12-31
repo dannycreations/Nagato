@@ -1,5 +1,5 @@
 #[macro_use]
-mod common;
+mod macros;
 
-mod custom;
 mod native;
+mod vendor;

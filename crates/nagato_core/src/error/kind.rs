@@ -86,43 +86,44 @@ impl PartialEq for ErrorKind {
 
 impl Eq for ErrorKind {}
 
-#[allow(non_upper_case_globals)]
-impl ErrorKind {
-  pub const InvalidHunkRangeLine: Self =
-    Self::Parse(ParseErrorKind::InvalidHunkRangeLine);
-  pub const InvalidHunkRangeSpan: Self =
-    Self::Parse(ParseErrorKind::InvalidHunkRangeSpan);
-  pub const MissingOldRange: Self =
-    Self::Parse(ParseErrorKind::MissingOldRange);
-  pub const MissingNewRange: Self =
-    Self::Parse(ParseErrorKind::MissingNewRange);
-  pub const InvalidPercentage: Self =
-    Self::Parse(ParseErrorKind::InvalidPercentage);
-  pub const InvalidFileMode: Self =
-    Self::Parse(ParseErrorKind::InvalidFileMode);
-  pub const InvalidFileHeader: Self =
-    Self::Parse(ParseErrorKind::InvalidFileHeader);
-  pub const InvalidIndexLine: Self =
-    Self::Parse(ParseErrorKind::InvalidIndexLine);
-  pub const InvalidIndexHashRange: Self =
-    Self::Parse(ParseErrorKind::InvalidIndexHashRange);
-  pub const InvalidBinaryFilesLine: Self =
-    Self::Parse(ParseErrorKind::InvalidBinaryFilesLine);
-  pub const UnexpectedLine: Self = Self::Parse(ParseErrorKind::UnexpectedLine);
-  pub const HunkLineCountMismatch: Self =
-    Self::Parse(ParseErrorKind::HunkLineCountMismatch);
-  pub const ExpectedHunkHeader: Self =
-    Self::Parse(ParseErrorKind::ExpectedHunkHeader);
-  pub const PatchHasContentButNoFileInfo: Self =
-    Self::Parse(ParseErrorKind::PatchHasContentButNoFileInfo);
-  pub const UnexpectedEof: Self = Self::Parse(ParseErrorKind::UnexpectedEof);
-
-  pub const CouldNotApplyHunk: Self =
-    Self::Apply(ApplyErrorKind::CouldNotApplyHunk);
-  pub const UnsupportedBinaryPatch: Self =
-    Self::Apply(ApplyErrorKind::UnsupportedBinaryPatch);
-  pub const InvalidBinaryPatch: Self =
-    Self::Apply(ApplyErrorKind::InvalidBinaryPatch);
-  pub const BinaryPatchSourceMismatch: Self =
-    Self::Apply(ApplyErrorKind::BinaryPatchSourceMismatch);
+/// Macro to delegate variants from sub-error enums to ErrorKind constants.
+/// This reduces boilerplate when adding new error types.
+macro_rules! delegate_variants {
+  ($variant_name:ident, $inner:ident, $($variant:ident),* $(,)?) => {
+    #[allow(non_upper_case_globals)]
+    impl ErrorKind {
+      $(
+        pub const $variant: Self = Self::$variant_name($inner::$variant);
+      )*
+    }
+  };
 }
+
+delegate_variants!(
+  Parse,
+  ParseErrorKind,
+  InvalidHunkRangeLine,
+  InvalidHunkRangeSpan,
+  MissingOldRange,
+  MissingNewRange,
+  InvalidPercentage,
+  InvalidFileMode,
+  InvalidFileHeader,
+  InvalidIndexLine,
+  InvalidIndexHashRange,
+  InvalidBinaryFilesLine,
+  UnexpectedLine,
+  HunkLineCountMismatch,
+  ExpectedHunkHeader,
+  PatchHasContentButNoFileInfo,
+  UnexpectedEof,
+);
+
+delegate_variants!(
+  Apply,
+  ApplyErrorKind,
+  CouldNotApplyHunk,
+  UnsupportedBinaryPatch,
+  InvalidBinaryPatch,
+  BinaryPatchSourceMismatch,
+);

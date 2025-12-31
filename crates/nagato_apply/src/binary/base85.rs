@@ -105,10 +105,8 @@ impl<'a> Read for Base85Reader<'a> {
         }
 
         if self.buf_len + 4 <= self.buffer.len() {
-          self.buffer[self.buf_len] = (val >> 24) as u8;
-          self.buffer[self.buf_len + 1] = (val >> 16) as u8;
-          self.buffer[self.buf_len + 2] = (val >> 8) as u8;
-          self.buffer[self.buf_len + 3] = val as u8;
+          self.buffer[self.buf_len..self.buf_len + 4]
+            .copy_from_slice(&val.to_be_bytes());
           self.buf_len += 4;
         }
       }

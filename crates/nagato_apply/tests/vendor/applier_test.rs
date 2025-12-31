@@ -120,35 +120,7 @@ test_patch_ok!(
 );
 
 test_patch_ok!(
-  applies_hunkless_with_repeated_label,
-  initial_fs: { "file.txt" => "Container {\n    Block 1 {\n        // item 1\n    }\n    Block 2 {\n        // item 2\n    }\n}\n" },
-  diff: r#"
-    file a/file.txt
-     Container {
-
-         Block 1 {
-    -        // item 1
-    +        // modified 1
-         }
-
-     Container {
-
-         Block 2 {
-    -        // item 2
-    +        // modified 2
-         }
-  "#,
-  assertions: |root| {
-    let content = fs::read_to_string(root.join("file.txt")).unwrap();
-    assert_eq!(
-      content,
-      "Container {\n    Block 1 {\n        // modified 1\n    }\n    Block 2 {\n        // modified 2\n    }\n}\n"
-    );
-  }
-);
-
-test_patch_ok!(
-  applies_with_label_line,
+  applies_hunkless_with_label,
   initial_fs: { "file.txt" => "function a() {\n// content\n}\n\nfunction b() {\n// content\n}\n" },
   diff: r#"
     file a/file.txt
@@ -162,5 +134,33 @@ test_patch_ok!(
     assert!(content.contains("function b() {\n// modified content\n"));
     // Function a should be unchanged
     assert!(content.contains("function a() {\n// content\n}"));
+  }
+);
+
+test_patch_ok!(
+  applies_hunkless_with_repeated_label,
+  initial_fs: { "file.txt" => "Container {\n    Block 1 {\n        // item 1\n    }\n    Block 2 {\n        // item 2\n    }\n}\n" },
+  diff: r#"
+    file a/file.txt
+    label Container {
+
+         Block 1 {
+    -        // item 1
+    +        // modified 1
+         }
+
+    label Container {
+
+         Block 2 {
+    -        // item 2
+    +        // modified 2
+         }
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    assert_eq!(
+      content,
+      "Container {\n    Block 1 {\n        // modified 1\n    }\n    Block 2 {\n        // modified 2\n    }\n}\n"
+    );
   }
 );

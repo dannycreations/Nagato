@@ -86,21 +86,21 @@ impl FileSystem {
       .to_path()
       .map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
-    let mut dest = self.root.clone();
-    let mut components = path.components().peekable();
+    let mut components = path.components();
 
-    // If the path starts with a root or prefix, we skip it to treat the path as relative.
-    // This is safer than rejecting it, as some patches might use absolute-looking paths
-    // that should still be relative to the project root.
-    while let Some(c) = components.peek() {
-      match c {
-        Component::RootDir | Component::Prefix(_) => {
-          components.next();
+    // Skip root/prefix to ensure path is treated as relative to root.
+    // We use a manual loop to avoid peekable overhead and keep it clean.
+    let components = loop {
+      let mut next = components.clone();
+      match next.next() {
+        Some(Component::RootDir) | Some(Component::Prefix(_)) => {
+          components = next;
         }
-        _ => break,
+        _ => break components,
       }
-    }
+    };
 
+    let mut dest = self.root.clone();
     for component in components {
       match component {
         Component::Normal(c) => dest.push(c),

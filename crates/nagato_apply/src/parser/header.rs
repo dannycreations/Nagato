@@ -8,11 +8,7 @@ pub fn parse_header<'a>(
   patch: &mut Patch<'a>,
   binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
-  while let Some(res) = parser.tokens.peek() {
-    let item = match res {
-      Ok(i) => i,
-      Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
-    };
+  while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::FileHeader { old_file, new_file } => {
         patch.old_file = old_file;
@@ -25,8 +21,9 @@ pub fn parse_header<'a>(
       } => {
         patch.old_hash = Some(old_hash);
         patch.new_hash = Some(new_hash);
-        patch.index_mode =
-          mode.and_then(|m| parse_int::<u32>(m, 8).map(|(v, _)| v));
+        patch.new_mode = patch.new_mode.or_else(|| {
+          mode.and_then(|m| parse_int::<u32>(m, 8).map(|(v, _)| v))
+        });
       }
       TokenKind::OldFile(file) => {
         patch.old_file = file;
@@ -53,7 +50,7 @@ pub fn parse_header<'a>(
         patch.old_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
       }
       TokenKind::DeletedFileMode(mode) => {
-        patch.deleted_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
+        patch.old_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
       }
       TokenKind::Similarity(percent) => {
         patch.similarity = parse_percentage(percent).ok();

@@ -22,6 +22,8 @@ impl<'a> Parser<'a> {
   }
 
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
+    // Ensure label state doesn't leak between patches.
+    self.label = None;
     let mut patch = Patch::default();
     let mut hunks = Vec::new();
     let mut binary_fragments = Vec::new();
@@ -83,6 +85,17 @@ impl<'a> Parser<'a> {
         Err(err)
       }
       None => Ok(false),
+    }
+  }
+
+  /// Helper to peek at the next token, handling errors.
+  pub fn peek_token(&mut self) -> Result<Option<&crate::LexerItem<'a>>, Error> {
+    if let Some(Err(_)) = self.tokens.peek() {
+      return Err(self.tokens.next().unwrap().unwrap_err());
+    }
+    match self.tokens.peek() {
+      Some(Ok(item)) => Ok(Some(item)),
+      _ => Ok(None),
     }
   }
 }

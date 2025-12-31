@@ -1,17 +1,17 @@
 use std::{
   env,
-  fs::File,
-  io::{stdin, IsTerminal, Read},
+  io::{stdin, IsTerminal},
   path::PathBuf,
 };
 
-use memmap2::Mmap;
-use nagato_core::{Error, ErrorKind, FileSystem};
+use nagato_core::{Error, FileSystem};
 use processor::process_patch;
+use source::PatchSource;
 use trimmer::process_trim;
 
 mod args;
 mod processor;
+mod source;
 mod trimmer;
 
 pub use args::*;
@@ -42,23 +42,10 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   let fs = FileSystem::new(root);
 
   // Process patches from stdin or specified files.
-  // We unify the input source into a collection of byte buffers.
-  if cli.files.is_empty() {
-    let mut stdin_content = Vec::new();
-    stdin().read_to_end(&mut stdin_content)?;
-    process_patch(&fs, &stdin_content, cli.reverse, cli.check)
-      .map_err(|e| e.with_file("<stdin>"))?;
-  } else {
-    for path in &cli.files {
-      let file_name = path.to_string_lossy().to_string();
-      let file = File::open(path).map_err(|e| {
-        Error::new(ErrorKind::CantOpenPatch(file_name.clone(), e))
-      })?;
-      // SAFETY: Mmap is used for efficient reading of large patch files.
-      let mmap = unsafe { Mmap::map(&file)? };
-      process_patch(&fs, &mmap, cli.reverse, cli.check)
-        .map_err(|e| e.with_file(file_name))?;
-    }
+  for source_res in PatchSource::iter(cli.files.clone()) {
+    let source = source_res?;
+    process_patch(&fs, source.content(), cli.reverse, cli.check)
+      .map_err(|e| e.with_file(source.name().to_string()))?;
   }
 
   Ok(())

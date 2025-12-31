@@ -7,12 +7,7 @@ pub fn parse_hunks<'a>(
   patch: &mut Patch<'a>,
   hunks: &mut Vec<Hunk<'a>>,
 ) -> Result<(), Error> {
-  while let Some(res) = parser.tokens.peek() {
-    let item = match res {
-      Ok(i) => i,
-      Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
-    };
-
+  while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::Label(l) => {
         parser.label = Some(*l);
@@ -30,8 +25,12 @@ pub fn parse_hunks<'a>(
       | TokenKind::Context(_) => {
         let initial_line = item.line_num;
         let mut lines = Vec::new();
-        let (old_span, new_span) =
-          collect_hunk_lines(parser, &mut lines, patch, true)?;
+        let (old_span, new_span) = collect_hunk_lines(
+          parser,
+          &mut lines,
+          patch,
+          |t| matches!(t, TokenKind::Context(s) if s.is_empty()),
+        )?;
 
         if !lines.is_empty() {
           hunks.push(Hunk {
@@ -55,25 +54,18 @@ pub fn parse_hunks<'a>(
 
 /// Collects hunk lines from the parser and updates the patch metadata.
 /// Returns the (old_span, new_span) of the collected lines.
-/// If `stop_on_empty` is true, stops at empty context lines (used for hunkless).
+/// The `stop_condition` closure allows customizing when to stop collecting lines.
 pub fn collect_hunk_lines<'a>(
   parser: &mut Parser<'a>,
   lines: &mut Vec<Line<'a>>,
   patch: &mut Patch<'a>,
-  stop_on_empty: bool,
+  stop_condition: impl Fn(&TokenKind<'a>) -> bool,
 ) -> Result<(u32, u32), Error> {
   let mut old_span = 0;
   let mut new_span = 0;
 
-  while let Some(res) = parser.tokens.peek() {
-    let item = match res {
-      Ok(i) => i,
-      Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
-    };
-
-    if stop_on_empty
-      && matches!(item.token, TokenKind::Context(s) if s.is_empty())
-    {
+  while let Some(item) = parser.peek_token()? {
+    if stop_condition(&item.token) {
       break;
     }
 
@@ -149,7 +141,7 @@ pub fn parse_hunk<'a>(
 
   let mut lines = Vec::with_capacity(old_span.max(new_span) as usize);
   let (actual_old_span, actual_new_span) =
-    collect_hunk_lines(parser, &mut lines, patch, false)?;
+    collect_hunk_lines(parser, &mut lines, patch, |_| false)?;
 
   if actual_old_span != old_span || actual_new_span != new_span {
     return Err(Error::with_line(

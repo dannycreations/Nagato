@@ -10,8 +10,6 @@ use crate::{BinaryFragment, Hunk, LineKind};
 /// Represents a single patch, which can contain multiple hunks.
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Patch<'a> {
-  /// The index mode.
-  pub index_mode: Option<u32>,
   /// The SHA1 hash of the old file.
   pub old_hash: Option<&'a [u8]>,
   /// The SHA1 hash of the new file.
@@ -34,8 +32,6 @@ pub struct Patch<'a> {
   pub new_mode: Option<u32>,
   /// The old file mode.
   pub old_mode: Option<u32>,
-  /// The deleted file mode.
-  pub deleted_mode: Option<u32>,
   /// The similarity index in a rename or copy operation.
   pub similarity: Option<u32>,
   /// The dissimilarity index in a rename or copy operation.
@@ -63,26 +59,12 @@ impl<'a> Patch<'a> {
 
   /// Invert the patch for reverse application.
   pub fn invert(mut self) -> Self {
-    let is_creation = self.old_file.is_dev_null();
-    let is_deletion = self.new_file.is_dev_null();
-
     mem::swap(&mut self.old_file, &mut self.new_file);
     mem::swap(&mut self.rename_from, &mut self.rename_to);
     mem::swap(&mut self.copy_from, &mut self.copy_to);
     mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
     mem::swap(&mut self.old_hash, &mut self.new_hash);
-
-    if is_creation {
-      self.deleted_mode = self.new_mode;
-      self.new_mode = None;
-      self.old_mode = None;
-    } else if is_deletion {
-      self.new_mode = self.deleted_mode.or(self.old_mode);
-      self.old_mode = None;
-      self.deleted_mode = None;
-    } else {
-      mem::swap(&mut self.old_mode, &mut self.new_mode);
-    }
+    mem::swap(&mut self.old_mode, &mut self.new_mode);
 
     for hunk in self.hunks.iter_mut() {
       hunk.invert();
@@ -93,11 +75,13 @@ impl<'a> Patch<'a> {
   /// Serialize the patch into the Nagato "trimmed" format.
   pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {
     // We use the new_file as the primary name if available, otherwise old_file.
-    let target_file = if !self.new_file.is_empty() {
-      self.new_file
-    } else {
-      self.old_file
-    };
+    // We avoid using /dev/null as the target file name for trimmed output.
+    let target_file =
+      if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
+        self.new_file
+      } else {
+        self.old_file
+      };
 
     out.write_all(b"file ")?;
     out.write_all(target_file)?;

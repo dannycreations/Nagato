@@ -84,23 +84,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(source)
   }
 
-  /// Find a match for a hunk in the source, allowing for fuzzing/offset.
-  pub fn find_hunk_match<'p>(
-    &mut self,
-    hunk: &Hunk<'p>,
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
-    first_line_to_match: &Line,
-  ) -> Result<(), Error> {
-    let source = self.source_at();
-    let (match_pos, final_source) =
-      self.search_match(source, hunk, lines_to_match, first_line_to_match)?;
-
-    let skipped = &source[..match_pos];
-    self.write_block(skipped)?;
-    self.pos += source.len() - final_source.len();
-    Ok(())
-  }
-
   fn search_match<'p>(
     &self,
     buffer: &'s [u8],

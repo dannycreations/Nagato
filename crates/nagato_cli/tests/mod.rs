@@ -1,4 +1,4 @@
 #[macro_use]
-mod common;
+mod macros;
 
 mod command;
