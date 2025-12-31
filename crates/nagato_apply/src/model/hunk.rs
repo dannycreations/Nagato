@@ -19,6 +19,8 @@ pub struct Hunk<'a> {
   pub patch_line_num: u32,
   /// Whether the hunk has a header.
   pub has_header: bool,
+  /// An optional label for matching.
+  pub label: Option<&'a [u8]>,
 }
 
 impl<'a> Hunk<'a> {

@@ -25,6 +25,7 @@ pub enum TokenKind<'a> {
     old_span: u32,
     new_line: u32,
     new_span: u32,
+    label: Option<&'a [u8]>,
   },
   /// A line that was added to the file.
   Addition(&'a [u8]),
@@ -65,4 +66,6 @@ pub enum TokenKind<'a> {
   BinaryPatchType { kind: BinaryKind, size: u64 },
   /// A line of binary data.
   BinaryData(&'a [u8]),
+  /// A label for the following hunk.
+  Label(&'a [u8]),
 }

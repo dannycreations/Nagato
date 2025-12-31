@@ -82,6 +82,7 @@ test_lexer_ok!(
     old_span: 2,
     new_line: 1,
     new_span: 2,
+    label: None,
   },
   TokenKind::Deletion(b"hello world"),
   TokenKind::Addition(b"Hello, world!"),
@@ -118,7 +119,8 @@ test_lexer_ok!(
     old_line: 1,
     old_span: 2,
     new_line: 1,
-    new_span: 2
+    new_span: 2,
+    label: None,
   },
   TokenKind::Deletion(b"hello"),
   TokenKind::Deletion(b"world"),
@@ -136,6 +138,7 @@ test_lexer_ok!(
     old_span: 0,
     new_line: 1,
     new_span: 3,
+    label: None,
   }
 );
 

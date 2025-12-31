@@ -65,6 +65,9 @@ impl<'a> Lexer<'a> {
       Some(b'i') if line.starts_with(b"index ") => {
         self.parse_index_line(&line[6..])
       }
+      Some(b'l') if line.starts_with(b"label ") => {
+        Ok(TokenKind::Label(&line[6..]))
+      }
       Some(b'n') => self.parse_n_line(line),
       Some(b'o') => self.parse_o_line(line),
       Some(b'r') => self.parse_r_line(line),
@@ -250,11 +253,24 @@ impl<'a> Lexer<'a> {
     let (old_line, old_span) = self.parse_range(old_range_bytes)?;
     let (new_line, new_span) = self.parse_range(new_range_bytes)?;
 
+    let label = if content_end + 3 < header.len() {
+      let l = &header[content_end + 3..];
+      let l = l.trim_start();
+      if l.is_empty() {
+        None
+      } else {
+        Some(l)
+      }
+    } else {
+      None
+    };
+
     Ok(TokenKind::HunkHeader {
       old_line,
       old_span,
       new_line,
       new_span,
+      label,
     })
   }
 

@@ -462,3 +462,22 @@ test_patch_ok!(
     );
   }
 );
+
+test_patch_ok!(
+  applies_with_hunk_header_label,
+  initial_fs: { "file.txt" => "function a() {\n// content\n}\n\nfunction b() {\n// content\n}\n" },
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -6,1 +6,1 @@ function b() {
+    -// content
+    +// modified content
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    // Function b should be changed
+    assert!(content.contains("function b() {\n// modified content\n"));
+    // Function a should be unchanged
+    assert!(content.contains("function a() {\n// content\n}"));
+  }
+);

@@ -10,12 +10,14 @@ mod hunk;
 
 pub struct Parser<'a> {
   pub tokens: Peekable<Lexer<'a>>,
+  pub label: Option<&'a [u8]>,
 }
 
 impl<'a> Parser<'a> {
   pub fn new(input: &'a [u8]) -> Self {
     Self {
       tokens: Lexer::new(input).peekable(),
+      label: None,
     }
   }
 
@@ -30,10 +32,11 @@ impl<'a> Parser<'a> {
 
     header::parse_header(self, &mut patch)?;
     self.skip_empty_context_lines()?;
-    hunk::parse_hunks(self, &mut patch)?;
 
-    if patch.hunks.is_empty() && patch.binary_fragments.is_empty() {
+    if patch.old_file.is_empty() && patch.new_file.is_empty() {
       hunk::parse_headerless_hunk(self, &mut patch)?;
+    } else {
+      hunk::parse_hunks(self, &mut patch)?;
     }
 
     if patch.hunks.is_empty()

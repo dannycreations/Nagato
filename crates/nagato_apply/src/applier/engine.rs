@@ -113,7 +113,27 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let mut best_error = None;
     let mut max_offset = 0;
 
-    for match_pos in finder.find_iter(buffer) {
+    let mut search_buffer = buffer;
+    let mut buffer_offset = 0;
+
+    if let Some(label) = hunk.label {
+      if let Some(label_pos) = Finder::new(label).find(buffer) {
+        // If label is found, we prioritize matching after it.
+        // We ensure the label match is at a line boundary.
+        if label_pos == 0 || buffer[label_pos - 1] == b'\n' {
+          // Find the end of the line containing the label
+          let label_line_end = memchr::memchr(b'\n', &buffer[label_pos..])
+            .map(|i| label_pos + i + 1)
+            .unwrap_or(buffer.len());
+
+          search_buffer = &buffer[label_line_end..];
+          buffer_offset = label_line_end;
+        }
+      }
+    }
+
+    for match_pos_rel in finder.find_iter(search_buffer) {
+      let match_pos = buffer_offset + match_pos_rel;
       // Ensure match is at the start of a line.
       if match_pos > 0 && buffer[match_pos - 1] != b'\n' {
         continue;
