@@ -109,9 +109,7 @@ pub fn patch_file_worker(
     handle_metadata_change(fs, patch, check)
   };
 
-  result.map_err(|e| {
-    e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
-  })?;
+  result.map_err(|e| e.with_file(String::from_utf8_lossy(patch.new_file)))?;
 
   if !check && !patch.new_file.is_dev_null() {
     if let Some(mode) = patch.new_mode.or(patch.index_mode) {

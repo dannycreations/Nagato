@@ -1,11 +1,12 @@
 use nagato_core::{parse_int, Error, ErrorKind};
 
 use super::binary::parse_binary_patch;
-use crate::{Parser, Patch, TokenKind};
+use crate::{BinaryFragment, Parser, Patch, TokenKind};
 
 pub fn parse_header<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
+  binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
   while let Some(res) = parser.tokens.peek() {
     let item = match res {
@@ -68,7 +69,7 @@ pub fn parse_header<'a>(
       }
       TokenKind::GitBinaryPatchHeader => {
         parser.tokens.next();
-        parse_binary_patch(parser, patch)?;
+        parse_binary_patch(parser, patch, binary_fragments)?;
         return Ok(());
       }
       _ => break,

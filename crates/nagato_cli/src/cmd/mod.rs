@@ -47,7 +47,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
     let mut stdin_content = Vec::new();
     stdin().read_to_end(&mut stdin_content)?;
     process_patch(&fs, &stdin_content, cli.reverse, cli.check)
-      .map_err(|e| e.with_file("<stdin>".into()))?;
+      .map_err(|e| e.with_file("<stdin>"))?;
   } else {
     for path in &cli.files {
       let file_name = path.to_string_lossy().to_string();

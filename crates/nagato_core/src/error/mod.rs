@@ -14,7 +14,7 @@ pub struct Error {
   /// Optional line number where the error occurred.
   pub line: Option<u32>,
   /// Optional file name where the error occurred.
-  pub file: Option<String>,
+  pub file: Option<Box<str>>,
   /// The specific kind of error.
   pub kind: ErrorKind,
   /// Wrapped context error.
@@ -29,11 +29,11 @@ impl fmt::Display for Error {
     }
     if let Some(line) = self.line {
       write!(f, "\n  at ")?;
-      match &self.file {
+      match self.file.as_deref() {
         Some(file) => write!(f, "{file}:{line}"),
         None => write!(f, "<stdin>:{line}"),
       }?;
-    } else if let Some(file) = &self.file {
+    } else if let Some(file) = self.file.as_deref() {
       write!(f, "\n  in {file}")?;
     }
     Ok(())
@@ -64,8 +64,8 @@ impl Error {
   }
 
   /// Attach a file name to the error.
-  pub fn with_file(mut self, file: String) -> Self {
-    self.file = Some(file);
+  pub fn with_file(mut self, file: impl Into<Box<str>>) -> Self {
+    self.file = Some(file.into());
     self
   }
 

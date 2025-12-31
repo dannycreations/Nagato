@@ -5,6 +5,7 @@ use crate::{BinaryFragment, BinaryKind, Parser, Patch, TokenKind};
 pub fn parse_binary_patch<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
+  binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
   patch.binary = true;
   while let Some(res) = parser.tokens.peek() {
@@ -38,9 +39,11 @@ pub fn parse_binary_patch<'a>(
             break;
           }
         }
-        patch
-          .binary_fragments
-          .push(BinaryFragment { kind, size, data });
+        binary_fragments.push(BinaryFragment {
+          kind,
+          size,
+          data: data.into_boxed_slice(),
+        });
       }
       TokenKind::Context(_) => {
         parser.tokens.next();

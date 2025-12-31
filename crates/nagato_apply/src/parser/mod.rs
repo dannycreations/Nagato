@@ -23,6 +23,9 @@ impl<'a> Parser<'a> {
 
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
     let mut patch = Patch::default();
+    let mut hunks = Vec::new();
+    let mut binary_fragments = Vec::new();
+
     let _start_line = self
       .tokens
       .peek()
@@ -30,14 +33,17 @@ impl<'a> Parser<'a> {
       .map(|i| i.line_num)
       .unwrap_or(0);
 
-    header::parse_header(self, &mut patch)?;
+    header::parse_header(self, &mut patch, &mut binary_fragments)?;
     self.skip_empty_context_lines()?;
 
     if patch.old_file.is_empty() && patch.new_file.is_empty() {
-      hunk::parse_headerless_hunk(self, &mut patch)?;
+      hunk::parse_hunkless(self, &mut patch, &mut hunks)?;
     } else {
-      hunk::parse_hunks(self, &mut patch)?;
+      hunk::parse_hunks(self, &mut patch, &mut hunks)?;
     }
+
+    patch.hunks = hunks.into_boxed_slice();
+    patch.binary_fragments = binary_fragments.into_boxed_slice();
 
     if patch.hunks.is_empty()
       && patch.binary_fragments.is_empty()

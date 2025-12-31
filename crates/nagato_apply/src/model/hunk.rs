@@ -14,7 +14,7 @@ pub struct Hunk<'a> {
   /// The number of lines in the new file.
   pub new_span: u32,
   /// The lines in the hunk.
-  pub lines: Vec<Line<'a>>,
+  pub lines: Box<[Line<'a>]>,
   /// This will be populated by the parser using the line number from the LexerItem.
   pub patch_line_num: u32,
   /// Whether the hunk has a header.
@@ -28,12 +28,12 @@ impl<'a> Hunk<'a> {
   pub fn invert(&mut self) {
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
-    self.lines.iter_mut().for_each(|line| {
+    for line in self.lines.iter_mut() {
       line.kind = match line.kind {
         LineKind::Addition => LineKind::Deletion,
         LineKind::Deletion => LineKind::Addition,
         LineKind::Context => LineKind::Context,
       };
-    });
+    }
   }
 }

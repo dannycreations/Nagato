@@ -30,7 +30,7 @@ pub struct Patch<'a> {
   /// The path to the new file.
   pub new_file: &'a [u8],
   /// The hunks in the patch.
-  pub hunks: Vec<Hunk<'a>>,
+  pub hunks: Box<[Hunk<'a>]>,
   /// The source file in a copy operation.
   pub copy_from: Option<&'a [u8]>,
   /// The destination file in a copy operation.
@@ -56,7 +56,7 @@ pub struct Patch<'a> {
   /// Indicates that the new file has no newline at the end.
   pub new_file_no_newline: bool,
   /// Binary patch fragments.
-  pub binary_fragments: Vec<BinaryFragment<'a>>,
+  pub binary_fragments: Box<[BinaryFragment<'a>]>,
 }
 
 impl<'a> Patch<'a> {
@@ -93,7 +93,9 @@ impl<'a> Patch<'a> {
       mem::swap(&mut self.old_mode, &mut self.new_mode);
     }
 
-    self.hunks.iter_mut().for_each(Hunk::invert);
+    for hunk in self.hunks.iter_mut() {
+      hunk.invert();
+    }
     self
   }
 

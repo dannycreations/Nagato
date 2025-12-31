@@ -5,6 +5,7 @@ use crate::{Hunk, LexerItem, Line, LineKind, Parser, Patch, TokenKind};
 pub fn parse_hunks<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
+  hunks: &mut Vec<Hunk<'a>>,
 ) -> Result<(), Error> {
   loop {
     parser.skip_empty_context_lines()?;
@@ -28,7 +29,7 @@ pub fn parse_hunks<'a>(
       } else {
         parser.label = None;
       }
-      patch.hunks.push(hunk);
+      hunks.push(hunk);
       found_something = true;
     } else if parser.peek_is(|t| {
       matches!(
@@ -50,12 +51,12 @@ pub fn parse_hunks<'a>(
         collect_hunk_lines(parser, &mut lines, patch, true)?;
 
       if !lines.is_empty() {
-        patch.hunks.push(Hunk {
+        hunks.push(Hunk {
           old_line: 0,
           new_line: 0,
           old_span,
           new_span,
-          lines,
+          lines: lines.into_boxed_slice(),
           patch_line_num: initial_line.saturating_sub(1),
           has_header: false,
           label: parser.label.take(),
@@ -73,7 +74,7 @@ pub fn parse_hunks<'a>(
 
 /// Collects hunk lines from the parser and updates the patch metadata.
 /// Returns the (old_span, new_span) of the collected lines.
-/// If `stop_on_empty` is true, stops at empty context lines (used for headerless hunks).
+/// If `stop_on_empty` is true, stops at empty context lines (used for hunkless).
 pub fn collect_hunk_lines<'a>(
   parser: &mut Parser<'a>,
   lines: &mut Vec<Line<'a>>,
@@ -186,16 +187,17 @@ pub fn parse_hunk<'a>(
     old_span,
     new_line,
     new_span,
-    lines,
+    lines: lines.into_boxed_slice(),
     patch_line_num,
     has_header: true,
     label,
   })
 }
 
-pub fn parse_headerless_hunk<'a>(
+pub fn parse_hunkless<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
+  hunks: &mut Vec<Hunk<'a>>,
 ) -> Result<(), Error> {
   let initial_start_line = parser
     .tokens
@@ -204,11 +206,9 @@ pub fn parse_headerless_hunk<'a>(
     .map(|item| item.line_num)
     .unwrap_or(0);
 
-  parse_hunks(parser, patch)?;
+  parse_hunks(parser, patch, hunks)?;
 
-  if !patch.hunks.is_empty()
-    && patch.old_file.is_empty()
-    && patch.new_file.is_empty()
+  if !hunks.is_empty() && patch.old_file.is_empty() && patch.new_file.is_empty()
   {
     return Err(Error::with_line(
       ErrorKind::PatchHasContentButNoFileInfo,

@@ -1,4 +1,4 @@
-use std::{io::Write, str};
+use std::io::Write;
 
 use bstr::ByteSlice;
 use memchr::memmem::Finder;
@@ -110,27 +110,28 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   ) -> Result<(usize, &'s [u8]), Error> {
     let needle = first_line_to_match.text;
     let finder = Finder::new(needle);
-    let mut best_error = None;
-    let mut max_offset = 0;
 
-    let mut search_buffer = buffer;
-    let mut buffer_offset = 0;
-
-    if let Some(label) = hunk.label {
-      if let Some(label_pos) = Finder::new(label).find(buffer) {
-        // If label is found, we prioritize matching after it.
-        // We ensure the label match is at a line boundary.
-        if label_pos == 0 || buffer[label_pos - 1] == b'\n' {
-          // Find the end of the line containing the label
-          let label_line_end = memchr::memchr(b'\n', &buffer[label_pos..])
-            .map(|i| label_pos + i + 1)
-            .unwrap_or(buffer.len());
-
-          search_buffer = &buffer[label_line_end..];
-          buffer_offset = label_line_end;
+    // If label is present, we start searching after the label's line.
+    let (search_buffer, buffer_offset) = match hunk.label {
+      Some(label) => {
+        match Finder::new(label)
+          .find(buffer)
+          .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
+        {
+          Some(pos) => {
+            let line_end = memchr::memchr(b'\n', &buffer[pos..])
+              .map(|i| pos + i + 1)
+              .unwrap_or(buffer.len());
+            (&buffer[line_end..], line_end)
+          }
+          None => (buffer, 0),
         }
       }
-    }
+      None => (buffer, 0),
+    };
+
+    let mut best_error = None;
+    let mut max_offset = 0;
 
     for match_pos_rel in finder.find_iter(search_buffer) {
       let match_pos = buffer_offset + match_pos_rel;
@@ -142,23 +143,17 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       // Ensure match ends at a line boundary.
       let end_pos = match_pos + needle.len();
       let remaining = &buffer[end_pos..];
-      let next_source = if remaining.is_empty() {
-        remaining
-      } else if let Some(rest) = remaining.strip_prefix(b"\n") {
-        rest
-      } else if let Some(rest) = remaining.strip_prefix(b"\r\n") {
-        rest
-      } else if remaining.starts_with(b"\r") {
-        // Handle cases where we might have a \r without \n, or just skip it
-        &remaining[1..]
-      } else {
-        continue;
+      let next_source = match remaining {
+        [b'\n', rest @ ..] => rest,
+        [b'\r', b'\n', rest @ ..] => rest,
+        [b'\r', rest @ ..] => rest,
+        [] => remaining,
+        _ => continue,
       };
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {
         Ok(final_source) => return Ok((match_pos, final_source)),
         Err(e) => {
-          // Otherwise, track the "best" match (the one that went furthest).
           let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
           if offset >= max_offset {
             max_offset = offset;
@@ -169,11 +164,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     Err(best_error.unwrap_or_else(|| {
-      let error_line = if hunk.has_header {
-        hunk.patch_line_num
-      } else {
-        hunk.patch_line_num + 1
-      };
+      let error_line =
+        hunk.patch_line_num + if hunk.has_header { 0 } else { 1 };
       Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
     }))
   }
@@ -269,13 +261,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         write!(hasher, "blob {}\0", source.len()).unwrap();
         hasher.update(source);
         let result = hasher.finalize();
-        let hex_hash = hex::encode(result);
+        let mut hex_hash = [0u8; 40];
+        hex::encode_to_slice(result, &mut hex_hash).unwrap();
 
-        let old_hash_str = str::from_utf8(old_hash_bytes)
-          .map_err(|_| Error::new(ErrorKind::InvalidIndexLine))?;
-
-        if !hex_hash.starts_with(old_hash_str)
-          && old_hash_str.chars().any(|c| c != '0')
+        if !hex_hash.starts_with(old_hash_bytes)
+          && old_hash_bytes.iter().any(|&b| b != b'0')
         {
           return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
         }
@@ -322,70 +312,51 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     let mut hunks = patch.hunks.clone();
 
-    // If we have headerless hunks, they might be out of order.
-    // However, they might also be in order but ambiguous (e.g. context matches multiple places).
-    // We first try to apply them sequentially (respecting file order).
-    // If that fails, we fall back to sorting them by best match position.
+    // Hunkless might be out of order or ambiguous.
+    // Try sequential application first; if it fails, sort by best match position.
     if !hunks.is_empty() && !hunks[0].has_header {
-      let mut can_apply_sequentially = true;
       let mut test_pos = self.pos;
-
-      for hunk in &hunks {
-        let mut lines_to_match = hunk
+      let sequential_possible = hunks.iter().all(|hunk| {
+        let mut lines = hunk
           .lines
           .iter()
           .enumerate()
           .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-        let first_line_to_match = if let Some((_, line)) = lines_to_match.next()
-        {
-          line
-        } else {
-          continue;
+
+        let first = match lines.next() {
+          Some((_, l)) => l,
+          None => return true,
         };
 
         let source_slice = &self.source[test_pos..];
-        match self.search_match(
-          source_slice,
-          hunk,
-          lines_to_match,
-          first_line_to_match,
-        ) {
+        match self.search_match(source_slice, hunk, lines, first) {
           Ok((_, final_source)) => {
             test_pos += source_slice.len() - final_source.len();
+            true
           }
-          Err(_) => {
-            can_apply_sequentially = false;
-            break;
-          }
+          Err(_) => false,
         }
-      }
+      });
 
-      // If we can't apply sequentially, assume they are out of order and sort them.
-      if !can_apply_sequentially {
+      if !sequential_possible {
         let mut hunks_with_pos = Vec::with_capacity(hunks.len());
         for hunk in &hunks {
-          let mut lines_to_match = hunk
+          let mut lines = hunk
             .lines
             .iter()
             .enumerate()
             .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-          let first_line_to_match =
-            if let Some((_, line)) = lines_to_match.next() {
-              line
-            } else {
+
+          let first = match lines.next() {
+            Some((_, l)) => l,
+            None => {
               hunks_with_pos.push((0, hunk.clone()));
               continue;
-            };
+            }
+          };
 
-          match self.search_match(
-            self.source,
-            hunk,
-            lines_to_match,
-            first_line_to_match,
-          ) {
-            Ok((pos, _)) => hunks_with_pos.push((pos, hunk.clone())),
-            Err(e) => return Err(e),
-          }
+          let (pos, _) = self.search_match(self.source, hunk, lines, first)?;
+          hunks_with_pos.push((pos, hunk.clone()));
         }
         hunks_with_pos.sort_by_key(|(pos, _)| *pos);
         hunks = hunks_with_pos.into_iter().map(|(_, h)| h).collect();
