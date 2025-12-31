@@ -1,8 +1,8 @@
 use bstr::ByteSlice;
 use memchr::memmem;
-use nagato_core::{parse_int, strip_git_prefix, ErrorKind};
+use nagato_core::{strip_git_prefix, ErrorKind};
 
-use crate::{lexer::LexerMode, BinaryKind, Lexer, TokenKind};
+use crate::{lexer::LexerMode, Lexer, TokenKind};
 
 impl<'a> Lexer<'a> {
   pub fn tokenize_binary(
@@ -15,17 +15,15 @@ impl<'a> Lexer<'a> {
 
     // Helper to parse binary patch type lines (literal/delta)
     let binary_type = if let Some(rest) = line.strip_prefix(b"literal ") {
-      Some((BinaryKind::Literal, rest))
+      Some((b"literal" as &[u8], rest))
     } else {
       line
         .strip_prefix(b"delta ")
-        .map(|rest| (BinaryKind::Delta, rest))
+        .map(|rest| (b"delta" as &[u8], rest))
     };
 
-    if let Some((kind, rest)) = binary_type {
-      if let Some((size, _)) = parse_int::<u64>(rest, 10) {
-        return Ok(TokenKind::BinaryPatchType { kind, size });
-      }
+    if let Some((kind, size)) = binary_type {
+      return Ok(TokenKind::BinaryPatchType { kind, size });
     }
 
     if line.starts_with(b"diff --git")
@@ -72,9 +70,9 @@ impl<'a> Lexer<'a> {
       Some(b'o') => self.parse_o_line(line),
       Some(b'r') => self.parse_r_line(line),
       Some(b'c') => self.parse_c_line(line),
-      Some(b's') if line.starts_with(b"similarity index ") => self
-        .parse_percentage(&line[17..])
-        .map(TokenKind::Similarity),
+      Some(b's') if line.starts_with(b"similarity index ") => {
+        Ok(TokenKind::Similarity(&line[17..]))
+      }
       Some(b'B') => self.parse_b_line(line),
       _ => self.parse_non_keyword_line(line),
     }
@@ -111,7 +109,7 @@ impl<'a> Lexer<'a> {
     if let Some(rest) = line.strip_prefix(b"diff --git ") {
       self.parse_file_header(rest)
     } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
-      self.parse_percentage(rest).map(TokenKind::Dissimilarity)
+      Ok(TokenKind::Dissimilarity(rest))
     } else {
       self
         .parse_mode(line, b"deleted ", TokenKind::DeletedFileMode)
@@ -209,29 +207,6 @@ impl<'a> Lexer<'a> {
     self.parse_non_keyword_line(line)
   }
 
-  pub fn parse_range(
-    &self,
-    range_bytes: &[u8],
-  ) -> Result<(u32, u32), ErrorKind> {
-    let (line, rest) = parse_int::<u32>(range_bytes, 10)
-      .ok_or(ErrorKind::InvalidHunkRangeLine)?;
-
-    let span = if let Some(rest) = rest.strip_prefix(b",") {
-      let (span, rest) =
-        parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
-      if !rest.is_empty() {
-        return Err(ErrorKind::InvalidHunkRangeSpan);
-      }
-      span
-    } else if rest.is_empty() {
-      1
-    } else {
-      return Err(ErrorKind::InvalidHunkRangeLine);
-    };
-
-    Ok((line, span))
-  }
-
   pub fn parse_hunk_header(
     &mut self,
     header: &'a [u8],
@@ -241,17 +216,14 @@ impl<'a> Lexer<'a> {
     let content = &header[..content_end];
     let mut parts = content.fields();
 
-    let old_range_bytes = parts
+    let old_range = parts
       .next()
       .and_then(|s: &[u8]| s.strip_prefix(b"-"))
       .ok_or(ErrorKind::MissingOldRange)?;
-    let new_range_bytes = parts
+    let new_range = parts
       .next()
       .and_then(|s: &[u8]| s.strip_prefix(b"+"))
       .ok_or(ErrorKind::MissingNewRange)?;
-
-    let (old_line, old_span) = self.parse_range(old_range_bytes)?;
-    let (new_line, new_span) = self.parse_range(new_range_bytes)?;
 
     let label = if content_end + 3 < header.len() {
       let l = &header[content_end + 3..];
@@ -266,22 +238,10 @@ impl<'a> Lexer<'a> {
     };
 
     Ok(TokenKind::HunkHeader {
-      old_line,
-      old_span,
-      new_line,
-      new_span,
+      old_range,
+      new_range,
       label,
     })
-  }
-
-  pub fn parse_percentage(&self, s: &[u8]) -> Result<u32, ErrorKind> {
-    let s = s.strip_suffix(b"%").ok_or(ErrorKind::InvalidPercentage)?;
-    let (num, rest) =
-      parse_int::<u32>(s, 10).ok_or(ErrorKind::InvalidPercentage)?;
-    if !rest.is_empty() {
-      return Err(ErrorKind::InvalidPercentage);
-    }
-    Ok(num)
   }
 
   pub fn parse_file_header(
@@ -308,9 +268,7 @@ impl<'a> Lexer<'a> {
     let (old_hash, new_hash) = hashes_bytes
       .split_once_str(b"..")
       .ok_or(ErrorKind::InvalidIndexHashRange)?;
-    let mode = parts
-      .next()
-      .and_then(|m| parse_int::<u32>(m, 8).map(|(v, _)| v));
+    let mode = parts.next();
     Ok(TokenKind::Index {
       old_hash,
       new_hash,
@@ -339,13 +297,12 @@ impl<'a> Lexer<'a> {
     &self,
     line: &'a [u8],
     prefix: &[u8],
-    f: impl FnOnce(u32) -> TokenKind<'a>,
+    f: impl FnOnce(&'a [u8]) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {
     line
       .strip_prefix(prefix)
       .and_then(|r| r.strip_prefix(b"file mode ").or(r.strip_prefix(b"mode ")))
-      .and_then(|rest| parse_int::<u32>(rest, 8))
-      .map(|(m, _)| f(m))
+      .map(f)
       .ok_or(ErrorKind::InvalidFileMode)
   }
 }

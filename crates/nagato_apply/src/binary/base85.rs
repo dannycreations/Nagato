@@ -134,7 +134,7 @@ pub fn decode_base85(
     {
       Error::new(ErrorKind::InvalidBinaryFilesLine)
     } else {
-      Error::new(ErrorKind::Io(e.into()))
+      Error::new(ErrorKind::Io(e))
     }
   })?;
   Ok(())

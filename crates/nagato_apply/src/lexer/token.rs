@@ -1,5 +1,3 @@
-use crate::BinaryKind;
-
 /// Represents a single token from a diff file.
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
@@ -13,7 +11,7 @@ pub enum TokenKind<'a> {
   Index {
     old_hash: &'a [u8],
     new_hash: &'a [u8],
-    mode: Option<u32>,
+    mode: Option<&'a [u8]>,
   },
   /// The old file path (`---`).
   OldFile(&'a [u8]),
@@ -21,10 +19,8 @@ pub enum TokenKind<'a> {
   NewFile(&'a [u8]),
   /// The header of a hunk, containing the line numbers and spans.
   HunkHeader {
-    old_line: u32,
-    old_span: u32,
-    new_line: u32,
-    new_span: u32,
+    old_range: &'a [u8],
+    new_range: &'a [u8],
     label: Option<&'a [u8]>,
   },
   /// A line that was added to the file.
@@ -46,15 +42,15 @@ pub enum TokenKind<'a> {
   /// The new file name in a rename operation.
   RenameTo(&'a [u8]),
   /// The new file mode.
-  NewFileMode(u32),
+  NewFileMode(&'a [u8]),
   /// The old file mode.
-  OldFileMode(u32),
+  OldFileMode(&'a [u8]),
   /// The deleted file mode.
-  DeletedFileMode(u32),
+  DeletedFileMode(&'a [u8]),
   /// The similarity index in a rename or copy operation.
-  Similarity(u32),
+  Similarity(&'a [u8]),
   /// The dissimilarity index in a rename or copy operation.
-  Dissimilarity(u32),
+  Dissimilarity(&'a [u8]),
   /// Indicates that two binary files are different.
   Binary {
     old_file: &'a [u8],
@@ -63,7 +59,7 @@ pub enum TokenKind<'a> {
   /// The header of a git binary patch.
   GitBinaryPatchHeader,
   /// The type and size of a binary patch fragment.
-  BinaryPatchType { kind: BinaryKind, size: u64 },
+  BinaryPatchType { kind: &'a [u8], size: &'a [u8] },
   /// A line of binary data.
   BinaryData(&'a [u8]),
   /// A label for the following hunk.

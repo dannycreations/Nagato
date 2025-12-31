@@ -23,13 +23,10 @@ impl AtomicWriter {
   /// The temporary file is created in the same directory as the destination file.
   pub fn new(path: &Path) -> Result<Self, Error> {
     let parent = path.parent().ok_or_else(|| {
-      Error::new(ErrorKind::Io(
-        IoError::new(
-          IoErrorKind::InvalidInput,
-          "Destination path has no parent directory",
-        )
-        .into(),
-      ))
+      Error::new(ErrorKind::Io(IoError::new(
+        IoErrorKind::InvalidInput,
+        "Destination path has no parent directory",
+      )))
     })?;
     let tempfile = NamedTempFile::new_in(parent)
       .with_context(|| format!("failed to create tempfile in {:?}", parent))?;

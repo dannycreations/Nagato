@@ -1,4 +1,4 @@
-use nagato_core::{Error, ErrorKind};
+use nagato_core::{parse_int, Error, ErrorKind};
 
 use crate::{Hunk, LexerItem, Line, LineKind, Parser, Patch, TokenKind};
 
@@ -150,14 +150,18 @@ pub fn parse_hunk<'a>(
       LexerItem {
         token:
           TokenKind::HunkHeader {
-            old_line,
-            old_span,
-            new_line,
-            new_span,
+            old_range,
+            new_range,
             label,
           },
         line_num,
-      } => (old_line, old_span, new_line, new_span, label, line_num),
+      } => {
+        let (old_line, old_span) =
+          parse_range(old_range).map_err(|k| Error::with_line(k, line_num))?;
+        let (new_line, new_span) =
+          parse_range(new_range).map_err(|k| Error::with_line(k, line_num))?;
+        (old_line, old_span, new_line, new_span, label, line_num)
+      }
       item => {
         return Err(Error::with_line(
           ErrorKind::ExpectedHunkHeader,
@@ -212,4 +216,24 @@ pub fn parse_headerless_hunk<'a>(
     ));
   }
   Ok(())
+}
+
+fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
+  let (line, rest) =
+    parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRangeLine)?;
+
+  let span = if let Some(rest) = rest.strip_prefix(b",") {
+    let (span, rest) =
+      parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
+    if !rest.is_empty() {
+      return Err(ErrorKind::InvalidHunkRangeSpan);
+    }
+    span
+  } else if rest.is_empty() {
+    1
+  } else {
+    return Err(ErrorKind::InvalidHunkRangeLine);
+  };
+
+  Ok((line, span))
 }

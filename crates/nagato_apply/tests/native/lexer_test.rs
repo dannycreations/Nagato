@@ -3,32 +3,32 @@ use nagato_apply::TokenKind;
 test_lexer_ok!(
   lexes_new_mode,
   "new mode 100644",
-  TokenKind::NewFileMode(0o100644)
+  TokenKind::NewFileMode(b"100644")
 );
 test_lexer_ok!(
   lexes_new_file_mode,
   "new file mode 100644",
-  TokenKind::NewFileMode(0o100644)
+  TokenKind::NewFileMode(b"100644")
 );
 test_lexer_ok!(
   lexes_old_mode,
   "old mode 100644",
-  TokenKind::OldFileMode(0o100644)
+  TokenKind::OldFileMode(b"100644")
 );
 test_lexer_ok!(
   lexes_old_file_mode,
   "old file mode 100644",
-  TokenKind::OldFileMode(0o100644)
+  TokenKind::OldFileMode(b"100644")
 );
 test_lexer_ok!(
   lexes_deleted_mode,
   "deleted mode 100644",
-  TokenKind::DeletedFileMode(0o100644)
+  TokenKind::DeletedFileMode(b"100644")
 );
 test_lexer_ok!(
   lexes_deleted_file_mode,
   "deleted file mode 100644",
-  TokenKind::DeletedFileMode(0o100644)
+  TokenKind::DeletedFileMode(b"100644")
 );
 
 test_lexer_ok!(
@@ -73,15 +73,13 @@ test_lexer_ok!(
   TokenKind::Index {
     old_hash: b"1234567",
     new_hash: b"abcdefg",
-    mode: Some(0o100644),
+    mode: Some(b"100644"),
   },
   TokenKind::OldFile(b"file.txt"),
   TokenKind::NewFile(b"file.txt"),
   TokenKind::HunkHeader {
-    old_line: 1,
-    old_span: 2,
-    new_line: 1,
-    new_span: 2,
+    old_range: b"1,2",
+    new_range: b"1,2",
     label: None,
   },
   TokenKind::Deletion(b"hello world"),
@@ -111,15 +109,13 @@ test_lexer_ok!(
   TokenKind::Index {
     old_hash: b"1234567",
     new_hash: b"abcdefg",
-    mode: Some(0o100644)
+    mode: Some(b"100644")
   },
   TokenKind::OldFile(b"file.txt"),
   TokenKind::NewFile(b"file.txt"),
   TokenKind::HunkHeader {
-    old_line: 1,
-    old_span: 2,
-    new_line: 1,
-    new_span: 2,
+    old_range: b"1,2",
+    new_range: b"1,2",
     label: None,
   },
   TokenKind::Deletion(b"hello"),
@@ -134,10 +130,8 @@ test_lexer_ok!(
   lexes_hunk_header_with_zero_span,
   "@@ -0,0 +1,3 @@",
   TokenKind::HunkHeader {
-    old_line: 0,
-    old_span: 0,
-    new_line: 1,
-    new_span: 3,
+    old_range: b"0,0",
+    new_range: b"1,3",
     label: None,
   }
 );

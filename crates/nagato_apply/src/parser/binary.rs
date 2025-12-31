@@ -1,6 +1,6 @@
-use nagato_core::Error;
+use nagato_core::{parse_int, Error};
 
-use crate::{BinaryFragment, Parser, Patch, TokenKind};
+use crate::{BinaryFragment, BinaryKind, Parser, Patch, TokenKind};
 
 pub fn parse_binary_patch<'a>(
   parser: &mut Parser<'a>,
@@ -16,6 +16,13 @@ pub fn parse_binary_patch<'a>(
     match item.token {
       TokenKind::BinaryPatchType { kind, size } => {
         parser.tokens.next();
+        let kind = if kind == b"literal" {
+          BinaryKind::Literal
+        } else {
+          BinaryKind::Delta
+        };
+        let (size, _) = parse_int::<u64>(size, 10).unwrap_or((0, &[]));
+
         // Pre-allocate binary data buffer
         let mut data = Vec::with_capacity((size / 70) as usize + 2);
         while let Some(res) = parser.tokens.peek() {

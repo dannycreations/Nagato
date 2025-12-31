@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, io::ErrorKind as IoErrorKind};
 
 use nagato_apply::Parser;
 use nagato_core::{ErrorKind, FileSystem};
@@ -75,7 +75,7 @@ fn fails_on_base85_overflow() {
       let is_invalid_binary =
         matches!(e.kind, ErrorKind::InvalidBinaryFilesLine);
       let is_io_invalid_data = if let ErrorKind::Io(io_err) = &e.kind {
-        io_err.0.kind() == std::io::ErrorKind::InvalidData
+        io_err.kind() == IoErrorKind::InvalidData
       } else {
         false
       };

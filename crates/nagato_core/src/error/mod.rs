@@ -81,8 +81,7 @@ impl From<AnyhowError> for Error {
   /// If it's already an Error, we downcast it to avoid double-wrapping.
   fn from(e: AnyhowError) -> Self {
     e.downcast::<Self>().unwrap_or_else(|e| {
-      Self::new(ErrorKind::Io(IoError::other(e.to_string()).into()))
-        .with_context(e)
+      Self::new(ErrorKind::Io(IoError::other(e.to_string()))).with_context(e)
     })
   }
 }
@@ -98,13 +97,13 @@ impl From<ErrorKind> for Error {
 impl From<IoError> for Error {
   /// Automatically wrap I/O errors into the core Error type.
   fn from(e: IoError) -> Self {
-    Self::new(ErrorKind::Io(e.into()))
+    Self::new(ErrorKind::Io(e))
   }
 }
 
 impl From<PersistError> for Error {
   /// Automatically wrap persistence errors into the core Error type.
   fn from(e: PersistError) -> Self {
-    Self::new(ErrorKind::Persist(e.into()))
+    Self::new(ErrorKind::Persist(e))
   }
 }

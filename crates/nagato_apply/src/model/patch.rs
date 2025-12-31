@@ -1,6 +1,9 @@
-use std::mem;
+use std::{
+  io::{Result as IoResult, Write},
+  mem,
+};
 
-use crate::{BinaryFragment, Hunk};
+use crate::{BinaryFragment, Hunk, LineKind};
 
 /// Extension trait for byte slices to check for /dev/null.
 pub trait IsDevNull {
@@ -92,5 +95,51 @@ impl<'a> Patch<'a> {
 
     self.hunks.iter_mut().for_each(Hunk::invert);
     self
+  }
+
+  /// Serialize the patch into the Nagato "trimmed" format.
+  pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {
+    // We use the new_file as the primary name if available, otherwise old_file.
+    let target_file = if !self.new_file.is_empty() {
+      self.new_file
+    } else {
+      self.old_file
+    };
+
+    out.write_all(b"file ")?;
+    out.write_all(target_file)?;
+    out.write_all(b"\n")?;
+
+    for (i, hunk) in self.hunks.iter().enumerate() {
+      // If it's the first hunk and no label, add extra newline after file header
+      // Otherwise, add newline between hunks
+      if i == 0 {
+        if hunk.label.is_none() {
+          out.write_all(b"\n")?;
+        }
+      } else {
+        out.write_all(b"\n")?;
+      }
+
+      // Replace hunk header with `label` if label exists
+      if let Some(label) = hunk.label {
+        out.write_all(b"label ")?;
+        out.write_all(label)?;
+        out.write_all(b"\n\n")?;
+      }
+
+      for line in &hunk.lines {
+        let prefix = match line.kind {
+          LineKind::Addition => b'+',
+          LineKind::Deletion => b'-',
+          LineKind::Context => b' ',
+        };
+        out.write_all(&[prefix])?;
+        out.write_all(line.text)?;
+        out.write_all(b"\n")?;
+      }
+    }
+
+    Ok(())
   }
 }

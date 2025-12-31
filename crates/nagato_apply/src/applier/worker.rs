@@ -19,7 +19,7 @@ where
       Err(Error {
         kind: ErrorKind::Io(e),
         ..
-      }) if e.0.kind() == IoErrorKind::NotFound => Ok(T::default()),
+      }) if e.kind() == IoErrorKind::NotFound => Ok(T::default()),
       res => res,
     }
   }
