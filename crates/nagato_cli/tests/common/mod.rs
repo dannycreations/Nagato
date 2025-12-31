@@ -6,6 +6,23 @@ macro_rules! test_exec_ok {
     args: [$($arg:expr),*],
     assert_file: ($file_to_check:expr, $expected_content:expr)
   ) => {
+    test_exec_ok!(
+      $test_name,
+      initial_fs: { $($path => $content),* },
+      diff: $diff,
+      args: [$($arg),*],
+      patch_name: "test.patch",
+      assert_file: ($file_to_check, $expected_content)
+    );
+  };
+  (
+    $test_name:ident,
+    initial_fs: { $($path:expr => $content:expr),* },
+    diff: $diff:expr,
+    args: [$($arg:expr),*],
+    patch_name: $patch_name:expr,
+    assert_file: ($file_to_check:expr, $expected_content:expr)
+  ) => {
     #[test]
     fn $test_name() {
       let dir = tempfile::Builder::new().prefix("temp").tempdir().unwrap();
@@ -19,14 +36,13 @@ macro_rules! test_exec_ok {
       )*
 
       let diff = indoc::indoc!($diff);
-      let patch_file_path = dir.path().join("test.patch");
+      let patch_file_path = dir.path().join($patch_name);
       std::fs::write(&patch_file_path, diff).unwrap();
 
       let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_nagato"));
-      cmd
-        .current_dir(dir.path())
-        .arg(patch_file_path.file_name().unwrap())
-        $(.arg($arg))*;
+      cmd.current_dir(dir.path());
+      $(cmd.arg($arg);)*
+      cmd.arg(patch_file_path.file_name().unwrap());
 
       cmd
         .assert()

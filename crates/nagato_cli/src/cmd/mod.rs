@@ -8,15 +8,25 @@ use std::{
 use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind, FileSystem};
 use processor::process_patch;
+use trimmer::process_trim;
 
 mod args;
 mod processor;
+mod trimmer;
 
 pub use args::*;
 pub use clap::*;
 
 /// Main entry point for the CLI logic.
 pub fn run(cli: &Cli) -> Result<(), Error> {
+  if let Some(command) = &cli.command {
+    match command {
+      Commands::Trim { files } => {
+        return process_trim(files);
+      }
+    }
+  }
+
   // If no files are provided and stdin is a terminal, print help.
   if cli.files.is_empty() && stdin().is_terminal() {
     Cli::command().print_help().unwrap();

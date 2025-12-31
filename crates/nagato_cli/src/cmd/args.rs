@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use clap::Parser as ClapParser;
+use clap::{Parser as ClapParser, Subcommand};
 
 #[derive(ClapParser, Debug)]
 #[command(
@@ -9,6 +9,9 @@ use clap::Parser as ClapParser;
   disable_version_flag = true,
 )]
 pub struct Cli {
+  #[command(subcommand)]
+  pub command: Option<Commands>,
+
   /// The path to the patch file(s).
   pub files: Vec<OsString>,
   /// Print version information.
@@ -23,4 +26,13 @@ pub struct Cli {
   /// The directory to run the patch in.
   #[arg(short, long)]
   pub directory: Option<OsString>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+  /// Trim optional parts from a patch file.
+  Trim {
+    /// The path to the patch file(s) to trim.
+    files: Vec<OsString>,
+  },
 }
