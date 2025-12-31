@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use nagato_core::Error;
+use nagato_core::{Error, ParseErrorKind};
 
 use crate::{Lexer, Patch, TokenKind};
 
@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
     let mut hunks = Vec::new();
     let mut binary_fragments = Vec::new();
 
-    let _start_line = self
+    let start_line = self
       .tokens
       .peek()
       .and_then(|r| r.as_ref().ok())
@@ -36,10 +36,16 @@ impl<'a> Parser<'a> {
     header::parse_header(self, &mut patch, &mut binary_fragments)?;
     self.skip_empty_context_lines()?;
 
-    if patch.old_file.is_empty() && patch.new_file.is_empty() {
-      hunk::parse_hunkless(self, &mut patch, &mut hunks)?;
-    } else {
-      hunk::parse_hunks(self, &mut patch, &mut hunks)?;
+    hunk::parse_hunks(self, &mut patch, &mut hunks)?;
+
+    if !hunks.is_empty()
+      && patch.old_file.is_empty()
+      && patch.new_file.is_empty()
+    {
+      return Err(Error::parse_with_line(
+        ParseErrorKind::PatchHasContentButNoFileInfo,
+        start_line,
+      ));
     }
 
     patch.hunks = hunks.into_boxed_slice();

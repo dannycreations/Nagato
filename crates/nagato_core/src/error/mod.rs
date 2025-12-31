@@ -64,15 +64,41 @@ impl Error {
   }
 
   /// Attach a file name to the error.
+  #[inline]
   pub fn with_file(mut self, file: impl Into<Cow<'static, str>>) -> Self {
     self.file = Some(file.into());
     self
   }
 
   /// Attach an anyhow context to the error.
+  #[inline]
   pub fn with_context(mut self, context: AnyhowError) -> Self {
     self.context = Some(context);
     self
+  }
+
+  /// Create a new parse error.
+  #[inline]
+  pub const fn parse(kind: ParseErrorKind) -> Self {
+    Self::new(ErrorKind::Parse(kind))
+  }
+
+  /// Create a new parse error with line information.
+  #[inline]
+  pub const fn parse_with_line(kind: ParseErrorKind, line: u32) -> Self {
+    Self::with_line(ErrorKind::Parse(kind), line)
+  }
+
+  /// Create a new apply error.
+  #[inline]
+  pub const fn apply(kind: ApplyErrorKind) -> Self {
+    Self::new(ErrorKind::Apply(kind))
+  }
+
+  /// Create a new apply error with line information.
+  #[inline]
+  pub const fn apply_with_line(kind: ApplyErrorKind, line: u32) -> Self {
+    Self::with_line(ErrorKind::Apply(kind), line)
   }
 }
 

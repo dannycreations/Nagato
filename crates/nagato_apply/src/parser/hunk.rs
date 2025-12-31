@@ -1,6 +1,6 @@
 use nagato_core::{parse_int, Error, ErrorKind};
 
-use crate::{Hunk, LexerItem, Line, LineKind, Parser, Patch, TokenKind};
+use crate::{Hunk, Line, LineKind, Parser, Patch, TokenKind};
 
 pub fn parse_hunks<'a>(
   parser: &mut Parser<'a>,
@@ -123,34 +123,29 @@ pub fn parse_hunk<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<Hunk<'a>, Error> {
-  let (old_line, old_span, new_line, new_span, label, patch_line_num) =
-    match parser
-      .tokens
-      .next()
-      .ok_or(Error::new(ErrorKind::UnexpectedEof))??
-    {
-      LexerItem {
-        token:
-          TokenKind::HunkHeader {
-            old_range,
-            new_range,
-            label,
-          },
-        line_num,
-      } => {
-        let (old_line, old_span) =
-          parse_range(old_range).map_err(|k| Error::with_line(k, line_num))?;
-        let (new_line, new_span) =
-          parse_range(new_range).map_err(|k| Error::with_line(k, line_num))?;
-        (old_line, old_span, new_line, new_span, label, line_num)
-      }
-      item => {
-        return Err(Error::with_line(
-          ErrorKind::ExpectedHunkHeader,
-          item.line_num,
-        ))
-      }
-    };
+  let item = parser
+    .tokens
+    .next()
+    .ok_or(Error::new(ErrorKind::UnexpectedEof))??;
+
+  let (old_range, new_range, label) = match item.token {
+    TokenKind::HunkHeader {
+      old_range,
+      new_range,
+      label,
+    } => (old_range, new_range, label),
+    _ => {
+      return Err(Error::with_line(
+        ErrorKind::ExpectedHunkHeader,
+        item.line_num,
+      ))
+    }
+  };
+
+  let (old_line, old_span) =
+    parse_range(old_range).map_err(|k| Error::with_line(k, item.line_num))?;
+  let (new_line, new_span) =
+    parse_range(new_range).map_err(|k| Error::with_line(k, item.line_num))?;
 
   let mut lines = Vec::with_capacity(old_span.max(new_span) as usize);
   let (actual_old_span, actual_new_span) =
@@ -159,7 +154,7 @@ pub fn parse_hunk<'a>(
   if actual_old_span != old_span || actual_new_span != new_span {
     return Err(Error::with_line(
       ErrorKind::HunkLineCountMismatch,
-      patch_line_num,
+      item.line_num,
     ));
   }
 
@@ -169,52 +164,30 @@ pub fn parse_hunk<'a>(
     new_line,
     new_span,
     lines: lines.into_boxed_slice(),
-    patch_line_num,
+    patch_line_num: item.line_num,
     has_header: true,
     label,
   })
 }
 
-pub fn parse_hunkless<'a>(
-  parser: &mut Parser<'a>,
-  patch: &mut Patch<'a>,
-  hunks: &mut Vec<Hunk<'a>>,
-) -> Result<(), Error> {
-  let start_line = parser
-    .tokens
-    .peek()
-    .and_then(|res| res.as_ref().ok())
-    .map(|i| i.line_num)
-    .unwrap_or(0);
-
-  parse_hunks(parser, patch, hunks)?;
-
-  if !hunks.is_empty() && patch.old_file.is_empty() && patch.new_file.is_empty()
-  {
-    return Err(Error::with_line(
-      ErrorKind::PatchHasContentButNoFileInfo,
-      start_line,
-    ));
-  }
-  Ok(())
-}
-
+/// Parse a range in the format "line[,span]".
 fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
   let (line, rest) =
     parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRangeLine)?;
 
-  let span = if let Some(rest) = rest.strip_prefix(b",") {
-    let (span, rest) =
-      parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
-    if !rest.is_empty() {
-      return Err(ErrorKind::InvalidHunkRangeSpan);
-    }
-    span
-  } else if rest.is_empty() {
-    1
-  } else {
-    return Err(ErrorKind::InvalidHunkRangeLine);
-  };
+  if rest.is_empty() {
+    return Ok((line, 1));
+  }
+
+  let rest = rest
+    .strip_prefix(b",")
+    .ok_or(ErrorKind::InvalidHunkRangeLine)?;
+  let (span, rest) =
+    parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
+
+  if !rest.is_empty() {
+    return Err(ErrorKind::InvalidHunkRangeSpan);
+  }
 
   Ok((line, span))
 }

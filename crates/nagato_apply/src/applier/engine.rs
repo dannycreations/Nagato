@@ -2,7 +2,7 @@ use std::io::Write;
 
 use bstr::ByteSlice;
 use memchr::memmem::Finder;
-use nagato_core::{get_line, Error, ErrorKind};
+use nagato_core::{get_line, ApplyErrorKind, Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
 use crate::{binary, BinaryKind, Hunk, Line, LineKind, Patch};
@@ -67,15 +67,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   ) -> Result<&'s [u8], Error> {
     for (offset, hunk_line) in lines_to_match {
       let (line, next_source) = get_line(source).ok_or_else(|| {
-        Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
+        Error::apply_with_line(
+          ApplyErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
         )
       })?;
 
       if line != hunk_line.text {
-        return Err(Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
+        return Err(Error::apply_with_line(
+          ApplyErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
         ));
       }
@@ -113,20 +113,19 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     // If label is present, we start searching after the label's line.
     let (search_buffer, buffer_offset) = match hunk.label {
-      Some(label) => {
-        match Finder::new(label)
-          .find(buffer)
-          .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
-        {
-          Some(pos) => {
-            let line_end = memchr::memchr(b'\n', &buffer[pos..])
-              .map(|i| pos + i + 1)
-              .unwrap_or(buffer.len());
-            (&buffer[line_end..], line_end)
-          }
-          None => (buffer, 0),
+      Some(label) => match buffer
+        .find(label)
+        .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
+      {
+        Some(pos) => {
+          let line_end = buffer[pos..]
+            .find_byte(b'\n')
+            .map(|i| pos + i + 1)
+            .unwrap_or(buffer.len());
+          (&buffer[line_end..], line_end)
         }
-      }
+        None => (buffer, 0),
+      },
       None => (buffer, 0),
     };
 
@@ -166,7 +165,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Err(best_error.unwrap_or_else(|| {
       let error_line =
         hunk.patch_line_num + if hunk.has_header { 0 } else { 1 };
-      Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
+      Error::apply_with_line(ApplyErrorKind::CouldNotApplyHunk, error_line)
     }))
   }
 
@@ -183,34 +182,30 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     let source = self.source_at();
 
-    // Attempt 1: Strict match
-    let mut attempt1_iter = lines_to_match.clone();
-    let first_line_attempt1 = attempt1_iter.next();
-
-    let match_result = if let Some((_, line)) = first_line_attempt1 {
-      self.search_match(source, hunk, attempt1_iter, line)
-    } else {
-      // If there are no context/deletion lines, we match at the current position (0 relative to source)
-      Ok((0, source))
-    };
-
-    let (match_pos, final_source, skipped_line_index) = match match_result {
-      Ok((pos, src)) => (pos, src, None),
-      Err(e) if !hunk.has_header => {
-        // Hunkless heuristic: skip the first context line which might be a label/header.
-        let mut alt_iter = lines_to_match.clone();
-        let first = alt_iter.next();
-        if let Some((_, second)) = alt_iter.next() {
-          self
-            .search_match(source, hunk, alt_iter, second)
-            .map(|(pos, src)| (pos, src, first.map(|(i, _)| i)))
-            .map_err(|_| e)?
-        } else {
-          // Fallback: match at current position but skip the first line.
-          (0, source, first.map(|(i, _)| i))
+    // Attempt match
+    let mut iter = lines_to_match.clone();
+    let (match_pos, final_source, skipped_line_index) = match iter.next() {
+      Some((_, first)) => {
+        match self.search_match(source, hunk, iter, first) {
+          Ok((pos, src)) => (pos, src, None),
+          Err(e) if !hunk.has_header => {
+            // Hunkless heuristic: skip the first context line which might be a label/header.
+            let mut alt_iter = lines_to_match.clone();
+            let first = alt_iter.next();
+            if let Some((_, second)) = alt_iter.next() {
+              self
+                .search_match(source, hunk, alt_iter, second)
+                .map(|(pos, src)| (pos, src, first.map(|(i, _)| i)))
+                .map_err(|_| e)?
+            } else {
+              // Fallback: match at current position but skip the first line.
+              (0, source, first.map(|(i, _)| i))
+            }
+          }
+          Err(e) => return Err(e),
         }
       }
-      Err(e) => return Err(e),
+      None => (0, source, None),
     };
 
     let skipped = &source[..match_pos];
@@ -293,7 +288,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
     }
 
-    Err(ErrorKind::CouldNotApplyHunk.into())
+    Err(Error::apply(ApplyErrorKind::CouldNotApplyHunk))
   }
 
   /// Process the entire patch.
@@ -302,13 +297,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return self.process_binary(patch);
     }
 
-    let mut hunks = patch.hunks.clone();
-
-    // Hunkless patches (no @@ headers) may be out of order.
-    // We sort them by their best match position in the source to ensure sequential application.
-    if !hunks.is_empty() && !hunks[0].has_header {
-      let mut hunks_with_pos = Vec::with_capacity(hunks.len());
-      for hunk in hunks.iter() {
+    if !patch.hunks.is_empty() && !patch.hunks[0].has_header {
+      // Hunkless patches (no @@ headers) may be out of order.
+      // We sort them by their best match position in the source to ensure sequential application.
+      let mut hunks_with_pos = Vec::with_capacity(patch.hunks.len());
+      for hunk in patch.hunks.iter() {
         let mut lines = hunk
           .lines
           .iter()
@@ -324,11 +317,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         hunks_with_pos.push((pos, hunk));
       }
       hunks_with_pos.sort_by_key(|(pos, _)| *pos);
-      hunks = hunks_with_pos.into_iter().map(|(_, h)| h.clone()).collect();
-    }
-
-    for hunk in &hunks {
-      self.process_hunk(hunk)?;
+      for (_, hunk) in hunks_with_pos {
+        self.process_hunk(hunk)?;
+      }
+    } else {
+      for hunk in patch.hunks.iter() {
+        self.process_hunk(hunk)?;
+      }
     }
 
     // Write any remaining source content to the output.

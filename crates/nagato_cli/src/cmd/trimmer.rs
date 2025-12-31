@@ -29,16 +29,10 @@ pub fn process_trim(files: &[OsString]) -> Result<(), Error> {
     }
 
     let mut output_path = PathBuf::from(path);
-    let mut new_extension = output_path
-      .extension()
-      .map(|e| e.to_string_lossy().to_string())
-      .unwrap_or_default();
-
-    if new_extension.is_empty() {
-      new_extension = "trim.patch".to_string();
-    } else {
-      new_extension = format!("trim.{}", new_extension);
-    }
+    let new_extension = match output_path.extension() {
+      Some(ext) => format!("trim.{}", ext.to_string_lossy()),
+      None => "trim.patch".to_string(),
+    };
     output_path.set_extension(new_extension);
 
     fs::write(&output_path, &trimmed_content)?;

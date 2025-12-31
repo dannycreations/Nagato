@@ -75,7 +75,14 @@ impl<'a> Lexer<'a> {
         Ok(TokenKind::Similarity(&line[17..]))
       }
       Some(b'B') => self.parse_b_line(line),
-      _ => self.parse_non_keyword_line(line),
+      Some(b'\\') if line == b"\\ No newline at end of file" => {
+        if self.is_new_file_context {
+          Ok(TokenKind::NewFileNoNewline)
+        } else {
+          Ok(TokenKind::OldFileNoNewline)
+        }
+      }
+      _ => Err(ErrorKind::UnexpectedLine),
     }
   }
 
@@ -114,7 +121,7 @@ impl<'a> Lexer<'a> {
     } else if let Some(rest) = line.strip_prefix(b"deleted ") {
       self.parse_mode_rest(rest, TokenKind::DeletedFileMode)
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -129,7 +136,7 @@ impl<'a> Lexer<'a> {
         new_file: file,
       })
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -141,7 +148,7 @@ impl<'a> Lexer<'a> {
       self.mode = LexerMode::Binary;
       Ok(TokenKind::GitBinaryPatchHeader)
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -152,7 +159,7 @@ impl<'a> Lexer<'a> {
     if let Some(rest) = line.strip_prefix(b"new ") {
       self.parse_mode_rest(rest, TokenKind::NewFileMode)
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -163,7 +170,7 @@ impl<'a> Lexer<'a> {
     if let Some(rest) = line.strip_prefix(b"old ") {
       self.parse_mode_rest(rest, TokenKind::OldFileMode)
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -176,7 +183,7 @@ impl<'a> Lexer<'a> {
     } else if let Some(rest) = line.strip_prefix(b"rename to ") {
       Ok(TokenKind::RenameTo(rest))
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -189,7 +196,7 @@ impl<'a> Lexer<'a> {
     } else if let Some(rest) = line.strip_prefix(b"copy to ") {
       Ok(TokenKind::CopyTo(rest))
     } else {
-      self.parse_non_keyword_line(line)
+      Err(ErrorKind::UnexpectedLine)
     }
   }
 
@@ -209,7 +216,8 @@ impl<'a> Lexer<'a> {
         new_file: strip_git_prefix(new_file),
       });
     }
-    self.parse_non_keyword_line(line)
+
+    Err(ErrorKind::UnexpectedLine)
   }
 
   pub fn parse_hunk_header(
@@ -279,22 +287,6 @@ impl<'a> Lexer<'a> {
       new_hash,
       mode,
     })
-  }
-
-  pub fn parse_non_keyword_line(
-    &mut self,
-    line: &'a [u8],
-  ) -> Result<TokenKind<'a>, ErrorKind> {
-    match line.first() {
-      Some(b'\\') if line == b"\\ No newline at end of file" => {
-        if self.is_new_file_context {
-          Ok(TokenKind::NewFileNoNewline)
-        } else {
-          Ok(TokenKind::OldFileNoNewline)
-        }
-      }
-      _ => Err(ErrorKind::UnexpectedLine),
-    }
   }
 
   /// Helper to parse mode lines after the initial keyword prefix.
