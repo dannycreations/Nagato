@@ -3,18 +3,9 @@ use std::{
   mem,
 };
 
+use nagato_core::IsDevNull;
+
 use crate::{BinaryFragment, Hunk, LineKind};
-
-/// Extension trait for byte slices to check for /dev/null.
-pub trait IsDevNull {
-  fn is_dev_null(&self) -> bool;
-}
-
-impl IsDevNull for [u8] {
-  fn is_dev_null(&self) -> bool {
-    self == b"/dev/null"
-  }
-}
 
 /// Represents a single patch, which can contain multiple hunks.
 #[derive(Debug, PartialEq, Default, Clone)]

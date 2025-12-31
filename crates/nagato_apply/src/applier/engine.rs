@@ -284,10 +284,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
             &mut self.output,
           ) {
             Ok(_) => return Ok(()),
-            Err(Error {
-              kind: ErrorKind::BinaryPatchSourceMismatch,
-              ..
-            }) => continue,
+            Err(e) if e.kind == ErrorKind::BinaryPatchSourceMismatch => {
+              continue
+            }
             Err(e) => return Err(e),
           }
         }

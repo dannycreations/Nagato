@@ -72,8 +72,7 @@ fn fails_on_base85_overflow() {
 
   match result {
     Err(e) => {
-      let is_invalid_binary =
-        matches!(e.kind, ErrorKind::InvalidBinaryFilesLine);
+      let is_invalid_binary = e.kind == ErrorKind::InvalidBinaryFilesLine;
       let is_io_invalid_data = if let ErrorKind::Io(io_err) = &e.kind {
         io_err.kind() == IoErrorKind::InvalidData
       } else {

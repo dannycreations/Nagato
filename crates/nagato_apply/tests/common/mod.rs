@@ -135,7 +135,7 @@ macro_rules! test_parser_err {
   (
     $test_name:ident,
     $diff:expr,
-    $expected_kind:pat
+    $expected_kind:expr
   ) => {
     #[test]
     fn $test_name() {
@@ -143,7 +143,7 @@ macro_rules! test_parser_err {
       let result = parser.next().unwrap();
       match result {
         Err(e) => {
-          assert!(matches!(e.kind, $expected_kind));
+          assert_eq!(e.kind, $expected_kind);
         }
         Ok(_) => panic!("Expected an error but got Ok"),
       }
@@ -174,7 +174,7 @@ macro_rules! test_patch_err_with_line {
     initial_fs: { $($path:expr => $content:expr),* },
     diff: $diff:expr,
     expected_line: $expected_line:expr,
-    expected_kind: $expected_kind:pat
+    expected_kind: $expected_kind:expr
   ) => {
     #[test]
     fn $test_name() {
@@ -185,7 +185,7 @@ macro_rules! test_patch_err_with_line {
       match result {
         Err(e) => {
           assert_eq!(e.line, Some($expected_line));
-          assert!(matches!(e.kind, $expected_kind));
+          assert_eq!(e.kind, $expected_kind);
         }
         Ok(_) => panic!("Expected an error but got Ok"),
       }

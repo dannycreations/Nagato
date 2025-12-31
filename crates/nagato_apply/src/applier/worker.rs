@@ -1,29 +1,9 @@
-use std::io::{sink, ErrorKind as IoErrorKind, Write as IoWrite};
+use std::io::{sink, Write as IoWrite};
 
 use memmap2::Mmap;
-use nagato_core::{Error, ErrorKind, FileSystem};
+use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
-use crate::{apply, IsDevNull, Patch};
-
-/// Extension trait for Result to easily ignore "Not Found" I/O errors.
-trait IgnoreNotFound {
-  fn ignore_not_found(self) -> Self;
-}
-
-impl<T> IgnoreNotFound for Result<T, Error>
-where
-  T: Default,
-{
-  fn ignore_not_found(self) -> Self {
-    match self {
-      Err(Error {
-        kind: ErrorKind::Io(e),
-        ..
-      }) if e.kind() == IoErrorKind::NotFound => Ok(T::default()),
-      res => res,
-    }
-  }
-}
+use crate::{apply, Patch};
 
 /// Read source file into memory map, returning None if path is /dev/null or file not found.
 pub fn read_source_or_empty(
