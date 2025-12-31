@@ -7,67 +7,48 @@ pub fn parse_hunks<'a>(
   patch: &mut Patch<'a>,
   hunks: &mut Vec<Hunk<'a>>,
 ) -> Result<(), Error> {
-  loop {
-    parser.skip_empty_context_lines()?;
+  while let Some(res) = parser.tokens.peek() {
+    let item = match res {
+      Ok(i) => i,
+      Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
+    };
 
-    let mut found_something = false;
+    match &item.token {
+      TokenKind::Label(l) => {
+        parser.label = Some(*l);
+        parser.tokens.next();
+        parser.skip_empty_context_lines()?;
+        continue;
+      }
+      TokenKind::HunkHeader { .. } => {
+        let mut hunk = parse_hunk(parser, patch)?;
+        hunk.label = hunk.label.or_else(|| parser.label.take());
+        hunks.push(hunk);
+      }
+      TokenKind::Addition(_)
+      | TokenKind::Deletion(_)
+      | TokenKind::Context(_) => {
+        let initial_line = item.line_num;
+        let mut lines = Vec::new();
+        let (old_span, new_span) =
+          collect_hunk_lines(parser, &mut lines, patch, true)?;
 
-    if parser.peek_is(|t| matches!(t, TokenKind::Label(..)))? {
-      if let Some(Ok(item)) = parser.tokens.next() {
-        if let TokenKind::Label(l) = item.token {
-          parser.label = Some(l);
+        if !lines.is_empty() {
+          hunks.push(Hunk {
+            old_line: 0,
+            new_line: 0,
+            old_span,
+            new_span,
+            lines: lines.into_boxed_slice(),
+            patch_line_num: initial_line.saturating_sub(1),
+            has_header: false,
+            label: parser.label.take(),
+          });
         }
       }
-      found_something = true;
-      parser.skip_empty_context_lines()?;
+      _ => break,
     }
-
-    if parser.peek_is(|t| matches!(t, TokenKind::HunkHeader { .. }))? {
-      let mut hunk = parse_hunk(parser, patch)?;
-      if hunk.label.is_none() {
-        hunk.label = parser.label.take();
-      } else {
-        parser.label = None;
-      }
-      hunks.push(hunk);
-      found_something = true;
-    } else if parser.peek_is(|t| {
-      matches!(
-        t,
-        TokenKind::Addition(..)
-          | TokenKind::Deletion(..)
-          | TokenKind::Context(..)
-      )
-    })? {
-      let initial_item = parser
-        .tokens
-        .peek()
-        .and_then(|res| res.as_ref().ok())
-        .ok_or(Error::new(ErrorKind::UnexpectedEof))?;
-      let initial_line = initial_item.line_num;
-
-      let mut lines = Vec::new();
-      let (old_span, new_span) =
-        collect_hunk_lines(parser, &mut lines, patch, true)?;
-
-      if !lines.is_empty() {
-        hunks.push(Hunk {
-          old_line: 0,
-          new_line: 0,
-          old_span,
-          new_span,
-          lines: lines.into_boxed_slice(),
-          patch_line_num: initial_line.saturating_sub(1),
-          has_header: false,
-          label: parser.label.take(),
-        });
-        found_something = true;
-      }
-    }
-
-    if !found_something {
-      break;
-    }
+    parser.skip_empty_context_lines()?;
   }
   Ok(())
 }
@@ -199,11 +180,11 @@ pub fn parse_hunkless<'a>(
   patch: &mut Patch<'a>,
   hunks: &mut Vec<Hunk<'a>>,
 ) -> Result<(), Error> {
-  let initial_start_line = parser
+  let start_line = parser
     .tokens
     .peek()
     .and_then(|res| res.as_ref().ok())
-    .map(|item| item.line_num)
+    .map(|i| i.line_num)
     .unwrap_or(0);
 
   parse_hunks(parser, patch, hunks)?;
@@ -212,7 +193,7 @@ pub fn parse_hunkless<'a>(
   {
     return Err(Error::with_line(
       ErrorKind::PatchHasContentButNoFileInfo,
-      initial_start_line,
+      start_line,
     ));
   }
   Ok(())

@@ -1,4 +1,4 @@
-use std::{fmt, io::Error as IoError};
+use std::{borrow::Cow, fmt, io::Error as IoError};
 
 use anyhow::Error as AnyhowError;
 use tempfile::PersistError;
@@ -14,7 +14,7 @@ pub struct Error {
   /// Optional line number where the error occurred.
   pub line: Option<u32>,
   /// Optional file name where the error occurred.
-  pub file: Option<Box<str>>,
+  pub file: Option<Cow<'static, str>>,
   /// The specific kind of error.
   pub kind: ErrorKind,
   /// Wrapped context error.
@@ -64,7 +64,7 @@ impl Error {
   }
 
   /// Attach a file name to the error.
-  pub fn with_file(mut self, file: impl Into<Box<str>>) -> Self {
+  pub fn with_file(mut self, file: impl Into<Cow<'static, str>>) -> Self {
     self.file = Some(file.into());
     self
   }

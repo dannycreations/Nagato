@@ -13,17 +13,18 @@ impl<'a> Lexer<'a> {
       return Ok(TokenKind::Context(&[]));
     }
 
-    // Helper to parse binary patch type lines (literal/delta)
-    let binary_type = if let Some(rest) = line.strip_prefix(b"literal ") {
-      Some((b"literal" as &[u8], rest))
-    } else {
-      line
-        .strip_prefix(b"delta ")
-        .map(|rest| (b"delta" as &[u8], rest))
-    };
-
-    if let Some((kind, size)) = binary_type {
-      return Ok(TokenKind::BinaryPatchType { kind, size });
+    // Fast path for binary data lines which usually start with base85 chars.
+    if let Some(rest) = line.strip_prefix(b"literal ") {
+      return Ok(TokenKind::BinaryPatchType {
+        kind: b"literal",
+        size: rest,
+      });
+    }
+    if let Some(rest) = line.strip_prefix(b"delta ") {
+      return Ok(TokenKind::BinaryPatchType {
+        kind: b"delta",
+        size: rest,
+      });
     }
 
     if line.starts_with(b"diff --git")
@@ -110,10 +111,10 @@ impl<'a> Lexer<'a> {
       self.parse_file_header(rest)
     } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
       Ok(TokenKind::Dissimilarity(rest))
+    } else if let Some(rest) = line.strip_prefix(b"deleted ") {
+      self.parse_mode_rest(rest, TokenKind::DeletedFileMode)
     } else {
-      self
-        .parse_mode(line, b"deleted ", TokenKind::DeletedFileMode)
-        .or_else(|_| self.parse_non_keyword_line(line))
+      self.parse_non_keyword_line(line)
     }
   }
 
@@ -148,18 +149,22 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    self
-      .parse_mode(line, b"new ", TokenKind::NewFileMode)
-      .or_else(|_| self.parse_non_keyword_line(line))
+    if let Some(rest) = line.strip_prefix(b"new ") {
+      self.parse_mode_rest(rest, TokenKind::NewFileMode)
+    } else {
+      self.parse_non_keyword_line(line)
+    }
   }
 
   fn parse_o_line(
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    self
-      .parse_mode(line, b"old ", TokenKind::OldFileMode)
-      .or_else(|_| self.parse_non_keyword_line(line))
+    if let Some(rest) = line.strip_prefix(b"old ") {
+      self.parse_mode_rest(rest, TokenKind::OldFileMode)
+    } else {
+      self.parse_non_keyword_line(line)
+    }
   }
 
   fn parse_r_line(
@@ -292,16 +297,15 @@ impl<'a> Lexer<'a> {
     }
   }
 
-  /// Helper to parse mode lines with various prefixes.
-  fn parse_mode(
+  /// Helper to parse mode lines after the initial keyword prefix.
+  fn parse_mode_rest(
     &self,
-    line: &'a [u8],
-    prefix: &[u8],
+    rest: &'a [u8],
     f: impl FnOnce(&'a [u8]) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    line
-      .strip_prefix(prefix)
-      .and_then(|r| r.strip_prefix(b"file mode ").or(r.strip_prefix(b"mode ")))
+    rest
+      .strip_prefix(b"file mode ")
+      .or_else(|| rest.strip_prefix(b"mode "))
       .map(f)
       .ok_or(ErrorKind::InvalidFileMode)
   }

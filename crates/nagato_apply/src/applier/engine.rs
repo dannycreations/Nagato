@@ -196,28 +196,21 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     let (match_pos, final_source, skipped_line_index) = match match_result {
       Ok((pos, src)) => (pos, src, None),
-      Err(e) => {
-        if !hunk.has_header {
-          // Attempt 2: Skip first context line (heuristic for label/header lines)
-          let mut attempt2_iter = lines_to_match.clone();
-          let skipped_line = attempt2_iter.next();
-
-          if let Some((_, second_line)) = attempt2_iter.next() {
-            match self.search_match(source, hunk, attempt2_iter, second_line) {
-              Ok((pos, src)) => (pos, src, skipped_line.map(|(i, _)| i)),
-              Err(_) => return Err(e),
-            }
-          } else if let Some((idx, _)) = skipped_line {
-            // Only 1 context line and strict match failed.
-            // Treat as match at 0 but skip writing the context line.
-            (0, source, Some(idx))
-          } else {
-            return Err(e);
-          }
+      Err(e) if !hunk.has_header => {
+        // Hunkless heuristic: skip the first context line which might be a label/header.
+        let mut alt_iter = lines_to_match.clone();
+        let first = alt_iter.next();
+        if let Some((_, second)) = alt_iter.next() {
+          self
+            .search_match(source, hunk, alt_iter, second)
+            .map(|(pos, src)| (pos, src, first.map(|(i, _)| i)))
+            .map_err(|_| e)?
         } else {
-          return Err(e);
+          // Fallback: match at current position but skip the first line.
+          (0, source, first.map(|(i, _)| i))
         }
       }
+      Err(e) => return Err(e),
     };
 
     let skipped = &source[..match_pos];
@@ -312,55 +305,27 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     let mut hunks = patch.hunks.clone();
 
-    // Hunkless might be out of order or ambiguous.
-    // Try sequential application first; if it fails, sort by best match position.
+    // Hunkless patches (no @@ headers) may be out of order.
+    // We sort them by their best match position in the source to ensure sequential application.
     if !hunks.is_empty() && !hunks[0].has_header {
-      let mut test_pos = self.pos;
-      let sequential_possible = hunks.iter().all(|hunk| {
+      let mut hunks_with_pos = Vec::with_capacity(hunks.len());
+      for hunk in hunks.iter() {
         let mut lines = hunk
           .lines
           .iter()
           .enumerate()
           .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
 
-        let first = match lines.next() {
-          Some((_, l)) => l,
-          None => return true,
-        };
-
-        let source_slice = &self.source[test_pos..];
-        match self.search_match(source_slice, hunk, lines, first) {
-          Ok((_, final_source)) => {
-            test_pos += source_slice.len() - final_source.len();
-            true
+        let (pos, _) = match lines.next() {
+          Some((_, first)) => {
+            self.search_match(self.source_at(), hunk, lines, first)?
           }
-          Err(_) => false,
-        }
-      });
-
-      if !sequential_possible {
-        let mut hunks_with_pos = Vec::with_capacity(hunks.len());
-        for hunk in &hunks {
-          let mut lines = hunk
-            .lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-
-          let first = match lines.next() {
-            Some((_, l)) => l,
-            None => {
-              hunks_with_pos.push((0, hunk.clone()));
-              continue;
-            }
-          };
-
-          let (pos, _) = self.search_match(self.source, hunk, lines, first)?;
-          hunks_with_pos.push((pos, hunk.clone()));
-        }
-        hunks_with_pos.sort_by_key(|(pos, _)| *pos);
-        hunks = hunks_with_pos.into_iter().map(|(_, h)| h).collect();
+          None => (0, self.source_at()),
+        };
+        hunks_with_pos.push((pos, hunk));
       }
+      hunks_with_pos.sort_by_key(|(pos, _)| *pos);
+      hunks = hunks_with_pos.into_iter().map(|(_, h)| h.clone()).collect();
     }
 
     for hunk in &hunks {
