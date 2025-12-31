@@ -443,3 +443,22 @@ test_patch_ok!(
     );
   }
 );
+
+test_patch_ok!(
+  applies_patch_with_negative_offset,
+  initial_fs: { "file.txt" => "line 1\nline 2\nline 3\nline 4\nline 5\n" },
+  diff: r#"
+    diff --git a/file.txt b/file.txt
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -5,1 +4,1 @@
+    -line 4
+    +modified 4
+  "#,
+  assertions: |root| {
+    assert_eq!(
+      fs::read_to_string(root.join("file.txt")).unwrap(),
+      "line 1\nline 2\nline 3\nmodified 4\nline 5\n"
+    );
+  }
+);

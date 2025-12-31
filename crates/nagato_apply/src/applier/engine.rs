@@ -57,23 +57,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  /// Advance the source and output to the start of a hunk.
-  pub fn advance_to_hunk(&mut self, hunk: &Hunk) -> Result<(), Error> {
-    let target_line = hunk.old_line.saturating_sub(1);
-    let lines_to_skip = target_line.saturating_sub(self.current_source_line);
-
-    for _ in 0..lines_to_skip {
-      let source = self.source_at();
-      let (line, next_source) = get_line(source).ok_or_else(|| {
-        Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num + 1)
-      })?;
-      self.write_line(line)?;
-      self.pos += source.len() - next_source.len();
-      self.current_source_line += 1;
-    }
-    Ok(())
-  }
-
   /// Verify if the source matches the expected hunk lines.
   #[inline]
   pub fn verify_match<'p>(
@@ -115,7 +98,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let skipped = &source[..match_pos];
     self.write_block(skipped)?;
     self.pos += source.len() - final_source.len();
-    self.current_source_line += 1;
     Ok(())
   }
 
@@ -156,13 +138,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {
         Ok(final_source) => return Ok((match_pos, final_source)),
         Err(e) => {
-          // If we have a specific line expectation, return the error immediately.
-          if hunk.old_line > 0
-            && self.current_source_line == hunk.old_line.saturating_sub(1)
-          {
-            return Err(e);
-          }
-
           // Otherwise, track the "best" match (the one that went furthest).
           let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
           if offset >= max_offset {
@@ -200,7 +175,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     };
 
     self.find_hunk_match(hunk, lines_to_match, first_line_to_match)?;
-    self.current_source_line += hunk.old_span.saturating_sub(1);
+    self.current_source_line += hunk.old_span;
 
     for line in &hunk.lines {
       match line.kind {
@@ -223,9 +198,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return Ok(());
     }
 
-    if hunk.old_line > 0 {
-      self.advance_to_hunk(hunk)?;
-    }
     self.find_and_apply_hunk(hunk)
   }
 
