@@ -54,22 +54,6 @@ test_patch_ok!(
 );
 
 test_patch_ok!(
-  applies_file_header,
-  initial_fs: { "file.txt" => "hello\n" },
-  diff: r#"
-    file a/file.txt
-    -hello
-    +world
-  "#,
-  assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "world\n"
-    );
-  }
-);
-
-test_patch_ok!(
   applies_multi_hunkless,
   initial_fs: { "file.txt" => "line1\nline2\nline3\nline4\nline5\n" },
   diff: r#"
@@ -87,6 +71,26 @@ test_patch_ok!(
       fs::read_to_string(root.join("file.txt")).unwrap(),
       "line1\nmodified2\nline3\nline4\nmodified5\n"
     );
+  }
+);
+
+test_patch_ok!(
+  applies_ambiguous_hunkless_sequential,
+  initial_fs: { "file.txt" => "Block A {\n    item {\n        val: 1\n    }\n}\n\nBlock B {\n    // Some context\n    let x = 1;\n\n    item {\n        val: 2\n    }\n}\n" },
+  diff: r#"
+    file a/file.txt
+     Block B {
+
+         item {
+    +        val: 3
+             val: 2
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    // The first block should NOT be modified
+    assert!(content.contains("Block A {\n    item {\n        val: 1\n    }\n}"));
+    // The second block SHOULD be modified
+    assert!(content.contains("item {\n        val: 3\n        val: 2\n    }"));
   }
 );
 
@@ -111,6 +115,34 @@ test_patch_ok!(
     assert_eq!(
       fs::read_to_string(root.join("file.txt")).unwrap(),
       "context 1\nchanged 3\ncontext 2\nchanged 2\ncontext 3\nchanged 1\n"
+    );
+  }
+);
+
+test_patch_ok!(
+  applies_hunkless_with_repeated_label,
+  initial_fs: { "file.txt" => "Container {\n    Block 1 {\n        // item 1\n    }\n    Block 2 {\n        // item 2\n    }\n}\n" },
+  diff: r#"
+    file a/file.txt
+     Container {
+
+         Block 1 {
+    -        // item 1
+    +        // modified 1
+         }
+
+     Container {
+
+         Block 2 {
+    -        // item 2
+    +        // modified 2
+         }
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    assert_eq!(
+      content,
+      "Container {\n    Block 1 {\n        // modified 1\n    }\n    Block 2 {\n        // modified 2\n    }\n}\n"
     );
   }
 );

@@ -163,21 +163,60 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     &mut self,
     hunk: &Hunk<'p>,
   ) -> Result<(), Error> {
-    let mut lines_to_match = hunk
+    let lines_to_match = hunk
       .lines
       .iter()
       .enumerate()
       .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-    let first_line_to_match = if let Some((_, line)) = lines_to_match.next() {
-      line
+
+    let source = self.source_at();
+
+    // Attempt 1: Strict match
+    let mut attempt1_iter = lines_to_match.clone();
+    let first_line_attempt1 = attempt1_iter.next();
+
+    let match_result = if let Some((_, line)) = first_line_attempt1 {
+      self.search_match(source, hunk, attempt1_iter, line)
     } else {
-      return Ok(());
+      // If there are no context/deletion lines, we match at the current position (0 relative to source)
+      Ok((0, source))
     };
 
-    self.find_hunk_match(hunk, lines_to_match, first_line_to_match)?;
+    let (match_pos, final_source, skipped_line_index) = match match_result {
+      Ok((pos, src)) => (pos, src, None),
+      Err(e) => {
+        if !hunk.has_header {
+          // Attempt 2: Skip first context line (heuristic for label/header lines)
+          let mut attempt2_iter = lines_to_match.clone();
+          let skipped_line = attempt2_iter.next();
+
+          if let Some((_, second_line)) = attempt2_iter.next() {
+            match self.search_match(source, hunk, attempt2_iter, second_line) {
+              Ok((pos, src)) => (pos, src, skipped_line.map(|(i, _)| i)),
+              Err(_) => return Err(e),
+            }
+          } else if let Some((idx, _)) = skipped_line {
+            // Only 1 context line and strict match failed.
+            // Treat as match at 0 but skip writing the context line.
+            (0, source, Some(idx))
+          } else {
+            return Err(e);
+          }
+        } else {
+          return Err(e);
+        }
+      }
+    };
+
+    let skipped = &source[..match_pos];
+    self.write_block(skipped)?;
+    self.pos += source.len() - final_source.len();
     self.current_source_line += hunk.old_span;
 
-    for line in &hunk.lines {
+    for (i, line) in hunk.lines.iter().enumerate() {
+      if Some(i) == skipped_line_index {
+        continue;
+      }
       match line.kind {
         LineKind::Addition | LineKind::Context => self.write_line(line.text)?,
         LineKind::Deletion => {}
@@ -264,9 +303,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let mut hunks = patch.hunks.clone();
 
     // If we have headerless hunks, they might be out of order.
-    // We sort them by their match position in the original source.
+    // However, they might also be in order but ambiguous (e.g. context matches multiple places).
+    // We first try to apply them sequentially (respecting file order).
+    // If that fails, we fall back to sorting them by best match position.
     if !hunks.is_empty() && !hunks[0].has_header {
-      let mut hunks_with_pos = Vec::with_capacity(hunks.len());
+      let mut can_apply_sequentially = true;
+      let mut test_pos = self.pos;
+
       for hunk in &hunks {
         let mut lines_to_match = hunk
           .lines
@@ -277,22 +320,56 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         {
           line
         } else {
-          hunks_with_pos.push((0, hunk.clone()));
           continue;
         };
 
+        let source_slice = &self.source[test_pos..];
         match self.search_match(
-          self.source,
+          source_slice,
           hunk,
           lines_to_match,
           first_line_to_match,
         ) {
-          Ok((pos, _)) => hunks_with_pos.push((pos, hunk.clone())),
-          Err(e) => return Err(e),
+          Ok((_, final_source)) => {
+            test_pos += source_slice.len() - final_source.len();
+          }
+          Err(_) => {
+            can_apply_sequentially = false;
+            break;
+          }
         }
       }
-      hunks_with_pos.sort_by_key(|(pos, _)| *pos);
-      hunks = hunks_with_pos.into_iter().map(|(_, h)| h).collect();
+
+      // If we can't apply sequentially, assume they are out of order and sort them.
+      if !can_apply_sequentially {
+        let mut hunks_with_pos = Vec::with_capacity(hunks.len());
+        for hunk in &hunks {
+          let mut lines_to_match = hunk
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
+          let first_line_to_match =
+            if let Some((_, line)) = lines_to_match.next() {
+              line
+            } else {
+              hunks_with_pos.push((0, hunk.clone()));
+              continue;
+            };
+
+          match self.search_match(
+            self.source,
+            hunk,
+            lines_to_match,
+            first_line_to_match,
+          ) {
+            Ok((pos, _)) => hunks_with_pos.push((pos, hunk.clone())),
+            Err(e) => return Err(e),
+          }
+        }
+        hunks_with_pos.sort_by_key(|(pos, _)| *pos);
+        hunks = hunks_with_pos.into_iter().map(|(_, h)| h).collect();
+      }
     }
 
     for hunk in &hunks {
