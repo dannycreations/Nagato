@@ -10,7 +10,10 @@ use crate::{binary, BinaryKind, Hunk, Line, LineKind, Patch};
 /// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
   pub output: &'b mut W,
+  /// The full original source. We use slices to track progress.
   pub source: &'s [u8],
+  /// The current byte offset in the full source.
+  pub pos: usize,
   pub first_line: bool,
   pub current_source_line: u32,
 }
@@ -20,9 +23,16 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Self {
       output,
       source,
+      pos: 0,
       first_line: true,
       current_source_line: 0,
     }
+  }
+
+  /// Returns the remaining source content.
+  #[inline(always)]
+  fn source_at(&self) -> &'s [u8] {
+    &self.source[self.pos..]
   }
 
   /// Write a line to the output, handling line endings.
@@ -53,11 +63,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let lines_to_skip = target_line.saturating_sub(self.current_source_line);
 
     for _ in 0..lines_to_skip {
-      let (line, next_source) = get_line(self.source).ok_or_else(|| {
+      let source = self.source_at();
+      let (line, next_source) = get_line(source).ok_or_else(|| {
         Error::with_line(ErrorKind::CouldNotApplyHunk, hunk.patch_line_num + 1)
       })?;
       self.write_line(line)?;
-      self.source = next_source;
+      self.pos += source.len() - next_source.len();
       self.current_source_line += 1;
     }
     Ok(())
@@ -97,18 +108,20 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
     first_line_to_match: &Line,
   ) -> Result<(), Error> {
+    let source = self.source_at();
     let (match_pos, final_source) =
-      self.search_match(hunk, lines_to_match, first_line_to_match)?;
+      self.search_match(source, hunk, lines_to_match, first_line_to_match)?;
 
-    let skipped = &self.source[..match_pos];
+    let skipped = &source[..match_pos];
     self.write_block(skipped)?;
-    self.source = final_source;
+    self.pos += source.len() - final_source.len();
     self.current_source_line += 1;
     Ok(())
   }
 
   fn search_match<'p>(
     &self,
+    buffer: &'s [u8],
     hunk: &Hunk<'p>,
     lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
     first_line_to_match: &Line,
@@ -118,15 +131,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let mut best_error = None;
     let mut max_offset = 0;
 
-    for match_pos in finder.find_iter(self.source) {
+    for match_pos in finder.find_iter(buffer) {
       // Ensure match is at the start of a line.
-      if match_pos > 0 && self.source[match_pos - 1] != b'\n' {
+      if match_pos > 0 && buffer[match_pos - 1] != b'\n' {
         continue;
       }
 
       // Ensure match ends at a line boundary.
       let end_pos = match_pos + needle.len();
-      let remaining = &self.source[end_pos..];
+      let remaining = &buffer[end_pos..];
       let next_source = if remaining.is_empty() {
         remaining
       } else if let Some(rest) = remaining.strip_prefix(b"\n") {
@@ -220,9 +233,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
     if let Some(old_hash_bytes) = patch.old_hash {
       if old_hash_bytes.len() >= 7 {
+        let source = self.source_at();
         let mut hasher = Sha1::new();
-        write!(hasher, "blob {}\0", self.source.len()).unwrap();
-        hasher.update(self.source);
+        write!(hasher, "blob {}\0", source.len()).unwrap();
+        hasher.update(source);
         let result = hasher.finalize();
         let hex_hash = hex::encode(result);
 
@@ -250,8 +264,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         }
         BinaryKind::Delta => {
           let mut decoded = binary::new_base85_decoder(&fragment.data);
-          match binary::apply_delta(&mut decoded, self.source, &mut self.output)
-          {
+          match binary::apply_delta(
+            &mut decoded,
+            self.source_at(),
+            &mut self.output,
+          ) {
             Ok(_) => return Ok(()),
             Err(Error {
               kind: ErrorKind::BinaryPatchSourceMismatch,
@@ -272,7 +289,41 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return self.process_binary(patch);
     }
 
-    for hunk in &patch.hunks {
+    let mut hunks = patch.hunks.clone();
+
+    // If we have headerless hunks, they might be out of order.
+    // We sort them by their match position in the original source.
+    if !hunks.is_empty() && !hunks[0].has_header {
+      let mut hunks_with_pos = Vec::with_capacity(hunks.len());
+      for hunk in &hunks {
+        let mut lines_to_match = hunk
+          .lines
+          .iter()
+          .enumerate()
+          .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
+        let first_line_to_match = if let Some((_, line)) = lines_to_match.next()
+        {
+          line
+        } else {
+          hunks_with_pos.push((0, hunk.clone()));
+          continue;
+        };
+
+        match self.search_match(
+          self.source,
+          hunk,
+          lines_to_match,
+          first_line_to_match,
+        ) {
+          Ok((pos, _)) => hunks_with_pos.push((pos, hunk.clone())),
+          Err(e) => return Err(e),
+        }
+      }
+      hunks_with_pos.sort_by_key(|(pos, _)| *pos);
+      hunks = hunks_with_pos.into_iter().map(|(_, h)| h).collect();
+    }
+
+    for hunk in &hunks {
       self.process_hunk(hunk)?;
     }
 
@@ -288,13 +339,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   /// Write remaining source lines to the output.
   fn flush_remaining_source(&mut self) -> Result<(), Error> {
-    let source = self.source;
+    let source = self.source_at();
     if source.is_empty() {
       return Ok(());
     }
 
     self.write_block(source)?;
-    self.source = &[];
+    self.pos = self.source.len();
     Ok(())
   }
 }

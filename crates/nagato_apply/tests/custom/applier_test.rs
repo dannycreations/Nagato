@@ -89,3 +89,28 @@ test_patch_ok!(
     );
   }
 );
+
+test_patch_ok!(
+  applies_multi_hunkless_backward,
+  initial_fs: { "file.txt" => "context 1\nsame\ncontext 2\nsame\ncontext 3\nsame\n" },
+  diff: r#"
+    file a/file.txt
+     context 3
+    -same
+    +changed 1
+
+     context 2
+    -same
+    +changed 2
+
+     context 1
+    -same
+    +changed 3
+  "#,
+  assertions: |root| {
+    assert_eq!(
+      fs::read_to_string(root.join("file.txt")).unwrap(),
+      "context 1\nchanged 3\ncontext 2\nchanged 2\ncontext 3\nchanged 1\n"
+    );
+  }
+);
