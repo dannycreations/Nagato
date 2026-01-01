@@ -1,8 +1,11 @@
+use core::mem::discriminant;
 use std::io::Error as IoError;
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
+/// Specific types of errors that can occur in Nagato.
+/// Flattened to reduce boilerplate and simplify matching.
 #[derive(ThisError, Debug)]
 pub enum ErrorKind {
   #[error("I/O error")]
@@ -10,20 +13,7 @@ pub enum ErrorKind {
   #[error("Failed to persist temporary file")]
   Persist(#[from] PersistError),
 
-  #[error("{0}")]
-  Parse(#[from] ParseErrorKind),
-
-  #[error("{0}")]
-  Apply(#[from] ApplyErrorKind),
-
-  #[error("Invalid path")]
-  InvalidPath,
-  #[error("Can't open patch '{0}'\n  {1}")]
-  CantOpenPatch(String, IoError),
-}
-
-#[derive(ThisError, Debug, PartialEq, Eq)]
-pub enum ParseErrorKind {
+  // Parse Errors
   #[error("Invalid hunk range line")]
   InvalidHunkRangeLine,
   #[error("Invalid hunk range span")]
@@ -54,10 +44,8 @@ pub enum ParseErrorKind {
   PatchHasContentButNoFileInfo,
   #[error("Unexpected end of patch")]
   UnexpectedEof,
-}
 
-#[derive(ThisError, Debug, PartialEq, Eq)]
-pub enum ApplyErrorKind {
+  // Apply Errors
   #[error("Could not apply hunk")]
   CouldNotApplyHunk,
   #[error("Binary patch content is not supported")]
@@ -66,64 +54,26 @@ pub enum ApplyErrorKind {
   InvalidBinaryPatch,
   #[error("Binary patch source length mismatch")]
   BinaryPatchSourceMismatch,
-}
 
-impl PartialEq for ErrorKind {
-  fn eq(&self, other: &Self) -> bool {
-    match (self, other) {
-      (Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
-      (Self::Persist(_), Self::Persist(_)) => true,
-      (Self::Parse(a), Self::Parse(b)) => a == b,
-      (Self::Apply(a), Self::Apply(b)) => a == b,
-      (Self::InvalidPath, Self::InvalidPath) => true,
-      (Self::CantOpenPatch(a, ae), Self::CantOpenPatch(b, be)) => {
-        a == b && ae.kind() == be.kind()
-      }
-      _ => false,
-    }
-  }
+  #[error("Invalid path")]
+  InvalidPath,
+  #[error("Can't open patch '{0}'\n  {1}")]
+  CantOpenPatch(String, IoError),
 }
 
 impl Eq for ErrorKind {}
 
-/// Macro to delegate variants from sub-error enums to ErrorKind constants.
-/// This reduces boilerplate when adding new error types.
-macro_rules! delegate_variants {
-  ($variant_name:ident, $inner:ident, $($variant:ident),* $(,)?) => {
-    #[allow(non_upper_case_globals)]
-    impl ErrorKind {
-      $(
-        pub const $variant: Self = Self::$variant_name($inner::$variant);
-      )*
+impl PartialEq for ErrorKind {
+  fn eq(&self, other: &Self) -> bool {
+    use ErrorKind::*;
+    match (self, other) {
+      (Io(a), Io(b)) => a.kind() == b.kind(),
+      (Persist(_), Persist(_)) => true,
+      (CantOpenPatch(a, ae), CantOpenPatch(b, be)) => {
+        a == b && ae.kind() == be.kind()
+      }
+      // Compare variants without data using discriminant to avoid boilerplate.
+      (a, b) => discriminant(a) == discriminant(b),
     }
-  };
+  }
 }
-
-delegate_variants!(
-  Parse,
-  ParseErrorKind,
-  InvalidHunkRangeLine,
-  InvalidHunkRangeSpan,
-  MissingOldRange,
-  MissingNewRange,
-  InvalidPercentage,
-  InvalidFileMode,
-  InvalidFileHeader,
-  InvalidIndexLine,
-  InvalidIndexHashRange,
-  InvalidBinaryFilesLine,
-  UnexpectedLine,
-  HunkLineCountMismatch,
-  ExpectedHunkHeader,
-  PatchHasContentButNoFileInfo,
-  UnexpectedEof,
-);
-
-delegate_variants!(
-  Apply,
-  ApplyErrorKind,
-  CouldNotApplyHunk,
-  UnsupportedBinaryPatch,
-  InvalidBinaryPatch,
-  BinaryPatchSourceMismatch,
-);

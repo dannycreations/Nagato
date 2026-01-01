@@ -9,15 +9,17 @@ pub fn strip_git_prefix(s: &[u8]) -> &[u8] {
 }
 
 /// Parse an integer from a byte slice.
+/// Returns the parsed value and the remaining byte slice.
 #[inline]
 pub fn parse_int<T>(bytes: &[u8], radix: u32) -> Option<(T, &[u8])>
 where
   T: TryFrom<u64>,
 {
-  let mut len = 0;
   let mut num = 0u64;
+  let mut iter = bytes.iter().enumerate();
 
-  for &b in bytes {
+  let mut len = 0;
+  for (i, &b) in iter.by_ref() {
     let digit = match b {
       b'0'..=b'9' => (b - b'0') as u32,
       b'a'..=b'z' => (b - b'a') as u32 + 10,
@@ -30,14 +32,14 @@ where
     }
 
     num = num.checked_mul(radix as u64)?.checked_add(digit as u64)?;
-    len += 1;
+    len = i + 1;
   }
 
   if len == 0 {
-    return None;
+    None
+  } else {
+    Some((T::try_from(num).ok()?, &bytes[len..]))
   }
-
-  Some((T::try_from(num).ok()?, &bytes[len..]))
 }
 
 /// Get the next line from a source, handling \n and \r\n.

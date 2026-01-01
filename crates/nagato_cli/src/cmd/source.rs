@@ -18,24 +18,27 @@ impl PatchSource {
   /// This allows processing patches one by one without loading all of them into memory at once.
   pub fn iter(
     files: Vec<OsString>,
-  ) -> Box<dyn Iterator<Item = Result<Self, Error>>> {
-    if files.is_empty() {
+  ) -> impl Iterator<Item = Result<Self, Error>> {
+    let stdin_iter = if files.is_empty() {
       let mut content = Vec::new();
       let res = stdin()
         .read_to_end(&mut content)
         .map(|_| Self::Stdin(content))
         .map_err(Error::from);
-      return Box::new(std::iter::once(res));
-    }
+      Some(std::iter::once(res))
+    } else {
+      None
+    };
 
-    Box::new(files.into_iter().map(|path| {
+    let file_iter = files.into_iter().map(|path| {
       let name = path.to_string_lossy().to_string();
       let file = File::open(&path)
         .map_err(|e| Error::new(ErrorKind::CantOpenPatch(name.clone(), e)))?;
-      // SAFETY: Mmap is used for efficient reading of large patch files.
       let content = unsafe { Mmap::map(&file)? };
       Ok(Self::File { name, content })
-    }))
+    });
+
+    stdin_iter.into_iter().flatten().chain(file_iter)
   }
 
   pub fn name(&self) -> &str {

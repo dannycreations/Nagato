@@ -21,23 +21,26 @@ impl FileSystem {
   pub fn new(root: impl Into<PathBuf>) -> Self {
     let root = root.into();
     // We try to make the root absolute to ensure consistent behavior.
+    // canonicalize() is avoided here because it requires the path to exist.
     let root = if root.is_absolute() {
       root
     } else {
       env::current_dir()
         .map(|cwd| cwd.join(&root))
-        .unwrap_or(root)
+        .unwrap_or_else(|_| root)
     };
     Self { root }
   }
 
   /// Check if a file exists at the given relative path.
+  #[inline]
   pub fn exists(&self, path: &[u8]) -> bool {
     self.resolve(path).is_ok_and(|p| p.exists())
   }
 
   /// Read a file into memory using a memory map.
   /// Handles the case where the file does not exist by returning an appropriate error.
+  #[inline]
   pub fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
     let path = self.resolve(path)?;
     let file = File::open(path)?;
@@ -86,26 +89,18 @@ impl FileSystem {
       .to_path()
       .map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
-    let mut components = path.components();
-
-    // Skip root/prefix to ensure path is treated as relative to root.
-    // We use a manual loop to avoid peekable overhead and keep it clean.
-    let components = loop {
-      let mut next = components.clone();
-      match next.next() {
-        Some(Component::RootDir) | Some(Component::Prefix(_)) => {
-          components = next;
-        }
-        _ => break components,
-      }
-    };
-
     let mut dest = self.root.clone();
-    for component in components {
+    for component in path.components() {
       match component {
+        // Normal components are appended to the root.
         Component::Normal(c) => dest.push(c),
+        // Current directory components are safely ignored.
         Component::CurDir => {}
-        _ => return Err(Error::new(ErrorKind::InvalidPath)),
+        // Absolute paths, prefixes, and parent directory traversals are strictly forbidden
+        // to ensure all operations remain within the designated root.
+        Component::RootDir | Component::Prefix(_) | Component::ParentDir => {
+          return Err(Error::new(ErrorKind::InvalidPath))
+        }
       }
     }
     Ok(dest)

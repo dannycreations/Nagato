@@ -550,7 +550,6 @@ dependencies = [
 name = "nagato_core"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bstr",
  "memmap2",
  "tempfile",

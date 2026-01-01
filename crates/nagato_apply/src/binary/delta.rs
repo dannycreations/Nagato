@@ -58,48 +58,22 @@ pub fn apply_delta(
       let mut offset: usize = 0;
       let mut size: usize = 0;
 
-      if (cmd & 0x01) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        offset |= cmd_buf[0] as usize;
-      }
-      if (cmd & 0x02) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        offset |= (cmd_buf[0] as usize) << 8;
-      }
-      if (cmd & 0x04) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        offset |= (cmd_buf[0] as usize) << 16;
-      }
-      if (cmd & 0x08) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        offset |= (cmd_buf[0] as usize) << 24;
+      for i in 0..4 {
+        if (cmd & (1 << i)) != 0 {
+          delta
+            .read_exact(&mut cmd_buf)
+            .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
+          offset |= (cmd_buf[0] as usize) << (i * 8);
+        }
       }
 
-      if (cmd & 0x10) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        size |= cmd_buf[0] as usize;
-      }
-      if (cmd & 0x20) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        size |= (cmd_buf[0] as usize) << 8;
-      }
-      if (cmd & 0x40) != 0 {
-        delta
-          .read_exact(&mut cmd_buf)
-          .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        size |= (cmd_buf[0] as usize) << 16;
+      for i in 0..3 {
+        if (cmd & (1 << (i + 4))) != 0 {
+          delta
+            .read_exact(&mut cmd_buf)
+            .map_err(|_| Error::new(ErrorKind::InvalidBinaryPatch))?;
+          size |= (cmd_buf[0] as usize) << (i * 8);
+        }
       }
 
       if size == 0 {

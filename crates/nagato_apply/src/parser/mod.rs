@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use nagato_core::{Error, ParseErrorKind};
+use nagato_core::{Error, ErrorKind};
 
 use crate::{Lexer, Patch, TokenKind};
 
@@ -44,8 +44,8 @@ impl<'a> Parser<'a> {
       && patch.old_file.is_empty()
       && patch.new_file.is_empty()
     {
-      return Err(Error::parse_with_line(
-        ParseErrorKind::PatchHasContentButNoFileInfo,
+      return Err(Error::with_line(
+        ErrorKind::PatchHasContentButNoFileInfo,
         start_line,
       ));
     }
@@ -80,10 +80,7 @@ impl<'a> Parser<'a> {
   ) -> Result<bool, Error> {
     match self.tokens.peek() {
       Some(Ok(item)) => Ok(check(&item.token)),
-      Some(Err(_)) => {
-        let err = self.tokens.next().unwrap().unwrap_err();
-        Err(err)
-      }
+      Some(Err(_)) => Err(self.tokens.next().transpose().unwrap_err()),
       None => Ok(false),
     }
   }
@@ -91,7 +88,7 @@ impl<'a> Parser<'a> {
   /// Helper to peek at the next token, handling errors.
   pub fn peek_token(&mut self) -> Result<Option<&crate::LexerItem<'a>>, Error> {
     if let Some(Err(_)) = self.tokens.peek() {
-      return Err(self.tokens.next().unwrap().unwrap_err());
+      return Err(self.tokens.next().transpose().unwrap_err());
     }
     match self.tokens.peek() {
       Some(Ok(item)) => Ok(Some(item)),

@@ -481,3 +481,65 @@ test_patch_ok!(
     assert!(content.contains("function a() {\n// content\n}"));
   }
 );
+
+test_patch_ok!(
+  applies_multi_file_patch,
+  initial_fs: {
+    "file1.txt" => "file1 content\n",
+    "file2.txt" => "file2 content\n"
+  },
+  diff: r#"
+    diff --git a/file1.txt b/file1.txt
+    index 1234567..89abcde 100644
+    --- a/file1.txt
+    +++ b/file1.txt
+    @@ -1 +1 @@
+    -file1 content
+    +file1 updated
+    diff --git a/file2.txt b/file2.txt
+    index 7654321..edcba98 100644
+    --- a/file2.txt
+    +++ b/file2.txt
+    @@ -1 +1 @@
+    -file2 content
+    +file2 updated
+  "#,
+  assertions: |root| {
+    assert_eq!(
+      fs::read_to_string(root.join("file1.txt")).unwrap(),
+      "file1 updated\n"
+    );
+    assert_eq!(
+      fs::read_to_string(root.join("file2.txt")).unwrap(),
+      "file2 updated\n"
+    );
+  }
+);
+
+test_patch_ok!(
+  applies_multi_file_patch_with_creation_and_deletion,
+  initial_fs: { "to_delete.txt" => "delete me\n" },
+  diff: r#"
+    diff --git a/to_delete.txt b/to_delete.txt
+    deleted file mode 100644
+    index 1234567..0000000
+    --- a/to_delete.txt
+    +++ /dev/null
+    @@ -1 +0,0 @@
+    -delete me
+    diff --git a/to_create.txt b/to_create.txt
+    new file mode 100644
+    index 0000000..1234567
+    --- /dev/null
+    +++ b/to_create.txt
+    @@ -0,0 +1 @@
+    +new file content
+  "#,
+  assertions: |root| {
+    assert!(!root.join("to_delete.txt").exists());
+    assert_eq!(
+      fs::read_to_string(root.join("to_create.txt")).unwrap(),
+      "new file content\n"
+    );
+  }
+);

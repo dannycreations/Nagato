@@ -13,18 +13,36 @@ use nagato_core::{Error, ErrorKind};
 
 /// Git's base85 alphabet
 const ENCODE_MAP: &[u8; 85] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
+/// Maximum decoded length of a single git binary line (Z = 52 bytes)
+const MAX_DECODED_LINE_LEN: usize = 52;
 
+/// Precomputed lookup table for base85 decoding to avoid linear searches.
+/// Values are stored as i8 where -1 indicates an invalid character.
+const DECODE_MAP: [i8; 256] = {
+  let mut map = [-1i8; 256];
+  let mut i = 0;
+  while i < 85 {
+    map[ENCODE_MAP[i] as usize] = i as i8;
+    i += 1;
+  }
+  map
+};
+
+#[inline(always)]
 fn decode_char(c: u8) -> Option<u8> {
-  ENCODE_MAP.iter().position(|&x| x == c).map(|x| x as u8)
+  let val = DECODE_MAP[c as usize];
+  if val >= 0 {
+    Some(val as u8)
+  } else {
+    None
+  }
 }
 
 fn decode_len_char(c: u8) -> Option<usize> {
-  if c.is_ascii_uppercase() {
-    Some((c - b'A' + 1) as usize)
-  } else if c.is_ascii_lowercase() {
-    Some((c - b'a' + 27) as usize)
-  } else {
-    None
+  match c {
+    b'A'..=b'Z' => Some((c - b'A' + 1) as usize),
+    b'a'..=b'z' => Some((c - b'a' + 27) as usize),
+    _ => None,
   }
 }
 
@@ -41,7 +59,7 @@ impl StdError for InvalidBinaryLineError {}
 
 pub struct Base85Reader<'a> {
   lines: Iter<'a, &'a [u8]>,
-  buffer: [u8; 52], // Git binary lines are at most 52 bytes decoded (Z line is 52)
+  buffer: [u8; MAX_DECODED_LINE_LEN],
   buf_len: usize,
   pos: usize,
 }
@@ -50,7 +68,7 @@ impl<'a> Base85Reader<'a> {
   pub fn new(lines: &'a [&'a [u8]]) -> Self {
     Self {
       lines: lines.iter(),
-      buffer: [0u8; 52],
+      buffer: [0u8; MAX_DECODED_LINE_LEN],
       buf_len: 0,
       pos: 0,
     }

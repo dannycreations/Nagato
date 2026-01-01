@@ -1,10 +1,6 @@
-use std::{
-  ffi::OsString,
-  fs::{self, File},
-  io::Read,
-  path::PathBuf,
-};
+use std::{ffi::OsString, fs, fs::File, path::PathBuf};
 
+use memmap2::Mmap;
 use nagato_apply::Parser;
 use nagato_core::{Error, ErrorKind};
 
@@ -12,12 +8,12 @@ use nagato_core::{Error, ErrorKind};
 pub fn process_trim(files: &[OsString]) -> Result<(), Error> {
   for path in files {
     let file_name = path.to_string_lossy().to_string();
-    let mut file = File::open(path).map_err(|e| {
+    let file = File::open(path).map_err(|e| {
       Error::new(ErrorKind::CantOpenPatch(file_name.clone(), e))
     })?;
 
-    let mut content = Vec::new();
-    file.read_to_end(&mut content)?;
+    // SAFETY: Use Mmap for consistent, high-performance reading of patch files.
+    let content = unsafe { Mmap::map(&file)? };
 
     let mut trimmed_content = Vec::new();
     for (i, patch_result) in Parser::new(&content).enumerate() {

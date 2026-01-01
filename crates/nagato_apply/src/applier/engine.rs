@@ -2,7 +2,7 @@ use std::io::Write;
 
 use bstr::ByteSlice;
 use memchr::memmem::Finder;
-use nagato_core::{get_line, ApplyErrorKind, Error, ErrorKind};
+use nagato_core::{get_line, Error, ErrorKind};
 use sha1::{Digest, Sha1};
 
 use crate::{binary, BinaryKind, Hunk, Line, LineKind, Patch};
@@ -67,15 +67,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   ) -> Result<&'s [u8], Error> {
     for (offset, hunk_line) in lines_to_match {
       let (line, next_source) = get_line(source).ok_or_else(|| {
-        Error::apply_with_line(
-          ApplyErrorKind::CouldNotApplyHunk,
+        Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
         )
       })?;
 
       if line != hunk_line.text {
-        return Err(Error::apply_with_line(
-          ApplyErrorKind::CouldNotApplyHunk,
+        return Err(Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
         ));
       }
@@ -84,6 +84,30 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(source)
   }
 
+  /// Extract the search buffer based on hunk labels if present.
+  fn get_search_buffer(
+    &self,
+    buffer: &'s [u8],
+    hunk: &Hunk,
+  ) -> (&'s [u8], usize) {
+    hunk
+      .label
+      .and_then(|label| {
+        buffer
+          .find(label)
+          .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
+          .map(|pos| {
+            let line_end = buffer[pos..]
+              .find_byte(b'\n')
+              .map(|i| pos + i + 1)
+              .unwrap_or(buffer.len());
+            (&buffer[line_end..], line_end)
+          })
+      })
+      .unwrap_or((buffer, 0))
+  }
+
+  #[inline]
   fn search_match<'p>(
     &self,
     buffer: &'s [u8],
@@ -93,43 +117,25 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   ) -> Result<(usize, &'s [u8]), Error> {
     let needle = first_line_to_match.text;
     let finder = Finder::new(needle);
-
-    // If label is present, we start searching after the label's line.
-    let (search_buffer, buffer_offset) = match hunk.label {
-      Some(label) => match buffer
-        .find(label)
-        .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
-      {
-        Some(pos) => {
-          let line_end = buffer[pos..]
-            .find_byte(b'\n')
-            .map(|i| pos + i + 1)
-            .unwrap_or(buffer.len());
-          (&buffer[line_end..], line_end)
-        }
-        None => (buffer, 0),
-      },
-      None => (buffer, 0),
-    };
+    let (search_buffer, buffer_offset) = self.get_search_buffer(buffer, hunk);
 
     let mut best_error = None;
     let mut max_offset = 0;
 
     for match_pos_rel in finder.find_iter(search_buffer) {
       let match_pos = buffer_offset + match_pos_rel;
-      // Ensure match is at the start of a line.
       if match_pos > 0 && buffer[match_pos - 1] != b'\n' {
         continue;
       }
 
-      // Ensure match ends at a line boundary.
       let end_pos = match_pos + needle.len();
-      let remaining = &buffer[end_pos..];
-      let next_source = match remaining {
-        [b'\n', rest @ ..] => rest,
-        [b'\r', b'\n', rest @ ..] => rest,
-        [b'\r', rest @ ..] => rest,
-        [] => remaining,
+      let next_source = match &buffer[end_pos..] {
+        // Handle all common line ending variations and EOF.
+        [b'\n', rest @ ..] | [b'\r', b'\n', rest @ ..] | [b'\r', rest @ ..] => {
+          rest
+        }
+        [] => &[],
+        // If the match isn't followed by a newline or EOF, it's a partial line match and should be skipped.
         _ => continue,
       };
 
@@ -148,11 +154,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Err(best_error.unwrap_or_else(|| {
       let error_line =
         hunk.patch_line_num + if hunk.has_header { 0 } else { 1 };
-      Error::apply_with_line(ApplyErrorKind::CouldNotApplyHunk, error_line)
+      Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
     }))
   }
 
   /// Find and apply a single hunk to the source.
+  #[inline]
   pub fn find_and_apply_hunk<'p>(
     &mut self,
     hunk: &Hunk<'p>,
@@ -172,17 +179,18 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         match self.search_match(source, hunk, iter, first) {
           Ok((pos, src)) => (pos, src, None),
           Err(e) if !hunk.has_header => {
-            // Hunkless heuristic: skip the first context line which might be a label/header.
+            // Hunkless heuristic: If an exact match fails for a hunk without a header,
+            // we attempt to skip the first context line. This handles cases where the
+            // first line might actually be a label or metadata that was misinterpreted
+            // as context by the parser.
             let mut alt_iter = lines_to_match.clone();
-            let first = alt_iter.next();
-            if let Some((_, second)) = alt_iter.next() {
-              self
+            let first_item = alt_iter.next();
+            match alt_iter.next() {
+              Some((_, second)) => self
                 .search_match(source, hunk, alt_iter, second)
-                .map(|(pos, src)| (pos, src, first.map(|(i, _)| i)))
-                .map_err(|_| e)?
-            } else {
-              // Fallback: match at current position but skip the first line.
-              (0, source, first.map(|(i, _)| i))
+                .map(|(pos, src)| (pos, src, first_item.map(|(i, _)| i)))
+                .map_err(|_| e)?,
+              None => (0, source, first_item.map(|(i, _)| i)),
             }
           }
           Err(e) => return Err(e),
@@ -197,12 +205,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.current_source_line += hunk.old_span;
 
     for (i, line) in hunk.lines.iter().enumerate() {
-      if Some(i) == skipped_line_index {
-        continue;
-      }
-      match line.kind {
-        LineKind::Addition | LineKind::Context => self.write_line(line.text)?,
-        LineKind::Deletion => {}
+      if Some(i) != skipped_line_index {
+        match line.kind {
+          LineKind::Addition | LineKind::Context => {
+            self.write_line(line.text)?
+          }
+          LineKind::Deletion => {}
+        }
       }
     }
 
@@ -271,7 +280,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
     }
 
-    Err(Error::apply(ApplyErrorKind::CouldNotApplyHunk))
+    Err(Error::new(ErrorKind::CouldNotApplyHunk))
   }
 
   /// Process the entire patch.

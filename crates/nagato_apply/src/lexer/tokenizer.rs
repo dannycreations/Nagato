@@ -5,6 +5,7 @@ use nagato_core::{strip_git_prefix, ErrorKind};
 use crate::{lexer::LexerMode, Lexer, TokenKind};
 
 impl<'a> Lexer<'a> {
+  #[inline]
   pub fn tokenize_binary(
     &mut self,
     line: &'a [u8],
@@ -39,6 +40,7 @@ impl<'a> Lexer<'a> {
   }
 
   /// Dispatches line parsing based on the first character.
+  #[inline]
   pub fn tokenize_text(
     &mut self,
     line: &'a [u8],
@@ -115,14 +117,15 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"diff --git ") {
-      self.parse_file_header(rest)
-    } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
-      Ok(TokenKind::Dissimilarity(rest))
-    } else if let Some(rest) = line.strip_prefix(b"deleted ") {
-      self.parse_mode_rest(rest, TokenKind::DeletedFileMode)
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+      return self.parse_file_header(rest);
     }
+    if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
+      return Ok(TokenKind::Dissimilarity(rest));
+    }
+    if let Some(rest) = line.strip_prefix(b"deleted ") {
+      return self.parse_mode_rest(rest, TokenKind::DeletedFileMode);
+    }
+    Err(ErrorKind::UnexpectedLine)
   }
 
   fn parse_f_line(
@@ -131,13 +134,12 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"file ") {
       let file = strip_git_prefix(rest.trim());
-      Ok(TokenKind::FileHeader {
+      return Ok(TokenKind::FileHeader {
         old_file: file,
         new_file: file,
-      })
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+      });
     }
+    Err(ErrorKind::UnexpectedLine)
   }
 
   fn parse_g_line(
@@ -146,32 +148,29 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line == b"GIT binary patch" {
       self.mode = LexerMode::Binary;
-      Ok(TokenKind::GitBinaryPatchHeader)
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+      return Ok(TokenKind::GitBinaryPatchHeader);
     }
+    Err(ErrorKind::UnexpectedLine)
   }
 
   fn parse_n_line(
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    if let Some(rest) = line.strip_prefix(b"new ") {
-      self.parse_mode_rest(rest, TokenKind::NewFileMode)
-    } else {
-      Err(ErrorKind::UnexpectedLine)
-    }
+    line
+      .strip_prefix(b"new ")
+      .map(|rest| self.parse_mode_rest(rest, TokenKind::NewFileMode))
+      .unwrap_or(Err(ErrorKind::UnexpectedLine))
   }
 
   fn parse_o_line(
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    if let Some(rest) = line.strip_prefix(b"old ") {
-      self.parse_mode_rest(rest, TokenKind::OldFileMode)
-    } else {
-      Err(ErrorKind::UnexpectedLine)
-    }
+    line
+      .strip_prefix(b"old ")
+      .map(|rest| self.parse_mode_rest(rest, TokenKind::OldFileMode))
+      .unwrap_or(Err(ErrorKind::UnexpectedLine))
   }
 
   fn parse_r_line(
@@ -179,12 +178,12 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"rename from ") {
-      Ok(TokenKind::RenameFrom(rest))
-    } else if let Some(rest) = line.strip_prefix(b"rename to ") {
-      Ok(TokenKind::RenameTo(rest))
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+      return Ok(TokenKind::RenameFrom(rest));
     }
+    if let Some(rest) = line.strip_prefix(b"rename to ") {
+      return Ok(TokenKind::RenameTo(rest));
+    }
+    Err(ErrorKind::UnexpectedLine)
   }
 
   fn parse_c_line(
@@ -192,12 +191,12 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"copy from ") {
-      Ok(TokenKind::CopyFrom(rest))
-    } else if let Some(rest) = line.strip_prefix(b"copy to ") {
-      Ok(TokenKind::CopyTo(rest))
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+      return Ok(TokenKind::CopyFrom(rest));
     }
+    if let Some(rest) = line.strip_prefix(b"copy to ") {
+      return Ok(TokenKind::CopyTo(rest));
+    }
+    Err(ErrorKind::UnexpectedLine)
   }
 
   fn parse_b_line(
@@ -290,6 +289,7 @@ impl<'a> Lexer<'a> {
   }
 
   /// Helper to parse mode lines after the initial keyword prefix.
+  #[inline]
   fn parse_mode_rest(
     &self,
     rest: &'a [u8],

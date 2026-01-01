@@ -1,6 +1,5 @@
 use std::{borrow::Cow, fmt, io::Error as IoError};
 
-use anyhow::Error as AnyhowError;
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
@@ -17,16 +16,11 @@ pub struct Error {
   pub file: Option<Cow<'static, str>>,
   /// The specific kind of error.
   pub kind: ErrorKind,
-  /// Wrapped context error.
-  pub context: Option<AnyhowError>,
 }
 
 impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.kind)?;
-    if let Some(ctx) = &self.context {
-      write!(f, ": {ctx:?}")?;
-    }
     if let Some(line) = self.line {
       write!(f, "\n  at ")?;
       match self.file.as_deref() {
@@ -48,7 +42,6 @@ impl Error {
       kind,
       line: None,
       file: None,
-      context: None,
     }
   }
 
@@ -59,7 +52,6 @@ impl Error {
       kind,
       line: Some(line),
       file: None,
-      context: None,
     }
   }
 
@@ -68,47 +60,6 @@ impl Error {
   pub fn with_file(mut self, file: impl Into<Cow<'static, str>>) -> Self {
     self.file = Some(file.into());
     self
-  }
-
-  /// Attach an anyhow context to the error.
-  #[inline]
-  pub fn with_context(mut self, context: AnyhowError) -> Self {
-    self.context = Some(context);
-    self
-  }
-
-  /// Create a new parse error.
-  #[inline]
-  pub const fn parse(kind: ParseErrorKind) -> Self {
-    Self::new(ErrorKind::Parse(kind))
-  }
-
-  /// Create a new parse error with line information.
-  #[inline]
-  pub const fn parse_with_line(kind: ParseErrorKind, line: u32) -> Self {
-    Self::with_line(ErrorKind::Parse(kind), line)
-  }
-
-  /// Create a new apply error.
-  #[inline]
-  pub const fn apply(kind: ApplyErrorKind) -> Self {
-    Self::new(ErrorKind::Apply(kind))
-  }
-
-  /// Create a new apply error with line information.
-  #[inline]
-  pub const fn apply_with_line(kind: ApplyErrorKind, line: u32) -> Self {
-    Self::with_line(ErrorKind::Apply(kind), line)
-  }
-}
-
-impl From<AnyhowError> for Error {
-  /// Convert an anyhow error to our core Error.
-  /// If it's already an Error, we downcast it to avoid double-wrapping.
-  fn from(e: AnyhowError) -> Self {
-    e.downcast::<Self>().unwrap_or_else(|e| {
-      Self::new(ErrorKind::Io(IoError::other(e.to_string()))).with_context(e)
-    })
   }
 }
 

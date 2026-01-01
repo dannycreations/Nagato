@@ -10,7 +10,6 @@ repository.workspace = true
 doctest = false
 
 [dependencies]
-anyhow.workspace = true
 bstr.workspace = true
 memmap2.workspace = true
 tempfile.workspace = true

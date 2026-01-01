@@ -1,4 +1,4 @@
-use nagato_core::{parse_int, Error, ErrorKind, ParseErrorKind};
+use nagato_core::{parse_int, Error, ErrorKind};
 
 use super::binary::parse_binary_patch;
 use crate::{BinaryFragment, Parser, Patch, TokenKind};
@@ -77,13 +77,11 @@ pub fn parse_header<'a>(
 }
 
 fn parse_percentage(s: &[u8]) -> Result<u32, ErrorKind> {
-  let s = s
-    .strip_suffix(b"%")
-    .ok_or(ParseErrorKind::InvalidPercentage)?;
+  let s = s.strip_suffix(b"%").ok_or(ErrorKind::InvalidPercentage)?;
   let (num, rest) =
-    parse_int::<u32>(s, 10).ok_or(ParseErrorKind::InvalidPercentage)?;
+    parse_int::<u32>(s, 10).ok_or(ErrorKind::InvalidPercentage)?;
   if !rest.is_empty() {
-    return Err(ParseErrorKind::InvalidPercentage.into());
+    return Err(ErrorKind::InvalidPercentage);
   }
   Ok(num)
 }

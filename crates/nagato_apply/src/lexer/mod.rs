@@ -38,6 +38,7 @@ impl<'a> Lexer<'a> {
     }
   }
 
+  #[inline]
   fn parse_line(&mut self) -> Option<Result<LexerItem<'a>, Error>> {
     let line = self.next_line()?;
     let line_num = self.line_num;

@@ -11,7 +11,7 @@ pub fn parse_binary_patch<'a>(
   while let Some(res) = parser.tokens.peek() {
     let item = match res {
       Ok(i) => i,
-      Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
+      Err(_) => return Err(parser.tokens.next().transpose().unwrap_err()),
     };
 
     match item.token {
@@ -29,7 +29,9 @@ pub fn parse_binary_patch<'a>(
         while let Some(res) = parser.tokens.peek() {
           let item = match res {
             Ok(i) => i,
-            Err(_) => return Err(parser.tokens.next().unwrap().unwrap_err()),
+            Err(_) => {
+              return Err(parser.tokens.next().transpose().unwrap_err())
+            }
           };
 
           if let TokenKind::BinaryData(line) = item.token {

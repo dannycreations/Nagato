@@ -6,7 +6,6 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use anyhow::Context;
 use tempfile::NamedTempFile;
 
 use crate::{Error, ErrorKind};
@@ -28,8 +27,7 @@ impl AtomicWriter {
         "Destination path has no parent directory",
       )))
     })?;
-    let tempfile = NamedTempFile::new_in(parent)
-      .with_context(|| format!("failed to create tempfile in {:?}", parent))?;
+    let tempfile = NamedTempFile::new_in(parent)?;
     // 1MB buffer for high-performance writes
     let writer = BufWriter::with_capacity(1024 * 1024, tempfile);
 
@@ -41,17 +39,13 @@ impl AtomicWriter {
 
   /// Commit the changes by persisting the temporary file to the destination path.
   pub fn commit(mut self) -> Result<(), Error> {
-    self
-      .writer
-      .flush()
-      .context("failed to flush atomic writer")?;
+    self.writer.flush()?;
     self
       .writer
       .into_inner()
-      .map_err(|e| e.into_error())
-      .context("failed to get inner writer from BufWriter")?
+      .map_err(|e| e.into_error())?
       .persist(&self.dest_path)
-      .context("failed to persist temporary file")?;
+      .map_err(Error::from)?;
     Ok(())
   }
 }

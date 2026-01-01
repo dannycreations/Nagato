@@ -1,6 +1,5 @@
 use std::io::{sink, Write as IoWrite};
 
-use anyhow::{Context, Error as AnyError};
 use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
@@ -38,24 +37,11 @@ fn handle_metadata_change(
   }
   let source_path = patch.source_file();
   if patch.rename_to.is_some() {
-    fs.rename(source_path, patch.new_file)
-      .map_err(AnyError::from)
-      .with_context(|| {
-        format!("failed to rename {:?} to {:?}", source_path, patch.new_file)
-      })?;
+    fs.rename(source_path, patch.new_file)?;
   } else if patch.copy_to.is_some() {
-    fs.copy(source_path, patch.new_file)
-      .map_err(AnyError::from)
-      .with_context(|| {
-        format!("failed to copy {:?} to {:?}", source_path, patch.new_file)
-      })?;
+    fs.copy(source_path, patch.new_file)?;
   } else if patch.old_file.is_dev_null() {
-    fs.write(patch.new_file)
-      .map_err(AnyError::from)
-      .with_context(|| {
-        format!("failed to create new file {:?}", patch.new_file)
-      })?
-      .commit()?;
+    fs.write(patch.new_file)?.commit()?;
   }
   Ok(())
 }
@@ -70,33 +56,17 @@ fn handle_application(
   if check || is_deletion {
     apply_to_writer(fs, patch, &mut sink())?;
     if !check && is_deletion {
-      fs.remove_file(patch.source_file())
-        .ignore_not_found()
-        .map_err(AnyError::from)
-        .with_context(|| {
-          format!("failed to remove deleted file {:?}", patch.source_file())
-        })?;
+      fs.remove_file(patch.source_file()).ignore_not_found()?;
     }
     Ok(())
   } else {
-    let mut writer = fs
-      .write(patch.new_file)
-      .map_err(AnyError::from)
-      .with_context(|| format!("failed to write to {:?}", patch.new_file))?;
+    let mut writer = fs.write(patch.new_file)?;
     apply_to_writer(fs, patch, &mut writer)?;
     writer.commit()?;
 
     let source_path = patch.source_file();
     if patch.rename_to.is_some() && source_path != patch.new_file {
-      fs.remove_file(source_path)
-        .ignore_not_found()
-        .map_err(AnyError::from)
-        .with_context(|| {
-          format!(
-            "failed to remove source file {:?} after rename",
-            source_path
-          )
-        })?;
+      fs.remove_file(source_path).ignore_not_found()?;
     }
     Ok(())
   }
@@ -125,11 +95,7 @@ pub fn patch_file_worker(
 
   if !check && !patch.new_file.is_dev_null() {
     if let Some(mode) = patch.new_mode {
-      fs.set_permissions(patch.new_file, mode)
-        .map_err(AnyError::from)
-        .with_context(|| {
-          format!("failed to set permissions for {:?}", patch.new_file)
-        })?;
+      fs.set_permissions(patch.new_file, mode)?;
     }
   }
 
