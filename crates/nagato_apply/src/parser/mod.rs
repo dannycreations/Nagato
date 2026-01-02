@@ -36,8 +36,6 @@ impl<'a> Parser<'a> {
       .unwrap_or(0);
 
     header::parse_header(self, &mut patch, &mut binary_fragments)?;
-    self.skip_empty_context_lines()?;
-
     hunk::parse_hunks(self, &mut patch, &mut hunks)?;
 
     if !hunks.is_empty()
@@ -101,9 +99,7 @@ impl<'a> Iterator for Parser<'a> {
   type Item = Result<Patch<'a>, Error>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    if let Err(e) = self.skip_empty_context_lines() {
-      return Some(Err(e));
-    }
+    self.skip_empty_context_lines().ok()?;
     self.tokens.peek()?;
 
     let patch_result = self.parse_patch();

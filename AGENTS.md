@@ -1,6 +1,6 @@
 # Nagato Development Guide
 
-### Commands
+## Commands
 
 ```cmd
 # Checks for compilation errors and linting warnings (Fast)

@@ -41,14 +41,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
     if !self.first_line {
       self.output.write_all(b"\n")?;
+    } else {
+      self.first_line = false;
     }
-    self.first_line = false;
-    self.output.write_all(line)?;
-    Ok(())
+    self.output.write_all(line).map_err(Into::into)
   }
 
-  /// Write a block of data, splitting it into lines and prepending newlines as needed.
-  /// This ensures consistent line endings and updates the source line counter.
+  /// Write a block of data, splitting it into lines and updating the source line counter.
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
     for line in block.lines() {
       self.write_line(line)?;
@@ -331,12 +330,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Write remaining source lines to the output.
   fn flush_remaining_source(&mut self) -> Result<(), Error> {
     let source = self.source_at();
-    if source.is_empty() {
-      return Ok(());
+    if !source.is_empty() {
+      self.write_block(source)?;
+      self.pos = self.source.len();
     }
-
-    self.write_block(source)?;
-    self.pos = self.source.len();
     Ok(())
   }
 }
