@@ -6,7 +6,7 @@ test_patch_ok!(
   initial_fs: { "file.txt" => " context 1\nnew line\n context 2\n" },
   diff: r#"
     diff --git a/file.txt b/file.txt
-    index 1234567..abcdefg
+    index 0000000..0000000
     --- a/file.txt
     +++ b/file.txt
     @@ -1,3 +1,3 @@
@@ -30,7 +30,7 @@ test_patch_ok!(
   diff: r#"
     diff --git a/new_file.txt b/new_file.txt
     new file mode 100644
-    index 0000000..abcdef0
+    index 0000000..0000000
     --- /dev/null
     +++ b/new_file.txt
     @@ -0,0 +1,2 @@
@@ -48,7 +48,7 @@ test_patch_ok!(
   initial_fs: {},
   diff: r#"
     diff --git a/file_to_delete.txt b/file_to_delete.txt
-    index abcdef0..0000000
+    index 0000000..0000000
     --- a/file_to_delete.txt
     +++ /dev/null
     @@ -1,2 +0,0 @@

@@ -41,6 +41,13 @@ fn handle_metadata_change(
   } else if patch.copy_to.is_some() {
     fs.copy(source_path, patch.new_file)?;
   } else if patch.old_file.is_dev_null() {
+    // Ensure destination file does not exist when creating a new file.
+    if fs.exists(patch.new_file) {
+      return Err(Error::new(ErrorKind::Io(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "Destination file already exists",
+      ))));
+    }
     fs.write(patch.new_file)?.commit()?;
   }
   Ok(())
@@ -56,10 +63,25 @@ fn handle_application(
   if check || is_deletion {
     apply_to_writer(fs, patch, &mut sink())?;
     if !check && is_deletion {
+      // Ensure source file exists before deletion.
+      if !patch.source_file().is_dev_null() && !fs.exists(patch.source_file()) {
+        return Err(Error::new(ErrorKind::Io(std::io::Error::new(
+          std::io::ErrorKind::NotFound,
+          "Source file to delete not found",
+        ))));
+      }
       fs.remove_file(patch.source_file()).ignore_not_found()?;
     }
     Ok(())
   } else {
+    // Ensure destination file does not exist when creating a new file via application.
+    if patch.old_file.is_dev_null() && fs.exists(patch.new_file) {
+      return Err(Error::new(ErrorKind::Io(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "Destination file already exists",
+      ))));
+    }
+
     let mut writer = fs.write(patch.new_file)?;
     apply_to_writer(fs, patch, &mut writer)?;
     writer.commit()?;

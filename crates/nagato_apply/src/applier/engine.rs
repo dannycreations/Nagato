@@ -234,7 +234,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Verify that the source matches the expected hash for a binary patch.
   pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
     if let Some(old_hash_bytes) = patch.old_hash {
-      if old_hash_bytes.len() >= 7 {
+      if old_hash_bytes.len() >= 7 && !old_hash_bytes.iter().all(|&b| b == b'0')
+      {
         let source = self.source_at();
         let mut hasher = Sha1::new();
         write!(hasher, "blob {}\0", source.len()).unwrap();
@@ -243,9 +244,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         let mut hex_hash = [0u8; 40];
         hex::encode_to_slice(result, &mut hex_hash).unwrap();
 
-        if !hex_hash.starts_with(old_hash_bytes)
-          && old_hash_bytes.iter().any(|&b| b != b'0')
-        {
+        if !hex_hash.starts_with(old_hash_bytes) {
           return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
         }
       }
@@ -287,6 +286,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     if !patch.binary_fragments.is_empty() {
       return self.process_binary(patch);
     }
+
+    // Verify source hash for text patches if index header is present.
+    // This is a strict check to prevent applying patches to the wrong file version.
+    self.verify_binary_source(patch)?;
 
     if !patch.hunks.is_empty() && !patch.hunks[0].has_header {
       // Hunkless patches (no @@ headers) may be out of order.

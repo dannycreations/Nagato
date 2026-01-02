@@ -147,7 +147,7 @@ test_patch_ok!(
   initial_fs: { "file_to_delete.txt" => "line 1\nline 2\n" },
   diff: r#"
     diff --git a/file_to_delete.txt b/file_to_delete.txt
-    index abcdef0..0000000
+    index 0000000..0000000
     --- a/file_to_delete.txt
     +++ /dev/null
     @@ -1,2 +0,0 @@
@@ -207,7 +207,7 @@ test_patch_ok!(
   initial_fs: { "file.txt" => "line 1\nline 2\nline 3\nline 4\nline 5\n" },
   diff: r#"
     diff --git a/file.txt b/file.txt
-    index abcdef0..abcdef0
+    index 0000000..0000000
     --- a/file.txt
     +++ b/file.txt
     @@ -1,2 +1,2 @@
@@ -490,14 +490,14 @@ test_patch_ok!(
   },
   diff: r#"
     diff --git a/file1.txt b/file1.txt
-    index 1234567..89abcde 100644
+    index 0000000..0000000 100644
     --- a/file1.txt
     +++ b/file1.txt
     @@ -1 +1 @@
     -file1 content
     +file1 updated
-    diff --git a/file2.txt b/file2.txt
-    index 7654321..edcba98 100644
+    diff --git b/file2.txt b/file2.txt
+    index 0000000..0000000 100644
     --- a/file2.txt
     +++ b/file2.txt
     @@ -1 +1 @@
@@ -522,7 +522,7 @@ test_patch_ok!(
   diff: r#"
     diff --git a/to_delete.txt b/to_delete.txt
     deleted file mode 100644
-    index 1234567..0000000
+    index 0000000..0000000
     --- a/to_delete.txt
     +++ /dev/null
     @@ -1 +0,0 @@
