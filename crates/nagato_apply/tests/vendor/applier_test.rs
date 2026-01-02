@@ -10,10 +10,9 @@ test_patch_ok!(
     +world
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "world\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "world\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -27,10 +26,9 @@ test_patch_ok!(
     +world
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "some other content\nworld\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "some other content\nworld\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -46,10 +44,9 @@ test_patch_ok!(
      context after
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "some other content\ncontext before\nworld\ncontext after\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "some other content\ncontext before\nworld\ncontext after\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -67,10 +64,9 @@ test_patch_ok!(
     +modified5
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "line1\nmodified2\nline3\nline4\nmodified5\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "line1\nmodified2\nline3\nline4\nmodified5\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -87,10 +83,10 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     let content = fs::read_to_string(root.join("file.txt")).unwrap();
-    // The first block should NOT be modified
-    assert!(content.contains("Block A {\n    item {\n        val: 1\n    }\n}"));
-    // The second block SHOULD be modified
-    assert!(content.contains("item {\n        val: 3\n        val: 2\n    }"));
+    let needle1 = "Block A {\n    item {\n        val: 1\n    }\n}";
+    let needle2 = "item {\n        val: 3\n        val: 2\n    }";
+    assert!(content.contains(needle1));
+    assert!(content.contains(needle2));
   }
 );
 
@@ -112,10 +108,9 @@ test_patch_ok!(
     +changed 3
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "context 1\nchanged 3\ncontext 2\nchanged 2\ncontext 3\nchanged 1\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "context 1\nchanged 3\ncontext 2\nchanged 2\ncontext 3\nchanged 1\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -130,10 +125,10 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     let content = fs::read_to_string(root.join("file.txt")).unwrap();
-    // Function b should be changed
-    assert!(content.contains("function b() {\n// modified content\n"));
-    // Function a should be unchanged
-    assert!(content.contains("function a() {\n// content\n}"));
+    let needle1 = "function b() {\n// modified content\n}";
+    let needle2 = "function a() {\n// content\n}";
+    assert!(content.contains(needle1));
+    assert!(content.contains(needle2));
   }
 );
 
@@ -158,9 +153,58 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     let content = fs::read_to_string(root.join("file.txt")).unwrap();
-    assert_eq!(
-      content,
-      "Container {\n    Block 1 {\n        // modified 1\n    }\n    Block 2 {\n        // modified 2\n    }\n}\n"
-    );
+    let needle = "Container {\n    Block 1 {\n        // modified 1\n    }\n    Block 2 {\n        // modified 2\n    }\n}\n";
+    assert_eq!(content, needle);
+  }
+);
+
+test_patch_ok!(
+  applies_hunkless_with_multiple_labels_and_empty_lines,
+  initial_fs: { "file.txt" => "Header {\n  Body {\n    value: 1\n  }\n\n  // Comment\n}\n\nHeader {\n  Body {\n    value: 1\n  }\n\n  // Comment\n}\n" },
+  diff: r#"
+    file file.txt
+    label Header {
+
+       Body {
+    +    new: true
+         value: 1
+       }
+
+       // Comment
+
+    label Header {
+
+       Body {
+    +    new: true
+         value: 1
+       }
+
+       // Comment
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "Body {\n    new: true\n    value: 1\n  }";
+    assert_eq!(content.matches(needle).count(), 2);
+  }
+);
+
+test_patch_ok!(
+  applies_hunkless_with_multiple_labels_and_empty_lines_ordered,
+  initial_fs: { "file.txt" => "Header {\n  Body {\n    value: 1\n  }\n\n  // Comment\n}\n\nHeader {\n  Body {\n    value: 1\n  }\n\n  // Comment\n}\n" },
+  diff: r#"
+    file file.txt
+    label Header {
+
+       Body {
+    +    new: true
+         value: 1
+       }
+
+       // Comment
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "Body {\n    new: true\n    value: 1\n  }\n\n  // Comment\n}\n\nHeader {\n  Body {\n    value: 1\n  }";
+    assert!(content.contains(needle));
   }
 );

@@ -1,4 +1,4 @@
 #[macro_use]
 mod macros;
 
-mod command;
+mod cmd;

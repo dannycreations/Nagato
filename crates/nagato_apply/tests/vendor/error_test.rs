@@ -56,3 +56,16 @@ test_patch_err_with_line!(
   expected_line: 5,
   expected_kind: ErrorKind::CouldNotApplyHunk
 );
+
+test_patch_err!(
+  fails_without_hunkless_heuristic,
+  initial_fs: { "file.txt" => "actual line 1\nactual line 2\nold line\n" },
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+     wrong context 1
+     actual line 2
+    -old line
+    +new line
+  "#
+);

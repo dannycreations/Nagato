@@ -174,27 +174,21 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     // Attempt match
     let mut iter = lines_to_match.clone();
     let (match_pos, final_source, skipped_line_index) = match iter.next() {
-      Some((_, first)) => {
-        match self.search_match(source, hunk, iter, first) {
-          Ok((pos, src)) => (pos, src, None),
-          Err(e) if !hunk.has_header => {
-            // Hunkless heuristic: If an exact match fails for a hunk without a header,
-            // we attempt to skip the first context line. This handles cases where the
-            // first line might actually be a label or metadata that was misinterpreted
-            // as context by the parser.
-            let mut alt_iter = lines_to_match.clone();
-            let first_item = alt_iter.next();
-            match alt_iter.next() {
-              Some((_, second)) => self
-                .search_match(source, hunk, alt_iter, second)
-                .map(|(pos, src)| (pos, src, first_item.map(|(i, _)| i)))
-                .map_err(|_| e)?,
-              None => (0, source, first_item.map(|(i, _)| i)),
-            }
+      Some((_, first)) => match self.search_match(source, hunk, iter, first) {
+        Ok((pos, src)) => (pos, src, None),
+        Err(e) if !hunk.has_header => {
+          let mut alt_iter = lines_to_match.clone();
+          let first_item = alt_iter.next();
+          match alt_iter.next() {
+            Some((_, second)) => self
+              .search_match(source, hunk, alt_iter, second)
+              .map(|(pos, src)| (pos, src, first_item.map(|(i, _)| i)))
+              .map_err(|_| e)?,
+            None => (0, source, first_item.map(|(i, _)| i)),
           }
-          Err(e) => return Err(e),
         }
-      }
+        Err(e) => return Err(e),
+      },
       None => (0, source, None),
     };
 

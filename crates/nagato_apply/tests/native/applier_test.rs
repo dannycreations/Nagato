@@ -15,10 +15,9 @@ test_patch_ok!(
     +  addition line
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      " context line\n  addition line\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = " context line\n  addition line\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -40,10 +39,9 @@ test_patch_ok!(
       and a final context
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n some context\n some more context\n a final bit of context\nthe new line to add\n and more context\n and more context\n and a final context\nline 15\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n some context\n some more context\n a final bit of context\nthe new line to add\n and more context\n and more context\n and a final context\nline 15\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -135,10 +133,9 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     assert!(root.join("new_file.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("new_file.txt")).unwrap(),
-      "line 1\nline 2\n"
-    );
+    let content = fs::read_to_string(root.join("new_file.txt")).unwrap();
+    let needle = "line 1\nline 2\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -176,10 +173,9 @@ test_patch_ok!(
   assertions: |root| {
     assert!(!root.join("old_name.txt").exists());
     assert!(root.join("new_name.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("new_name.txt")).unwrap(),
-      "new file content\n"
-    );
+    let content = fs::read_to_string(root.join("new_name.txt")).unwrap();
+    let needle = "new file content\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -195,10 +191,9 @@ test_patch_ok!(
   assertions: |root| {
     assert!(!root.join("old_metadata.txt").exists());
     assert!(root.join("new_metadata.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("new_metadata.txt")).unwrap(),
-      "content"
-    );
+    let content = fs::read_to_string(root.join("new_metadata.txt")).unwrap();
+    let needle = "content";
+    assert_eq!(content, needle);
   }
 );
 
@@ -222,10 +217,9 @@ test_patch_ok!(
     +new line 5
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "new line 1\nnew line 2\nline 3\nnew line 4\nnew line 5\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "new line 1\nnew line 2\nline 3\nnew line 4\nnew line 5\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -240,10 +234,9 @@ test_patch_ok!(
   assertions: |root| {
     assert!(root.join("old_file.txt").exists());
     assert!(root.join("new_file.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("new_file.txt")).unwrap(),
-      "content"
-    );
+    let content = fs::read_to_string(root.join("new_file.txt")).unwrap();
+    let needle = "content";
+    assert_eq!(content, needle);
   }
 );
 
@@ -321,10 +314,9 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     assert!(root.join("new/dir/file.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("new/dir/file.txt")).unwrap(),
-      "hello world\n"
-    );
+    let content = fs::read_to_string(root.join("new/dir/file.txt")).unwrap();
+    let needle = "hello world\n";
+    assert_eq!(content, needle);
     assert!(root.join("new/dir").is_dir());
   }
 );
@@ -357,10 +349,9 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     assert!(root.join("empty.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("empty.txt")).unwrap(),
-      "line 1\nline 2\n"
-    );
+    let content = fs::read_to_string(root.join("empty.txt")).unwrap();
+    let needle = "line 1\nline 2\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -382,10 +373,9 @@ test_patch_ok!(
   assertions: |root| {
     use std::os::unix::fs::PermissionsExt;
     assert!(root.join("file.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "hello\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "hello\n";
+    assert_eq!(content, needle);
     let permissions = fs::metadata(root.join("file.txt"))
       .unwrap()
       .permissions();
@@ -403,10 +393,9 @@ test_patch_ok!(
     new mode 100755
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "hello\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "hello\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -437,10 +426,9 @@ test_patch_ok!(
     +modified3
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "line1\n\nmodified2\n\nmodified3\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "line1\n\nmodified2\n\nmodified3\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -456,10 +444,9 @@ test_patch_ok!(
     +modified 4
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      "line 1\nline 2\nline 3\nmodified 4\nline 5\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "line 1\nline 2\nline 3\nmodified 4\nline 5\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -475,10 +462,12 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle1 = "function b() {\n// modified content\n";
+    let needle2 = "function a() {\n// content\n}";
     // Function b should be changed
-    assert!(content.contains("function b() {\n// modified content\n"));
+    assert!(content.contains(needle1));
     // Function a should be unchanged
-    assert!(content.contains("function a() {\n// content\n}"));
+    assert!(content.contains(needle2));
   }
 );
 
@@ -505,14 +494,13 @@ test_patch_ok!(
     +file2 updated
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file1.txt")).unwrap(),
-      "file1 updated\n"
-    );
-    assert_eq!(
-      fs::read_to_string(root.join("file2.txt")).unwrap(),
-      "file2 updated\n"
-    );
+    let content1 = fs::read_to_string(root.join("file1.txt")).unwrap();
+    let needle1 = "file1 updated\n";
+    assert_eq!(content1, needle1);
+
+    let content2 = fs::read_to_string(root.join("file2.txt")).unwrap();
+    let needle2 = "file2 updated\n";
+    assert_eq!(content2, needle2);
   }
 );
 
@@ -537,9 +525,27 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     assert!(!root.join("to_delete.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("to_create.txt")).unwrap(),
-      "new file content\n"
-    );
+    let content = fs::read_to_string(root.join("to_create.txt")).unwrap();
+    let needle = "new file content\n";
+    assert_eq!(content, needle);
+  }
+);
+
+test_patch_ok!(
+  applies_expected_row_number_priority,
+  initial_fs: { "file.txt" => "same context\nwrong place\n\nsame context\nright place\n" },
+  diff: r#"
+    diff --git a/file.txt b/file.txt
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -4,2 +4,2 @@
+     same context
+    -right place
+    +modified place
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = "same context\nwrong place\n\nsame context\nmodified place\n";
+    assert_eq!(content, needle);
   }
 );

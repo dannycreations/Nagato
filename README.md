@@ -2,8 +2,6 @@
 
 ### Linux
 
-Install Nagato using `curl`:
-
 ```bash
 # Install latest
 curl -fsSL https://bit.ly/nagato-linux | bash
@@ -16,8 +14,6 @@ curl -fsSL https://bit.ly/nagato-linux | bash -s -- nightly
 
 ### Windows
 
-Install Nagato using PowerShell:
-
 ```powershell
 # Install latest
 irm https://bit.ly/nagato-windows | iex
@@ -27,7 +23,3 @@ irm https://bit.ly/nagato-windows | iex
 # Install nightly
 $env:NAGATO_VERSION='nightly'; irm https://bit.ly/nagato-windows | iex
 ```
-
-## Manual Installation
-
-You can also download the binaries directly from the [Releases](https://github.com/dannycreations/nagato/releases) page.

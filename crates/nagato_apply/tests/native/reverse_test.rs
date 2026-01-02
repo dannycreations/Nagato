@@ -16,10 +16,9 @@ test_patch_ok!(
       context 2
   "#,
   assertions: |root| {
-    assert_eq!(
-      fs::read_to_string(root.join("file.txt")).unwrap(),
-      " context 1\nold line\n context 2\n"
-    );
+    let content = fs::read_to_string(root.join("file.txt")).unwrap();
+    let needle = " context 1\nold line\n context 2\n";
+    assert_eq!(content, needle);
   }
 );
 
@@ -57,9 +56,8 @@ test_patch_ok!(
   "#,
   assertions: |root| {
     assert!(root.join("file_to_delete.txt").exists());
-    assert_eq!(
-      fs::read_to_string(root.join("file_to_delete.txt")).unwrap(),
-      "line 1\nline 2\n"
-    );
+    let content = fs::read_to_string(root.join("file_to_delete.txt")).unwrap();
+    let needle = "line 1\nline 2\n";
+    assert_eq!(content, needle);
   }
 );
