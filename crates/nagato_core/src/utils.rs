@@ -16,10 +16,9 @@ where
   T: TryFrom<u64>,
 {
   let mut num = 0u64;
-  let mut iter = bytes.iter().enumerate();
-
   let mut len = 0;
-  for (i, &b) in iter.by_ref() {
+
+  for &b in bytes {
     let digit = match b {
       b'0'..=b'9' => (b - b'0') as u32,
       b'a'..=b'z' => (b - b'a') as u32 + 10,
@@ -32,7 +31,7 @@ where
     }
 
     num = num.checked_mul(radix as u64)?.checked_add(digit as u64)?;
-    len = i + 1;
+    len += 1;
   }
 
   if len == 0 {

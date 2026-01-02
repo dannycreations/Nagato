@@ -14,10 +14,8 @@ pub enum ErrorKind {
   Persist(#[from] PersistError),
 
   // Parse Errors
-  #[error("Invalid hunk range line")]
-  InvalidHunkRangeLine,
-  #[error("Invalid hunk range span")]
-  InvalidHunkRangeSpan,
+  #[error("Invalid hunk range")]
+  InvalidHunkRange,
   #[error("Missing old range in hunk header")]
   MissingOldRange,
   #[error("Missing new range in hunk header")]

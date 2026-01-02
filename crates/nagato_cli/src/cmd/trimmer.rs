@@ -15,41 +15,38 @@ pub fn process_trim(files: &[OsString], split: bool) -> Result<(), Error> {
     // SAFETY: Use Mmap for consistent, high-performance reading of patch files.
     let content = unsafe { Mmap::map(&file)? };
 
+    let patches: Vec<_> = Parser::new(&content).collect::<Result<_, _>>()?;
+
     if split {
-      for patch_result in Parser::new(&content) {
-        let patch = patch_result?;
-        let target_filename = String::from_utf8_lossy(patch.filename());
+      for patch in patches {
+        let target = String::from_utf8_lossy(patch.filename());
+        let mut out_path = PathBuf::from(path);
+        out_path.set_file_name(format!("{}.trim.patch", target));
 
-        let mut output_path = PathBuf::from(path);
-        output_path.set_file_name(format!("{}.trim.patch", target_filename));
-
-        // Ensure parent directory exists for the split patch file.
-        if let Some(parent) = output_path.parent() {
+        if let Some(parent) = out_path.parent() {
           fs::create_dir_all(parent)?;
         }
 
-        let mut trimmed_content = Vec::new();
-        patch.to_bytes(&mut trimmed_content)?;
-        fs::write(&output_path, &trimmed_content)?;
+        let mut buf = Vec::new();
+        patch.to_bytes(&mut buf)?;
+        fs::write(out_path, buf)?;
       }
     } else {
-      let mut trimmed_content = Vec::new();
-      for (i, patch_result) in Parser::new(&content).enumerate() {
-        let patch = patch_result?;
+      let mut buf = Vec::new();
+      for (i, patch) in patches.iter().enumerate() {
         if i > 0 {
-          trimmed_content.push(b'\n');
+          buf.push(b'\n');
         }
-        patch.to_bytes(&mut trimmed_content)?;
+        patch.to_bytes(&mut buf)?;
       }
 
-      let mut output_path = PathBuf::from(path);
-      let new_extension = match output_path.extension() {
-        Some(ext) => format!("trim.{}", ext.to_string_lossy()),
-        None => "trim.patch".to_string(),
-      };
-      output_path.set_extension(new_extension);
-
-      fs::write(&output_path, &trimmed_content)?;
+      let mut out_path = PathBuf::from(path);
+      let ext = out_path
+        .extension()
+        .map(|e| format!("trim.{}", e.to_string_lossy()))
+        .unwrap_or_else(|| "trim.patch".to_string());
+      out_path.set_extension(ext);
+      fs::write(out_path, buf)?;
     }
   }
   Ok(())

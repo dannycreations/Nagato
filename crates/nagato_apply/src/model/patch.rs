@@ -83,17 +83,8 @@ impl<'a> Patch<'a> {
 
   /// Serialize the patch into the Nagato "trimmed" format.
   pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {
-    // We use the new_file as the primary name if available, otherwise old_file.
-    // We avoid using /dev/null as the target file name for trimmed output.
-    let target_file =
-      if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
-        self.new_file
-      } else {
-        self.old_file
-      };
-
     out.write_all(b"file ")?;
-    out.write_all(target_file)?;
+    out.write_all(self.filename())?;
     out.write_all(b"\n")?;
 
     for (i, hunk) in self.hunks.iter().enumerate() {

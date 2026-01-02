@@ -165,20 +165,18 @@ pub fn parse_hunk<'a>(
 /// Parse a range in the format "line[,span]".
 fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
   let (line, rest) =
-    parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRangeLine)?;
+    parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRange)?;
 
   if rest.is_empty() {
     return Ok((line, 1));
   }
 
-  let rest = rest
-    .strip_prefix(b",")
-    .ok_or(ErrorKind::InvalidHunkRangeLine)?;
+  let rest = rest.strip_prefix(b",").ok_or(ErrorKind::InvalidHunkRange)?;
   let (span, rest) =
-    parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRangeSpan)?;
+    parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRange)?;
 
   if !rest.is_empty() {
-    return Err(ErrorKind::InvalidHunkRangeSpan);
+    return Err(ErrorKind::InvalidHunkRange);
   }
 
   Ok((line, span))
