@@ -21,8 +21,8 @@ pub use clap::*;
 pub fn run(cli: &Cli) -> Result<(), Error> {
   if let Some(command) = &cli.command {
     match command {
-      Commands::Trim { files } => {
-        return process_trim(files);
+      Commands::Trim { files, split } => {
+        return process_trim(files, *split);
       }
     }
   }

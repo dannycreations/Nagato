@@ -34,5 +34,8 @@ pub enum Commands {
   Trim {
     /// The path to the patch file(s) to trim.
     files: Vec<OsString>,
+    /// Split multi-file patches into independent files.
+    #[arg(short, long)]
+    split: bool,
   },
 }

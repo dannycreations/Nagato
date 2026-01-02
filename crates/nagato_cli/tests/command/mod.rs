@@ -1,1 +1,2 @@
-mod argument_test;
+mod args_test;
+mod trim_test;

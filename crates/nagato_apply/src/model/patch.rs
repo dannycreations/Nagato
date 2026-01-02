@@ -57,6 +57,15 @@ impl<'a> Patch<'a> {
     !self.hunks.is_empty() || !self.binary_fragments.is_empty()
   }
 
+  /// Returns the target filename for the patch.
+  pub fn filename(&self) -> &'a [u8] {
+    if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
+      self.new_file
+    } else {
+      self.old_file
+    }
+  }
+
   /// Invert the patch for reverse application.
   pub fn invert(mut self) -> Self {
     mem::swap(&mut self.old_file, &mut self.new_file);
