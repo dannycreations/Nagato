@@ -120,10 +120,10 @@ test_lexer_ok!(
   },
   TokenKind::Deletion(b"hello"),
   TokenKind::Deletion(b"world"),
-  TokenKind::OldFileNoNewline,
+  TokenKind::NoNewline,
   TokenKind::Addition(b"hello"),
   TokenKind::Addition(b"world"),
-  TokenKind::NewFileNoNewline
+  TokenKind::NoNewline
 );
 
 test_lexer_ok!(

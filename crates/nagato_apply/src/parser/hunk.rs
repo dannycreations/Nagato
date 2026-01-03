@@ -69,30 +69,40 @@ pub fn collect_hunk_lines<'a>(
       break;
     }
 
-    let line = match &item.token {
+    let (line, is_no_newline) = match &item.token {
       TokenKind::Addition(text) => {
         new_span += 1;
-        Some(Line {
-          kind: LineKind::Addition,
-          text,
-        })
+        (
+          Some(Line {
+            kind: LineKind::Addition,
+            text,
+          }),
+          false,
+        )
       }
       TokenKind::Deletion(text) => {
         old_span += 1;
-        Some(Line {
-          kind: LineKind::Deletion,
-          text,
-        })
+        (
+          Some(Line {
+            kind: LineKind::Deletion,
+            text,
+          }),
+          false,
+        )
       }
       TokenKind::Context(text) => {
         old_span += 1;
         new_span += 1;
-        Some(Line {
-          kind: LineKind::Context,
-          text,
-        })
+        (
+          Some(Line {
+            kind: LineKind::Context,
+            text,
+          }),
+          false,
+        )
       }
-      _ => None,
+      TokenKind::NoNewline => (None, true),
+      _ => (None, false),
     };
 
     if let Some(line) = line {
@@ -101,12 +111,19 @@ pub fn collect_hunk_lines<'a>(
       continue;
     }
 
-    match &item.token {
-      TokenKind::OldFileNoNewline => patch.old_file_no_newline = true,
-      TokenKind::NewFileNoNewline => patch.new_file_no_newline = true,
-      _ => break,
+    if is_no_newline {
+      if new_span > 0
+        && lines.last().is_some_and(|l| l.kind != LineKind::Deletion)
+      {
+        patch.new_file_no_newline = true;
+      } else {
+        patch.old_file_no_newline = true;
+      }
+      parser.tokens.next();
+      continue;
     }
-    parser.tokens.next();
+
+    break;
   }
   Ok((old_span, new_span))
 }

@@ -46,7 +46,6 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line.is_empty() {
-      self.is_new_file_context = true;
       return Ok(TokenKind::Context(&[]));
     }
 
@@ -55,7 +54,6 @@ impl<'a> Lexer<'a> {
         if let Some(rest) = line.strip_prefix(b"+++ ") {
           Ok(TokenKind::NewFile(strip_git_prefix(rest)))
         } else {
-          self.is_new_file_context = true;
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
@@ -63,14 +61,10 @@ impl<'a> Lexer<'a> {
         if let Some(rest) = line.strip_prefix(b"--- ") {
           Ok(TokenKind::OldFile(strip_git_prefix(rest)))
         } else {
-          self.is_new_file_context = false;
           Ok(TokenKind::Deletion(&line[1..]))
         }
       }
-      Some(b' ') => {
-        self.is_new_file_context = true;
-        Ok(TokenKind::Context(&line[1..]))
-      }
+      Some(b' ') => Ok(TokenKind::Context(&line[1..])),
       Some(b'@') if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
       Some(b'd') => self.parse_git_header(line),
       Some(b'f') if line.starts_with(b"file ") => {
@@ -102,11 +96,7 @@ impl<'a> Lexer<'a> {
         self.parse_binary_files_line(line)
       }
       Some(b'\\') if line == b"\\ No newline at end of file" => {
-        if self.is_new_file_context {
-          Ok(TokenKind::NewFileNoNewline)
-        } else {
-          Ok(TokenKind::OldFileNoNewline)
-        }
+        Ok(TokenKind::NoNewline)
       }
       _ => Err(ErrorKind::UnexpectedLine),
     }
@@ -118,7 +108,6 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     let header = &line[3..];
-    self.is_new_file_context = false;
     let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
     let content = &header[..content_end];
     let mut parts = content.fields();

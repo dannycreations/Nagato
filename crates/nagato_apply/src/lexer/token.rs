@@ -29,10 +29,8 @@ pub enum TokenKind<'a> {
   Deletion(&'a [u8]),
   /// A line that is part of the context.
   Context(&'a [u8]),
-  /// Indicates that there is no newline at the end of the old file.
-  OldFileNoNewline,
-  /// Indicates that there is no newline at the end of the new file.
-  NewFileNoNewline,
+  /// Indicates that there is no newline at the end of the file.
+  NoNewline,
   /// The source file in a copy operation.
   CopyFrom(&'a [u8]),
   /// The destination file in a copy operation.

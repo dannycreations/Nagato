@@ -4,13 +4,12 @@ use std::{
   path::PathBuf,
 };
 
+use nagato_apply::Parser;
 use nagato_core::{Error, FileSystem};
-use processor::process_patch;
 use source::PatchSource;
 use trimmer::process_trim;
 
 mod args;
-mod processor;
 mod source;
 mod trimmer;
 
@@ -44,7 +43,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   // Process patches from stdin or specified files.
   for source_res in PatchSource::iter(cli.files.clone()) {
     let source = source_res?;
-    process_patch(&fs, source.content(), cli.reverse, cli.check)
+    Parser::apply_to_fs(&fs, source.content(), cli.reverse, cli.check)
       .map_err(|e| e.with_file(source.name().to_string()))?;
   }
 

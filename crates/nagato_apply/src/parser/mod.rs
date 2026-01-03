@@ -116,3 +116,18 @@ impl<'a> Iterator for Parser<'a> {
     }
   }
 }
+
+impl<'a> Parser<'a> {
+  /// Iterate over patches and apply them to the file system.
+  pub fn apply_to_fs(
+    fs: &nagato_core::FileSystem,
+    input: &'a [u8],
+    reverse: bool,
+    check: bool,
+  ) -> Result<(), Error> {
+    for patch in Self::new(input) {
+      crate::patch_file(fs, patch?, reverse, check)?;
+    }
+    Ok(())
+  }
+}

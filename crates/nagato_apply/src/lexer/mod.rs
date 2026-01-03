@@ -22,7 +22,6 @@ pub struct Lexer<'a> {
   input: &'a [u8],
   pos: usize,
   line_num: u32,
-  is_new_file_context: bool,
   mode: LexerMode,
 }
 
@@ -33,7 +32,6 @@ impl<'a> Lexer<'a> {
       input,
       pos: 0,
       line_num: 0,
-      is_new_file_context: false,
       mode: LexerMode::Text,
     }
   }
