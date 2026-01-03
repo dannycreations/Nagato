@@ -93,7 +93,16 @@ impl FileSystem {
     for component in path.components() {
       match component {
         // Normal components are appended to the root.
-        Component::Normal(c) => dest.push(c),
+        Component::Normal(c) => {
+          // Check for Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
+          // These are problematic on Windows and should be avoided for cross-platform safety.
+          let s = c.to_string_lossy();
+          let base = s.split('.').next().unwrap_or(&s);
+          if is_reserved_name(base) {
+            return Err(Error::new(ErrorKind::InvalidPath));
+          }
+          dest.push(c);
+        }
         // Current directory components are safely ignored.
         Component::CurDir => {}
         // Absolute paths, prefixes, and parent directory traversals are strictly forbidden
@@ -115,5 +124,19 @@ impl FileSystem {
       fs::create_dir_all(parent)?;
     }
     Ok(p)
+  }
+}
+
+/// Check if a name is a Windows reserved device name.
+fn is_reserved_name(name: &str) -> bool {
+  match name.to_ascii_uppercase().as_str() {
+    "CON" | "PRN" | "AUX" | "NUL" => true,
+    s if s.starts_with("COM") && s.len() == 4 => {
+      s[3..].chars().next().is_some_and(|c| c.is_ascii_digit())
+    }
+    s if s.starts_with("LPT") && s.len() == 4 => {
+      s[3..].chars().next().is_some_and(|c| c.is_ascii_digit())
+    }
+    _ => false,
   }
 }

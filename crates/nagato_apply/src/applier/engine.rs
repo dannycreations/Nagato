@@ -7,24 +7,48 @@ use sha1::{Digest, Sha1};
 
 use crate::{binary, BinaryKind, Hunk, Line, LineKind, Patch};
 
+/// Helper to handle line-based writing with automatic newline insertion.
+struct LineWriter<'a, W: Write + ?Sized> {
+  output: &'a mut W,
+  first: bool,
+}
+
+impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
+  #[inline]
+  fn new(output: &'a mut W) -> Self {
+    Self {
+      output,
+      first: true,
+    }
+  }
+
+  #[inline]
+  fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
+    if !self.first {
+      self.output.write_all(b"\n")?;
+    } else {
+      self.first = false;
+    }
+    self.output.write_all(line).map_err(Into::into)
+  }
+}
+
 /// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
-  pub output: &'b mut W,
+  writer: LineWriter<'b, W>,
   /// The full original source. We use slices to track progress.
   pub source: &'s [u8],
   /// The current byte offset in the full source.
   pub pos: usize,
-  pub first_line: bool,
   pub current_source_line: u32,
 }
 
 impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   pub fn new(output: &'b mut W, source: &'s [u8]) -> Self {
     Self {
-      output,
+      writer: LineWriter::new(output),
       source,
       pos: 0,
-      first_line: true,
       current_source_line: 0,
     }
   }
@@ -39,12 +63,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// We prepend a newline for every line except the first to ensure correct formatting.
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
-    if !self.first_line {
-      self.output.write_all(b"\n")?;
-    } else {
-      self.first_line = false;
-    }
-    self.output.write_all(line).map_err(Into::into)
+    self.writer.write_line(line)
   }
 
   /// Write a block of data, splitting it into lines and updating the source line counter.
@@ -253,14 +272,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     for fragment in &patch.binary_fragments {
       match fragment.kind {
         BinaryKind::Literal => {
-          return binary::decode_base85(&fragment.data, &mut self.output);
+          return binary::decode_base85(&fragment.data, self.writer.output);
         }
         BinaryKind::Delta => {
           let mut decoded = binary::new_base85_decoder(&fragment.data);
           match binary::apply_delta(
             &mut decoded,
             self.source_at(),
-            &mut self.output,
+            self.writer.output,
           ) {
             Ok(_) => return Ok(()),
             Err(e) if e.kind == ErrorKind::BinaryPatchSourceMismatch => {
@@ -286,28 +305,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.verify_binary_source(patch)?;
 
     if !patch.hunks.is_empty() && !patch.hunks[0].has_header {
-      // Hunkless patches (no @@ headers) may be out of order.
-      // We sort them by their best match position in the source to ensure sequential application.
-      let mut hunks_with_pos = Vec::with_capacity(patch.hunks.len());
-      for hunk in patch.hunks.iter() {
-        let mut lines = hunk
-          .lines
-          .iter()
-          .enumerate()
-          .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-
-        let (pos, _) = match lines.next() {
-          Some((_, first)) => {
-            self.search_match(self.source_at(), hunk, lines, first)?
-          }
-          None => (0, self.source_at()),
-        };
-        hunks_with_pos.push((pos, hunk));
-      }
-      hunks_with_pos.sort_by_key(|(pos, _)| *pos);
-      for (_, hunk) in hunks_with_pos {
-        self.process_hunk(hunk)?;
-      }
+      self.process_hunkless_patches(patch)?;
     } else {
       for hunk in patch.hunks.iter() {
         self.process_hunk(hunk)?;
@@ -318,8 +316,38 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.flush_remaining_source()?;
 
     // Ensure final newline unless suppressed by patch metadata.
-    if !patch.new_file_no_newline && !patch.binary && !self.first_line {
-      self.output.write_all(b"\n")?;
+    if !patch.new_file_no_newline && !patch.binary && !self.writer.first {
+      self.writer.output.write_all(b"\n")?;
+    }
+    Ok(())
+  }
+
+  /// Process hunkless patches by sorting them based on their match position.
+  fn process_hunkless_patches(
+    &mut self,
+    patch: &Patch<'_>,
+  ) -> Result<(), Error> {
+    // Hunkless patches (no @@ headers) may be out of order.
+    // We sort them by their best match position in the source to ensure sequential application.
+    let mut hunks_with_pos = Vec::with_capacity(patch.hunks.len());
+    for hunk in patch.hunks.iter() {
+      let mut lines = hunk
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
+
+      let (pos, _) = match lines.next() {
+        Some((_, first)) => {
+          self.search_match(self.source_at(), hunk, lines, first)?
+        }
+        None => (0, self.source_at()),
+      };
+      hunks_with_pos.push((pos, hunk));
+    }
+    hunks_with_pos.sort_by_key(|(pos, _)| *pos);
+    for (_, hunk) in hunks_with_pos {
+      self.process_hunk(hunk)?;
     }
     Ok(())
   }

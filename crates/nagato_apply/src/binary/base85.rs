@@ -138,7 +138,7 @@ impl<'a> Read for Base85Reader<'a> {
 
 pub fn decode_base85(
   lines: &[&[u8]],
-  writer: &mut impl Write,
+  writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
   use flate2::read::ZlibDecoder;
   let mut decoder = ZlibDecoder::new(Base85Reader::new(lines));

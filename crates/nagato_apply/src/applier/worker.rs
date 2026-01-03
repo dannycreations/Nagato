@@ -112,7 +112,12 @@ pub fn patch_file_worker(
   };
 
   result.map_err(|e| {
-    e.with_file(String::from_utf8_lossy(patch.new_file).into_owned())
+    let file = if patch.new_file.is_dev_null() {
+      patch.old_file
+    } else {
+      patch.new_file
+    };
+    e.with_file(String::from_utf8_lossy(file).into_owned())
   })?;
 
   if !check && !patch.new_file.is_dev_null() {

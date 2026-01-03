@@ -32,7 +32,7 @@ fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
 pub fn apply_delta(
   mut delta: impl Read,
   source: &[u8],
-  writer: &mut impl Write,
+  writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
   let source_size = read_variable_length_int(&mut delta)?;
 
