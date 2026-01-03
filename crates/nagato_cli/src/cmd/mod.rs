@@ -44,7 +44,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   for source_res in PatchSource::iter(cli.files.clone()) {
     let source = source_res?;
     Parser::apply_to_fs(&fs, source.content(), cli.reverse, cli.check)
-      .map_err(|e| e.with_file(source.name().to_string()))?;
+      .map_err(|e| e.with_origin(source.name().to_string()))?;
   }
 
   Ok(())

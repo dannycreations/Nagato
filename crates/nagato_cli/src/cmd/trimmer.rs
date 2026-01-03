@@ -15,7 +15,9 @@ pub fn process_trim(files: &[OsString], split: bool) -> Result<(), Error> {
     // SAFETY: Use Mmap for consistent, high-performance reading of patch files.
     let content = unsafe { Mmap::map(&file)? };
 
-    let patches: Vec<_> = Parser::new(&content).collect::<Result<_, _>>()?;
+    let patches: Vec<_> = Parser::new(&content)
+      .collect::<Result<Vec<_>, _>>()
+      .map_err(|e| e.with_origin(file_name.clone()))?;
 
     if split {
       for patch in patches {

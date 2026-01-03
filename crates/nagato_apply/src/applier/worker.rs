@@ -26,60 +26,50 @@ fn apply_to_writer(
   apply(writer, patch, source.as_deref().unwrap_or(&[]))
 }
 
-/// Handle metadata-only changes (renames, copies, or creating empty files).
-fn handle_metadata_change(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-  check: bool,
-) -> Result<(), Error> {
-  if check {
-    return Ok(());
+/// Ensure the destination file does not exist when creating a new file.
+fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
+  if fs.exists(path) {
+    Err(Error::new(ErrorKind::Io(std::io::Error::new(
+      std::io::ErrorKind::AlreadyExists,
+      "Destination file already exists",
+    ))))
+  } else {
+    Ok(())
   }
-  let source_path = patch.source_file();
-  if patch.rename_to.is_some() {
-    fs.rename(source_path, patch.new_file)?;
-  } else if patch.copy_to.is_some() {
-    fs.copy(source_path, patch.new_file)?;
-  } else if patch.old_file.is_dev_null() {
-    // Ensure destination file does not exist when creating a new file.
-    if fs.exists(patch.new_file) {
-      return Err(Error::new(ErrorKind::Io(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "Destination file already exists",
-      ))));
-    }
-    fs.write(patch.new_file)?.commit()?;
-  }
-  Ok(())
 }
 
-/// Handle content changes (including deletions) by applying the patch.
-fn handle_application(
+/// The main worker for applying a patch to the file system.
+/// Handles content changes, metadata updates, and deletions in a unified pipeline.
+pub fn patch_file_worker(
   fs: &FileSystem,
   patch: &Patch<'_>,
   check: bool,
 ) -> Result<(), Error> {
+  if patch.binary && !patch.hunks.is_empty() {
+    return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
+  }
+
   let is_deletion = patch.new_file.is_dev_null();
-  if check || is_deletion {
+  let has_content = patch.has_content_changes();
+
+  let result = if check || is_deletion {
+    // Dry-run for checks, or full application to sink for deletions.
     apply_to_writer(fs, patch, &mut sink())?;
     if !check && is_deletion {
-      // Ensure source file exists before deletion.
-      if !patch.source_file().is_dev_null() && !fs.exists(patch.source_file()) {
+      let source_path = patch.source_file();
+      if !source_path.is_dev_null() && !fs.exists(source_path) {
         return Err(Error::new(ErrorKind::Io(std::io::Error::new(
           std::io::ErrorKind::NotFound,
           "Source file to delete not found",
         ))));
       }
-      fs.remove_file(patch.source_file()).ignore_not_found()?;
+      fs.remove_file(source_path).ignore_not_found()?;
     }
     Ok(())
-  } else {
-    // Ensure destination file does not exist when creating a new file via application.
-    if patch.old_file.is_dev_null() && fs.exists(patch.new_file) {
-      return Err(Error::new(ErrorKind::Io(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "Destination file already exists",
-      ))));
+  } else if has_content {
+    // Atomic content application.
+    if patch.old_file.is_dev_null() {
+      ensure_not_exists(fs, patch.new_file)?;
     }
 
     let mut writer = fs.write(patch.new_file)?;
@@ -91,33 +81,22 @@ fn handle_application(
       fs.remove_file(source_path).ignore_not_found()?;
     }
     Ok(())
-  }
-}
-
-/// The main worker for applying a patch to the file system.
-pub fn patch_file_worker(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-  check: bool,
-) -> Result<(), Error> {
-  if patch.binary && !patch.hunks.is_empty() {
-    return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
-  }
-
-  let is_deletion = patch.new_file.is_dev_null();
-  let result = if is_deletion || patch.has_content_changes() {
-    handle_application(fs, patch, check)
   } else {
-    handle_metadata_change(fs, patch, check)
+    // Metadata-only changes (rename, copy, or create empty).
+    let source_path = patch.source_file();
+    if patch.rename_to.is_some() {
+      fs.rename(source_path, patch.new_file)?;
+    } else if patch.copy_to.is_some() {
+      fs.copy(source_path, patch.new_file)?;
+    } else if patch.old_file.is_dev_null() {
+      ensure_not_exists(fs, patch.new_file)?;
+      fs.write(patch.new_file)?.commit()?;
+    }
+    Ok(())
   };
 
-  result.map_err(|e| {
-    let file = if patch.new_file.is_dev_null() {
-      patch.old_file
-    } else {
-      patch.new_file
-    };
-    e.with_file(String::from_utf8_lossy(file).into_owned())
+  result.map_err(|e: Error| {
+    e.with_file(String::from_utf8_lossy(patch.filename()).into_owned())
   })?;
 
   if !check && !patch.new_file.is_dev_null() {

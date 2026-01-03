@@ -1,37 +1,10 @@
 use std::io::Write;
 
 use bstr::ByteSlice;
-use memchr::memmem::Finder;
-use nagato_core::{get_line, Error, ErrorKind};
+use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
-use crate::{binary, BinaryKind, Hunk, Line, LineKind, Patch};
-
-/// Helper to handle line-based writing with automatic newline insertion.
-struct LineWriter<'a, W: Write + ?Sized> {
-  output: &'a mut W,
-  first: bool,
-}
-
-impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
-  #[inline]
-  fn new(output: &'a mut W) -> Self {
-    Self {
-      output,
-      first: true,
-    }
-  }
-
-  #[inline]
-  fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
-    if !self.first {
-      self.output.write_all(b"\n")?;
-    } else {
-      self.first = false;
-    }
-    self.output.write_all(line).map_err(Into::into)
-  }
-}
+use crate::{binary, BinaryKind, Hunk, LineKind, Matcher, Patch};
 
 /// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
@@ -63,10 +36,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// We prepend a newline for every line except the first to ensure correct formatting.
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
-    self.writer.write_line(line)
+    self.writer.write_line(line).map_err(Into::into)
   }
 
   /// Write a block of data, splitting it into lines and updating the source line counter.
+  /// Uses bstr's line iterator for efficient byte-level line splitting.
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
     for line in block.lines() {
       self.write_line(line)?;
@@ -75,141 +49,26 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  /// Verify if the source matches the expected hunk lines.
-  #[inline]
-  pub fn verify_match<'p>(
-    &self,
-    mut source: &'s [u8],
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
-    hunk: &Hunk,
-  ) -> Result<&'s [u8], Error> {
-    for (offset, hunk_line) in lines_to_match {
-      let (line, next_source) = get_line(source).ok_or_else(|| {
-        Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + offset as u32,
-        )
-      })?;
-
-      if line != hunk_line.text {
-        return Err(Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + offset as u32,
-        ));
-      }
-      source = next_source;
-    }
-    Ok(source)
-  }
-
-  /// Extract the search buffer based on hunk labels if present.
-  fn get_search_buffer(
-    &self,
-    buffer: &'s [u8],
-    hunk: &Hunk,
-  ) -> (&'s [u8], usize) {
-    hunk
-      .label
-      .and_then(|label| {
-        buffer
-          .find(label)
-          .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
-          .map(|pos| {
-            let line_end = buffer[pos..]
-              .find_byte(b'\n')
-              .map(|i| pos + i + 1)
-              .unwrap_or(buffer.len());
-            (&buffer[line_end..], line_end)
-          })
-      })
-      .unwrap_or((buffer, 0))
-  }
-
-  #[inline]
-  fn search_match<'p>(
-    &self,
-    buffer: &'s [u8],
-    hunk: &Hunk<'p>,
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
-    first_line_to_match: &Line,
-  ) -> Result<(usize, &'s [u8]), Error> {
-    let needle = first_line_to_match.text;
-    let finder = Finder::new(needle);
-    let (search_buffer, buffer_offset) = self.get_search_buffer(buffer, hunk);
-
-    let mut best_error = None;
-    let mut max_offset = 0;
-
-    for match_pos_rel in finder.find_iter(search_buffer) {
-      let match_pos = buffer_offset + match_pos_rel;
-      if match_pos > 0 && buffer[match_pos - 1] != b'\n' {
-        continue;
-      }
-
-      let end_pos = match_pos + needle.len();
-      let next_source = match &buffer[end_pos..] {
-        // Handle all common line ending variations and EOF.
-        [b'\n', rest @ ..] | [b'\r', b'\n', rest @ ..] | [b'\r', rest @ ..] => {
-          rest
-        }
-        [] => &[],
-        // If the match isn't followed by a newline or EOF, it's a partial line match and should be skipped.
-        _ => continue,
-      };
-
-      match self.verify_match(next_source, lines_to_match.clone(), hunk) {
-        Ok(final_source) => return Ok((match_pos, final_source)),
-        Err(e) => {
-          let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
-          if offset >= max_offset {
-            max_offset = offset;
-            best_error = Some(e);
-          }
-        }
-      }
-    }
-
-    Err(best_error.unwrap_or_else(|| {
-      let error_line =
-        hunk.patch_line_num + if hunk.has_header { 0 } else { 1 };
-      Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
-    }))
-  }
-
   /// Find and apply a single hunk to the source.
   #[inline]
   pub fn find_and_apply_hunk<'p>(
     &mut self,
     hunk: &Hunk<'p>,
   ) -> Result<(), Error> {
-    let lines_to_match = hunk
-      .lines
-      .iter()
-      .enumerate()
-      .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-
     let source = self.source_at();
+    let matcher = Matcher;
 
     // Attempt match
-    let mut iter = lines_to_match.clone();
-    let (match_pos, final_source, skipped_line_index) = match iter.next() {
-      Some((_, first)) => match self.search_match(source, hunk, iter, first) {
-        Ok((pos, src)) => (pos, src, None),
-        Err(e) if !hunk.has_header => {
-          let mut alt_iter = lines_to_match.clone();
-          let first_item = alt_iter.next();
-          match alt_iter.next() {
-            Some((_, second)) => self
-              .search_match(source, hunk, alt_iter, second)
-              .map(|(pos, src)| (pos, src, first_item.map(|(i, _)| i)))
-              .map_err(|_| e)?,
-            None => (0, source, first_item.map(|(i, _)| i)),
-          }
+    let (match_pos, final_source, skipped_line_index) = matcher
+      .find_match(source, hunk)
+      .map(|(pos, src)| (pos, src, None))
+      .or_else(|e| {
+        if !hunk.has_header {
+          matcher.find_match_recovery(source, hunk)
+        } else {
+          Err(e)
         }
-        Err(e) => return Err(e),
-      },
-      None => (0, source, None),
-    };
+      })?;
 
     let skipped = &source[..match_pos];
     self.write_block(skipped)?;
@@ -251,7 +110,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       {
         let source = self.source_at();
         let mut hasher = Sha1::new();
-        write!(hasher, "blob {}\0", source.len()).unwrap();
+        let _ = write!(hasher, "blob {}\0", source.len());
         hasher.update(source);
         let result = hasher.finalize();
         let mut hex_hash = [0u8; 40];
@@ -272,14 +131,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     for fragment in &patch.binary_fragments {
       match fragment.kind {
         BinaryKind::Literal => {
-          return binary::decode_base85(&fragment.data, self.writer.output);
+          return binary::decode_base85(&fragment.data, self.writer.output());
         }
         BinaryKind::Delta => {
           let mut decoded = binary::new_base85_decoder(&fragment.data);
           match binary::apply_delta(
             &mut decoded,
             self.source_at(),
-            self.writer.output,
+            self.writer.output(),
           ) {
             Ok(_) => return Ok(()),
             Err(e) if e.kind == ErrorKind::BinaryPatchSourceMismatch => {
@@ -316,8 +175,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.flush_remaining_source()?;
 
     // Ensure final newline unless suppressed by patch metadata.
-    if !patch.new_file_no_newline && !patch.binary && !self.writer.first {
-      self.writer.output.write_all(b"\n")?;
+    if !patch.new_file_no_newline && !patch.binary {
+      self.writer.ensure_newline().map_err(Error::from)?;
     }
     Ok(())
   }
@@ -330,19 +189,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     // Hunkless patches (no @@ headers) may be out of order.
     // We sort them by their best match position in the source to ensure sequential application.
     let mut hunks_with_pos = Vec::with_capacity(patch.hunks.len());
+    let matcher = Matcher;
     for hunk in patch.hunks.iter() {
-      let mut lines = hunk
-        .lines
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-
-      let (pos, _) = match lines.next() {
-        Some((_, first)) => {
-          self.search_match(self.source_at(), hunk, lines, first)?
-        }
-        None => (0, self.source_at()),
-      };
+      let (pos, _) = matcher.find_match(self.source_at(), hunk)?;
       hunks_with_pos.push((pos, hunk));
     }
     hunks_with_pos.sort_by_key(|(pos, _)| *pos);

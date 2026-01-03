@@ -32,7 +32,7 @@ impl<'a> Lexer<'a> {
       || line.starts_with(b"--- ")
       || line.starts_with(b"+++ ")
     {
-      self.mode = LexerMode::Text;
+      self.set_mode(LexerMode::Text);
       return self.tokenize_text(line);
     }
 
@@ -75,7 +75,7 @@ impl<'a> Lexer<'a> {
         })
       }
       Some(b'G') if line == b"GIT binary patch" => {
-        self.mode = LexerMode::Binary;
+        self.set_mode(LexerMode::Binary);
         Ok(TokenKind::GitBinaryPatchHeader)
       }
       Some(b'i') if line.starts_with(b"index ") => self.parse_index_line(line),

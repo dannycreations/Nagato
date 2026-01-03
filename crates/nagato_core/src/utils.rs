@@ -1,3 +1,5 @@
+use std::io::{Result as IoResult, Write};
+
 use bstr::ByteSlice;
 
 /// Strip common git prefixes "a/" and "b/" from a path.
@@ -51,4 +53,68 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
 
   let (line, rest) = source.split_once_str(b"\n").unwrap_or((source, &[]));
   Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
+}
+
+/// Helper to handle line-based writing with automatic newline insertion.
+/// Ensures we only insert newlines between lines, not before the first or after the last.
+pub struct LineWriter<'a, W: Write + ?Sized> {
+  output: &'a mut W,
+  /// Tracks if we've written anything yet to manage inter-line newlines.
+  is_first_line: bool,
+}
+
+impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
+  #[inline]
+  pub fn new(output: &'a mut W) -> Self {
+    Self {
+      output,
+      is_first_line: true,
+    }
+  }
+
+  /// Write a line to the output. Prepends a newline if it's not the first line.
+  #[inline]
+  pub fn write_line(&mut self, line: &[u8]) -> IoResult<()> {
+    self.ensure_newline()?;
+    self.output.write_all(line)
+  }
+
+  /// Ensure a newline is written before the next content, unless it's the first line.
+  #[inline]
+  pub fn ensure_newline(&mut self) -> IoResult<()> {
+    if !self.is_first_line {
+      self.output.write_all(b"\n")?;
+    } else {
+      self.is_first_line = false;
+    }
+    Ok(())
+  }
+
+  /// Write raw bytes to the underlying output.
+  #[inline]
+  pub fn write_bytes(&mut self, bytes: &[u8]) -> IoResult<()> {
+    if !bytes.is_empty() {
+      self.is_first_line = false;
+    }
+    self.output.write_all(bytes)
+  }
+
+  /// Write a raw newline character.
+  #[inline]
+  pub fn write_newline(&mut self) -> IoResult<()> {
+    self.is_first_line = false;
+    self.output.write_all(b"\n")
+  }
+
+  /// Check if no lines have been written yet.
+  #[inline]
+  pub fn is_first_line(&self) -> bool {
+    self.is_first_line
+  }
+
+  /// Access the underlying output writer.
+  #[inline]
+  pub fn output(&mut self) -> &mut W {
+    self.output
+  }
 }

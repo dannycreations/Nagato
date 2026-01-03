@@ -62,15 +62,15 @@ pub enum ErrorKind {
 impl Eq for ErrorKind {}
 
 impl PartialEq for ErrorKind {
+  #[inline]
   fn eq(&self, other: &Self) -> bool {
-    use ErrorKind::*;
     match (self, other) {
-      (Io(a), Io(b)) => a.kind() == b.kind(),
-      (Persist(_), Persist(_)) => true,
-      (CantOpenPatch(a, ae), CantOpenPatch(b, be)) => {
+      (Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
+      (Self::CantOpenPatch(a, ae), Self::CantOpenPatch(b, be)) => {
         a == b && ae.kind() == be.kind()
       }
-      // Compare variants without data using discriminant to avoid boilerplate.
+      // Use discriminant to compare variants without data.
+      // This reduces maintenance as new data-less variants won't need manual eq updates.
       (a, b) => discriminant(a) == discriminant(b),
     }
   }

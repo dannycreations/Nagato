@@ -36,6 +36,11 @@ impl<'a> Lexer<'a> {
     }
   }
 
+  /// Set the lexer mode.
+  pub(crate) fn set_mode(&mut self, mode: LexerMode) {
+    self.mode = mode;
+  }
+
   #[inline]
   fn parse_line(&mut self) -> Option<Result<LexerItem<'a>, Error>> {
     let line = self.next_line()?;

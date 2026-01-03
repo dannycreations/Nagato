@@ -3,7 +3,7 @@ use std::{
   mem,
 };
 
-use nagato_core::IsDevNull;
+use nagato_core::{IsDevNull, LineWriter};
 
 use crate::{BinaryFragment, Hunk, LineKind};
 
@@ -83,26 +83,29 @@ impl<'a> Patch<'a> {
 
   /// Serialize the patch into the Nagato "trimmed" format.
   pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {
-    out.write_all(b"file ")?;
-    out.write_all(self.filename())?;
-    out.write_all(b"\n")?;
+    let mut writer = LineWriter::new(out);
+
+    writer.write_bytes(b"file ")?;
+    writer.write_bytes(self.filename())?;
+    writer.write_newline()?;
 
     for (i, hunk) in self.hunks.iter().enumerate() {
       // If it's the first hunk and no label, add extra newline after file header
       // Otherwise, add newline between hunks
       if i == 0 {
         if hunk.label.is_none() {
-          out.write_all(b"\n")?;
+          writer.write_newline()?;
         }
       } else {
-        out.write_all(b"\n")?;
+        writer.write_newline()?;
       }
 
       // Replace hunk header with `label` if label exists
       if let Some(label) = hunk.label {
-        out.write_all(b"label ")?;
-        out.write_all(label)?;
-        out.write_all(b"\n\n")?;
+        writer.write_bytes(b"label ")?;
+        writer.write_bytes(label)?;
+        writer.write_newline()?;
+        writer.write_newline()?;
       }
 
       for line in &hunk.lines {
@@ -111,9 +114,9 @@ impl<'a> Patch<'a> {
           LineKind::Deletion => b'-',
           LineKind::Context => b' ',
         };
-        out.write_all(&[prefix])?;
-        out.write_all(line.text)?;
-        out.write_all(b"\n")?;
+        writer.write_bytes(&[prefix])?;
+        writer.write_bytes(line.text)?;
+        writer.write_newline()?;
       }
     }
 

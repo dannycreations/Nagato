@@ -129,6 +129,7 @@ impl FileSystem {
 }
 
 /// Check if a name is a Windows reserved device name.
+/// See: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
 fn is_reserved_name(name: &str) -> bool {
   match name.len() {
     3 => {

@@ -17,7 +17,11 @@ pub fn parse_hunks<'a>(
       }
       TokenKind::HunkHeader { .. } => {
         let mut hunk = parse_hunk(parser, patch)?;
+        // Labels from `label ` lines apply to the next hunk.
+        // If the hunk has its own label in the `@@` header, it takes precedence,
+        // but we must still consume any pending label to prevent it leaking to the next hunk.
         hunk.label = hunk.label.or_else(|| parser.label.take());
+        parser.label = None;
         hunks.push(hunk);
       }
       TokenKind::Addition(_)

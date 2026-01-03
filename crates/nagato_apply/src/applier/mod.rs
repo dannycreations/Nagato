@@ -5,9 +5,11 @@ use nagato_core::{Error, FileSystem};
 use crate::Patch;
 
 mod engine;
+mod matcher;
 mod worker;
 
 pub use engine::*;
+pub use matcher::*;
 
 /// Apply a patch to the source bytes and write to the output.
 /// This is the core application logic that works on byte slices.

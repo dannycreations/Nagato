@@ -24,8 +24,9 @@ pub fn parse_binary_patch<'a>(
         };
         let (size, _) = parse_int::<u64>(size, 10).unwrap_or((0, &[]));
 
-        // Pre-allocate binary data buffer
-        let mut data = Vec::with_capacity((size / 70) as usize + 2);
+        // Pre-allocate binary data buffer.
+        // Git base85 encodes 5 characters into 4 bytes, with max 52 decoded bytes per line.
+        let mut data = Vec::with_capacity((size / 52) as usize + 1);
         while let Some(res) = parser.tokens.peek() {
           let item = match res {
             Ok(i) => i,
