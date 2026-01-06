@@ -42,15 +42,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Write a block of data, splitting it into lines and updating the source line counter.
   /// Uses bstr's line iterator for efficient byte-level line splitting.
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
-    if block.is_empty() {
-      return Ok(());
-    }
-
-    for line in block.lines() {
-      self.write_line(line)?;
+    block.lines().try_for_each(|l| {
+      self.write_line(l)?;
       self.current_source_line += 1;
-    }
-    Ok(())
+      Ok(())
+    })
   }
 
   /// Find and apply a single hunk to the source.
@@ -130,8 +126,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   /// Process a binary patch.
   pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
-    self.verify_binary_source(patch)?;
-
     for fragment in &patch.binary_fragments {
       match fragment.kind {
         BinaryKind::Literal => {
@@ -159,19 +153,20 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   /// Process the entire patch.
   pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
+    // Verify source hash if index header is present.
+    self.verify_binary_source(patch)?;
+
     if !patch.binary_fragments.is_empty() {
       return self.process_binary(patch);
     }
 
-    // Verify source hash for text patches if index header is present.
-    // This is a strict check to prevent applying patches to the wrong file version.
-    self.verify_binary_source(patch)?;
-
-    if !patch.hunks.is_empty() && !patch.hunks[0].has_header {
-      self.process_hunkless_patches(patch)?;
-    } else {
-      for hunk in patch.hunks.iter() {
-        self.process_hunk(hunk)?;
+    if !patch.hunks.is_empty() {
+      if !patch.hunks[0].has_header {
+        self.process_hunkless_patches(patch)?;
+      } else {
+        for hunk in patch.hunks.iter() {
+          self.process_hunk(hunk)?;
+        }
       }
     }
 

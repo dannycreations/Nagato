@@ -18,10 +18,8 @@ pub fn parse_hunks<'a>(
       TokenKind::HunkHeader { .. } => {
         let mut hunk = parse_hunk(parser, patch)?;
         // Labels from `label ` lines apply to the next hunk.
-        // If the hunk has its own label in the `@@` header, it takes precedence,
-        // but we must still consume any pending label to prevent it leaking to the next hunk.
+        // If the hunk has its own label in the `@@` header, it takes precedence.
         hunk.label = hunk.label.or_else(|| parser.label.take());
-        parser.label = None;
         hunks.push(hunk);
       }
       TokenKind::Addition(_)
@@ -116,9 +114,10 @@ pub fn collect_hunk_lines<'a>(
     }
 
     if is_no_newline {
-      if new_span > 0
-        && lines.last().is_some_and(|l| l.kind != LineKind::Deletion)
-      {
+      let is_new = new_span > 0
+        && lines.last().is_some_and(|l| l.kind != LineKind::Deletion);
+
+      if is_new {
         patch.new_file_no_newline = true;
       } else {
         patch.old_file_no_newline = true;

@@ -1,5 +1,5 @@
 use core::mem::discriminant;
-use std::io::Error as IoError;
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
@@ -16,20 +16,16 @@ pub enum ErrorKind {
   // Parse Errors
   #[error("Invalid hunk range")]
   InvalidHunkRange,
-  #[error("Missing old range in hunk header")]
-  MissingOldRange,
-  #[error("Missing new range in hunk header")]
-  MissingNewRange,
+  #[error("Missing range in hunk header")]
+  MissingRange,
   #[error("Invalid percentage")]
   InvalidPercentage,
   #[error("Invalid file mode")]
   InvalidFileMode,
   #[error("Invalid file header")]
   InvalidFileHeader,
-  #[error("Invalid index line")]
-  InvalidIndexLine,
-  #[error("Invalid index hash range")]
-  InvalidIndexHashRange,
+  #[error("Invalid index header")]
+  InvalidIndexHeader,
   #[error("Invalid binary files line")]
   InvalidBinaryFilesLine,
   #[error("Unexpected line")]
@@ -56,7 +52,7 @@ pub enum ErrorKind {
   #[error("Invalid path")]
   InvalidPath,
   #[error("Can't open patch '{0}'\n  {1}")]
-  CantOpenPatch(String, IoError),
+  CantOpenPatch(Box<str>, IoError),
 }
 
 impl Eq for ErrorKind {}
@@ -72,6 +68,17 @@ impl PartialEq for ErrorKind {
       // Use discriminant to compare variants without data.
       // This reduces maintenance as new data-less variants won't need manual eq updates.
       (a, b) => discriminant(a) == discriminant(b),
+    }
+  }
+}
+
+impl ErrorKind {
+  /// Returns the I/O error kind if this is an I/O error.
+  pub fn io_kind(&self) -> Option<IoErrorKind> {
+    match self {
+      Self::Io(e) => Some(e.kind()),
+      Self::CantOpenPatch(_, e) => Some(e.kind()),
+      _ => None,
     }
   }
 }

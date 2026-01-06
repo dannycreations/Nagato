@@ -148,9 +148,9 @@ pub fn decode_base85(
       .map(|r| r.is::<InvalidBinaryLineError>())
       .unwrap_or(false)
     {
-      Error::new(ErrorKind::InvalidBinaryFilesLine)
+      Error::from(ErrorKind::InvalidBinaryFilesLine)
     } else {
-      Error::new(ErrorKind::Io(e))
+      Error::from(e)
     }
   })?;
   Ok(())

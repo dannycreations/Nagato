@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt, io::Error as IoError};
+use std::{fmt, io::Error as IoError};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
@@ -13,9 +13,9 @@ pub struct Error {
   /// Optional line number where the error occurred.
   pub line: Option<u32>,
   /// Optional file name (target) where the error occurred.
-  pub file: Option<Cow<'static, str>>,
+  pub file: Option<Box<str>>,
   /// Optional origin name (patch file) where the error occurred.
-  pub origin: Option<Cow<'static, str>>,
+  pub origin: Option<Box<str>>,
   /// The specific kind of error.
   pub kind: ErrorKind,
 }
@@ -78,14 +78,14 @@ impl Error {
 
   /// Attach a file name (target) to the error.
   #[inline]
-  pub fn with_file(mut self, file: impl Into<Cow<'static, str>>) -> Self {
+  pub fn with_file(mut self, file: impl Into<Box<str>>) -> Self {
     self.file = Some(file.into());
     self
   }
 
   /// Attach an origin name (patch file) to the error.
   #[inline]
-  pub fn with_origin(mut self, origin: impl Into<Cow<'static, str>>) -> Self {
+  pub fn with_origin(mut self, origin: impl Into<Box<str>>) -> Self {
     self.origin = Some(origin.into());
     self
   }

@@ -113,11 +113,11 @@ impl<'a> Lexer<'a> {
     let old_range = parts
       .next()
       .and_then(|s: &[u8]| s.strip_prefix(b"-"))
-      .ok_or(ErrorKind::MissingOldRange)?;
+      .ok_or(ErrorKind::MissingRange)?;
     let new_range = parts
       .next()
       .and_then(|s: &[u8]| s.strip_prefix(b"+"))
-      .ok_or(ErrorKind::MissingNewRange)?;
+      .ok_or(ErrorKind::MissingRange)?;
 
     let label = if content_end + 3 < header.len() {
       let l = &header[content_end + 3..];
@@ -169,10 +169,10 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     let rest = &line[6..];
     let mut parts = rest.fields();
-    let hashes_bytes = parts.next().ok_or(ErrorKind::InvalidIndexLine)?;
+    let hashes_bytes = parts.next().ok_or(ErrorKind::InvalidIndexHeader)?;
     let (old_hash, new_hash) = hashes_bytes
       .split_once_str(b"..")
-      .ok_or(ErrorKind::InvalidIndexHashRange)?;
+      .ok_or(ErrorKind::InvalidIndexHeader)?;
     let mode = parts.next();
     Ok(TokenKind::Index {
       old_hash,

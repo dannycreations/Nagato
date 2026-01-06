@@ -36,9 +36,11 @@ where
     len += 1;
   }
 
-  (len > 0)
-    .then(|| Some((T::try_from(num).ok()?, &bytes[len..])))
-    .flatten()
+  if len > 0 {
+    Some((T::try_from(num).ok()?, &bytes[len..]))
+  } else {
+    None
+  }
 }
 
 /// Get the next line from a source, handling \n and \r\n.

@@ -131,23 +131,17 @@ impl FileSystem {
 /// Check if a name is a Windows reserved device name.
 /// See: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
 fn is_reserved_name(name: &str) -> bool {
-  match name.len() {
-    3 => {
-      name.eq_ignore_ascii_case("CON")
-        || name.eq_ignore_ascii_case("PRN")
-        || name.eq_ignore_ascii_case("AUX")
-        || name.eq_ignore_ascii_case("NUL")
-    }
-    4 => {
-      let (prefix, digit) = name.split_at(3);
-      if prefix.eq_ignore_ascii_case("COM")
-        || prefix.eq_ignore_ascii_case("LPT")
-      {
-        digit.chars().next().is_some_and(|c| c.is_ascii_digit())
-      } else {
-        false
-      }
-    }
-    _ => false,
+  let len = name.len();
+  if len == 3 {
+    return matches!(
+      name.to_ascii_uppercase().as_str(),
+      "CON" | "PRN" | "AUX" | "NUL"
+    );
   }
+  if len == 4 {
+    let (prefix, digit) = name.split_at(3);
+    return matches!(prefix.to_ascii_uppercase().as_str(), "COM" | "LPT")
+      && digit.as_bytes()[0].is_ascii_digit();
+  }
+  false
 }

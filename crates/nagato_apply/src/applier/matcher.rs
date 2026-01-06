@@ -140,7 +140,11 @@ impl Matcher {
         | Some([b'\r', b'\n', rest @ ..])
         | Some([b'\r', rest @ ..]) => rest,
         Some([]) => &[],
-        _ => continue,
+        _ => {
+          // If the needle match is at the end of a line but doesn't end the buffer,
+          // it must be followed by a newline. If not, it's a partial line match.
+          continue;
+        }
       };
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {

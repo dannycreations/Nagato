@@ -10,7 +10,7 @@ use nagato_core::{Error, ErrorKind};
 /// Represents a source of patch data.
 pub enum PatchSource {
   Stdin(Vec<u8>),
-  File { name: String, content: Mmap },
+  File { name: Box<str>, content: Mmap },
 }
 
 impl PatchSource {
@@ -18,27 +18,27 @@ impl PatchSource {
   /// This allows processing patches one by one without loading all of them into memory at once.
   pub fn iter(
     files: Vec<OsString>,
-  ) -> impl Iterator<Item = Result<Self, Error>> {
-    let stdin_iter = if files.is_empty() {
+  ) -> Box<dyn Iterator<Item = Result<Self, Error>>> {
+    if files.is_empty() {
       let mut content = Vec::new();
       let res = stdin()
         .read_to_end(&mut content)
         .map(|_| Self::Stdin(content))
         .map_err(Error::from);
-      Some(std::iter::once(res))
-    } else {
-      None
-    };
+      return Box::new(std::iter::once(res));
+    }
 
-    let file_iter = files.into_iter().map(|path| {
-      let name = path.to_string_lossy().to_string();
-      let file = File::open(&path)
-        .map_err(|e| Error::new(ErrorKind::CantOpenPatch(name.clone(), e)))?;
+    Box::new(files.into_iter().map(|path| {
+      let file_name: Box<str> = path.to_string_lossy().into();
+      let file = File::open(&path).map_err(|e| {
+        Error::new(ErrorKind::CantOpenPatch(file_name.clone(), e))
+      })?;
       let content = unsafe { Mmap::map(&file)? };
-      Ok(Self::File { name, content })
-    });
-
-    stdin_iter.into_iter().flatten().chain(file_iter)
+      Ok(Self::File {
+        name: file_name,
+        content,
+      })
+    }))
   }
 
   pub fn name(&self) -> &str {

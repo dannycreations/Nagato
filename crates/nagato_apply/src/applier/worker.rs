@@ -96,7 +96,7 @@ pub fn patch_file_worker(
   };
 
   result.map_err(|e: Error| {
-    e.with_file(String::from_utf8_lossy(patch.filename()).into_owned())
+    e.with_file(String::from_utf8_lossy(patch.filename()))
   })?;
 
   if !check && !patch.new_file.is_dev_null() {
