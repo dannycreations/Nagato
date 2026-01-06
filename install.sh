@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
 OWNER="dannycreations"
 REPO="nagato"
@@ -21,7 +21,7 @@ fi
 
 echo "Fetching $VERSION release info..."
 
-RELEASE_INFO=$(curl -sL -A "nagato-installer" "$URL")
+RELEASE_INFO=$(curl -fsSL -A "nagato-installer" "$URL")
 DOWNLOAD_URL=$(echo "$RELEASE_INFO" | grep -oP '"browser_download_url":\s*"\K[^"]+' | grep "$ASSET_NAME" | head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
@@ -35,7 +35,7 @@ mkdir -p "$INSTALL_DIR"
 DEST_PATH="$INSTALL_DIR/$BINARY_NAME"
 
 echo "Downloading $ASSET_NAME..."
-curl -L -o "$DEST_PATH" "$DOWNLOAD_URL"
+curl -fsSL "$DOWNLOAD_URL" -o "$DEST_PATH"
 chmod +x "$DEST_PATH"
 
 if [ -f "$HOME/.zshrc" ]; then
