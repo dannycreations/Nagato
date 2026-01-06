@@ -1,4 +1,10 @@
-use std::{ffi::OsString, fs, fs::File, path::PathBuf};
+use std::{
+  ffi::OsString,
+  fs,
+  fs::File,
+  io::Result as IoResult,
+  path::{Path, PathBuf},
+};
 
 use memmap2::Mmap;
 use nagato_apply::Parser;
@@ -25,9 +31,7 @@ pub fn process_trim(files: &[OsString], split: bool) -> Result<(), Error> {
         let mut out_path = PathBuf::from(path);
         out_path.set_file_name(format!("{}.trim.patch", target));
 
-        if let Some(parent) = out_path.parent() {
-          fs::create_dir_all(parent)?;
-        }
+        ensure_parent_dirs(&out_path)?;
 
         let mut buf = Vec::new();
         patch.to_bytes(&mut buf)?;
@@ -48,8 +52,17 @@ pub fn process_trim(files: &[OsString], split: bool) -> Result<(), Error> {
         .map(|e| format!("trim.{}", e.to_string_lossy()))
         .unwrap_or_else(|| "trim.patch".to_string());
       out_path.set_extension(ext);
+
+      ensure_parent_dirs(&out_path)?;
       fs::write(out_path, buf)?;
     }
+  }
+  Ok(())
+}
+
+fn ensure_parent_dirs(path: &Path) -> IoResult<()> {
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent)?;
   }
   Ok(())
 }

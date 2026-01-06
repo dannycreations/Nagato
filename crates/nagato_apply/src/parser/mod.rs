@@ -48,8 +48,8 @@ impl<'a> Parser<'a> {
       ));
     }
 
-    patch.hunks = hunks.into_boxed_slice();
-    patch.binary_fragments = binary_fragments.into_boxed_slice();
+    patch.hunks = hunks;
+    patch.binary_fragments = binary_fragments;
 
     if patch.hunks.is_empty()
       && patch.binary_fragments.is_empty()
@@ -76,22 +76,19 @@ impl<'a> Parser<'a> {
     &mut self,
     check: impl Fn(&TokenKind<'a>) -> bool,
   ) -> Result<bool, Error> {
-    match self.tokens.peek() {
-      Some(Ok(item)) => Ok(check(&item.token)),
-      Some(Err(_)) => Err(self.tokens.next().transpose().unwrap_err()),
-      None => Ok(false),
-    }
+    Ok(self.peek_token()?.is_some_and(|i| check(&i.token)))
   }
 
   /// Helper to peek at the next token, handling errors.
   pub fn peek_token(&mut self) -> Result<Option<&crate::LexerItem<'a>>, Error> {
-    if let Some(Err(_)) = self.tokens.peek() {
-      return Err(self.tokens.next().transpose().unwrap_err());
-    }
     match self.tokens.peek() {
-      Some(Ok(item)) => Ok(Some(item)),
-      _ => Ok(None),
+      Some(Ok(_)) => {}
+      Some(Err(_)) => return Err(self.tokens.next().unwrap().unwrap_err()),
+      None => return Ok(None),
     }
+
+    // Re-peek to return the reference safely now that we know it's Ok.
+    Ok(self.tokens.peek().and_then(|r| r.as_ref().ok()))
   }
 }
 

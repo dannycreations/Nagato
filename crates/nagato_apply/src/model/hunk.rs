@@ -14,7 +14,7 @@ pub struct Hunk<'a> {
   /// The number of lines in the new file.
   pub new_span: u32,
   /// The lines in the hunk.
-  pub lines: Box<[Line<'a>]>,
+  pub lines: Vec<Line<'a>>,
   /// This will be populated by the parser using the line number from the LexerItem.
   pub patch_line_num: u32,
   /// Whether the hunk has a header.

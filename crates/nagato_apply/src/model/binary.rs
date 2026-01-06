@@ -8,5 +8,5 @@ pub enum BinaryKind {
 pub struct BinaryFragment<'a> {
   pub kind: BinaryKind,
   pub size: u64,
-  pub data: Box<[&'a [u8]]>,
+  pub data: Vec<&'a [u8]>,
 }

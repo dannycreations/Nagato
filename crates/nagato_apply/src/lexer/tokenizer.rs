@@ -49,53 +49,51 @@ impl<'a> Lexer<'a> {
       return Ok(TokenKind::Context(&[]));
     }
 
-    match line.first() {
-      Some(b'+') => {
+    match line[0] {
+      b'+' => {
         if let Some(rest) = line.strip_prefix(b"+++ ") {
           Ok(TokenKind::NewFile(strip_git_prefix(rest)))
         } else {
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
-      Some(b'-') => {
+      b'-' => {
         if let Some(rest) = line.strip_prefix(b"--- ") {
           Ok(TokenKind::OldFile(strip_git_prefix(rest)))
         } else {
           Ok(TokenKind::Deletion(&line[1..]))
         }
       }
-      Some(b' ') => Ok(TokenKind::Context(&line[1..])),
-      Some(b'@') if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
-      Some(b'd') => self.parse_git_header(line),
-      Some(b'f') if line.starts_with(b"file ") => {
+      b' ' => Ok(TokenKind::Context(&line[1..])),
+      b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
+      b'd' => self.parse_git_header(line),
+      b'f' if line.starts_with(b"file ") => {
         let file = strip_git_prefix(line[5..].trim());
         Ok(TokenKind::FileHeader {
           old_file: file,
           new_file: file,
         })
       }
-      Some(b'G') if line == b"GIT binary patch" => {
+      b'G' if line == b"GIT binary patch" => {
         self.set_mode(LexerMode::Binary);
         Ok(TokenKind::GitBinaryPatchHeader)
       }
-      Some(b'i') if line.starts_with(b"index ") => self.parse_index_line(line),
-      Some(b'l') if line.starts_with(b"label ") => {
-        Ok(TokenKind::Label(&line[6..]))
-      }
-      Some(b'n') if line.starts_with(b"new ") => {
+      b'i' if line.starts_with(b"index ") => self.parse_index_line(line),
+      b'l' if line.starts_with(b"label ") => Ok(TokenKind::Label(&line[6..])),
+      b'n' if line.starts_with(b"new ") => {
         self.parse_mode_rest(&line[4..], TokenKind::NewFileMode)
       }
-      Some(b'o') if line.starts_with(b"old ") => {
+      b'o' if line.starts_with(b"old ") => {
         self.parse_mode_rest(&line[4..], TokenKind::OldFileMode)
       }
-      Some(b'r') | Some(b'c') => self.parse_rename_copy_line(line),
-      Some(b's') if line.starts_with(b"similarity index ") => {
+      b'r' | b'c' => self.parse_rename_copy_line(line),
+      b's' if line.starts_with(b"similarity index ") => {
         Ok(TokenKind::Similarity(&line[17..]))
       }
-      Some(b'B') if line.starts_with(b"Binary files ") => {
+      b'B' if line.starts_with(b"Binary files ") => {
         self.parse_binary_files_line(line)
       }
-      Some(b'\\') if line == b"\\ No newline at end of file" => {
+      b'\\' if line == b"\\ No newline at end of file" => {
         Ok(TokenKind::NoNewline)
       }
       _ => Err(ErrorKind::UnexpectedLine),

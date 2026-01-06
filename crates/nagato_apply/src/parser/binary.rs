@@ -42,11 +42,7 @@ pub fn parse_binary_patch<'a>(
             break;
           }
         }
-        binary_fragments.push(BinaryFragment {
-          kind,
-          size,
-          data: data.into_boxed_slice(),
-        });
+        binary_fragments.push(BinaryFragment { kind, size, data });
       }
       TokenKind::Context(_) => {
         parser.tokens.next();

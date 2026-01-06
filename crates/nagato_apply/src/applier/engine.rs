@@ -42,6 +42,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   /// Write a block of data, splitting it into lines and updating the source line counter.
   /// Uses bstr's line iterator for efficient byte-level line splitting.
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
+    if block.is_empty() {
+      return Ok(());
+    }
+
     for line in block.lines() {
       self.write_line(line)?;
       self.current_source_line += 1;

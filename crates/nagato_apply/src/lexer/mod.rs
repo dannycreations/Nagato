@@ -49,13 +49,11 @@ impl<'a> Lexer<'a> {
     let res = match self.mode {
       LexerMode::Binary => self.tokenize_binary(line),
       LexerMode::Text => self.tokenize_text(line),
-    };
+    }
+    .map(|token| LexerItem { token, line_num })
+    .map_err(|kind| Error::with_line(kind, line_num));
 
-    Some(
-      res
-        .map(|token| LexerItem { token, line_num })
-        .map_err(|kind| Error::with_line(kind, line_num)),
-    )
+    Some(res)
   }
 
   /// Advance to the next line and return it, normalized.
