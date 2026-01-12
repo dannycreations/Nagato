@@ -1,4 +1,4 @@
-use nagato_core::FileSystem;
+use nagato_core::{ErrorKind, FileSystem};
 use tempfile::tempdir;
 
 #[test]
@@ -35,4 +35,40 @@ fn rejects_prefix_component() {
   // However, our implementation rejects Prefix components which are specific to Windows path parsing.
   #[cfg(windows)]
   assert!(fs.read(b"C:file.txt").is_err());
+}
+
+#[test]
+fn rejects_reserved_names() {
+  let root = tempdir().unwrap();
+  let fs = FileSystem::new(root.path());
+  assert!(fs.read(b"con").is_err());
+  assert!(fs.read(b"PRN.txt").is_err());
+  assert!(fs.read(b"aux/file").is_err());
+  assert!(fs.read(b"NUL").is_err());
+  assert!(fs.read(b"com1").is_err());
+  assert!(fs.read(b"LPT9").is_err());
+  assert!(fs.read(b"CLOCK$").is_err());
+}
+
+#[test]
+fn rejects_trailing_dots_and_spaces() {
+  let root = tempdir().unwrap();
+  let fs = FileSystem::new(root.path());
+  assert!(fs.read(b"file.txt.").is_err());
+  assert!(fs.read(b"file.txt ").is_err());
+  assert!(fs.read(b"space /file").is_err());
+}
+
+#[test]
+fn rejects_short_names() {
+  let root = tempdir().unwrap();
+  let fs = FileSystem::new(root.path());
+  assert!(fs.read(b"PROGRA~1").is_err());
+  assert!(fs.read(b"docume~2.txt").is_err());
+  // Valid use of tilde (not followed by digit) should pass validation.
+  // We check that it doesn't return InvalidPath. It returns an Io error (NotFound)
+  // because the file doesn't actually exist.
+  let res = fs.read(b"my~file.txt");
+  assert!(res.is_err());
+  assert!(res.unwrap_err().kind != ErrorKind::InvalidPath);
 }

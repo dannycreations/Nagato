@@ -81,6 +81,19 @@ impl FileSystem {
       match component {
         Component::Normal(c) => {
           if let Some(s) = c.to_str() {
+            // Windows ignores trailing dots and spaces, which can lead to collisions or security bypasses.
+            if s.ends_with('.') || s.ends_with(' ') {
+              return Err(Error::new(ErrorKind::InvalidPath));
+            }
+
+            // Windows 8.3 short names (e.g., PROGRA~1) can be used to bypass filters.
+            if let Some(tilde_idx) = s.find('~') {
+              let suffix = &s[tilde_idx + 1..];
+              if suffix.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                return Err(Error::new(ErrorKind::InvalidPath));
+              }
+            }
+
             let base = s.split('.').next().unwrap_or(s);
             if is_reserved_name(base) {
               return Err(Error::new(ErrorKind::InvalidPath));
@@ -120,6 +133,7 @@ fn is_reserved_name(name: &str) -> bool {
         || bytes[..3].eq_ignore_ascii_case(b"LPT"))
         && bytes[3].is_ascii_digit()
     }
+    6 => bytes.eq_ignore_ascii_case(b"CLOCK$"),
     _ => false,
   }
 }
