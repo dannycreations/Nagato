@@ -69,62 +69,55 @@ pub fn collect_hunk_lines<'a>(
       break;
     }
 
-    let (line, is_no_newline) = match &item.token {
+    // Hunk line processing resets the no-newline flags to ensure that markers only apply when they are the final elements for their respective file versions.
+    let line = match &item.token {
       TokenKind::Addition(text) => {
         new_span += 1;
-        (
-          Some(Line {
-            kind: LineKind::Addition,
-            text,
-          }),
-          false,
-        )
+        patch.new_file_no_newline = false;
+        Some(Line {
+          kind: LineKind::Addition,
+          text,
+        })
       }
       TokenKind::Deletion(text) => {
         old_span += 1;
-        (
-          Some(Line {
-            kind: LineKind::Deletion,
-            text,
-          }),
-          false,
-        )
+        patch.old_file_no_newline = false;
+        Some(Line {
+          kind: LineKind::Deletion,
+          text,
+        })
       }
       TokenKind::Context(text) => {
         old_span += 1;
         new_span += 1;
-        (
-          Some(Line {
-            kind: LineKind::Context,
-            text,
-          }),
-          false,
-        )
+        patch.old_file_no_newline = false;
+        patch.new_file_no_newline = false;
+        Some(Line {
+          kind: LineKind::Context,
+          text,
+        })
       }
-      TokenKind::NoNewline => (None, true),
-      _ => (None, false),
+      TokenKind::NoNewline => {
+        let is_new = new_span > 0
+          && lines.last().is_some_and(|l| l.kind != LineKind::Deletion);
+        if is_new {
+          patch.new_file_no_newline = true;
+        }
+
+        let is_old = old_span > 0
+          && lines.last().is_some_and(|l| l.kind != LineKind::Addition);
+        if is_old {
+          patch.old_file_no_newline = true;
+        }
+        None
+      }
+      _ => break,
     };
 
+    parser.tokens.next();
     if let Some(line) = line {
       lines.push(line);
-      parser.tokens.next();
-      continue;
     }
-
-    if is_no_newline {
-      let is_new = new_span > 0
-        && lines.last().is_some_and(|l| l.kind != LineKind::Deletion);
-
-      if is_new {
-        patch.new_file_no_newline = true;
-      } else {
-        patch.old_file_no_newline = true;
-      }
-      parser.tokens.next();
-      continue;
-    }
-
-    break;
   }
   Ok((old_span, new_span))
 }
