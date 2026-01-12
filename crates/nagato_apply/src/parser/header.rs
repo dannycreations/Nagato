@@ -8,6 +8,7 @@ pub fn parse_header<'a>(
   patch: &mut Patch<'a>,
   binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
+  // Patch headers are processed by iteratively peeking at tokens and updating patch metadata until a non-header token is encountered.
   while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::FileHeader { old_file, new_file } => {
@@ -46,10 +47,7 @@ pub fn parse_header<'a>(
       TokenKind::NewFileMode(mode) => {
         patch.new_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
       }
-      TokenKind::OldFileMode(mode) => {
-        patch.old_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
-      }
-      TokenKind::DeletedFileMode(mode) => {
+      TokenKind::OldFileMode(mode) | TokenKind::DeletedFileMode(mode) => {
         patch.old_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
       }
       TokenKind::Similarity(percent) => {
@@ -77,11 +75,9 @@ pub fn parse_header<'a>(
 }
 
 fn parse_percentage(s: &[u8]) -> Result<u32, ErrorKind> {
-  let s = s.strip_suffix(b"%").ok_or(ErrorKind::InvalidPercentage)?;
-  let (num, rest) =
-    parse_int::<u32>(s, 10).ok_or(ErrorKind::InvalidPercentage)?;
-  if !rest.is_empty() {
-    return Err(ErrorKind::InvalidPercentage);
-  }
-  Ok(num)
+  s.strip_suffix(b"%")
+    .and_then(|s| parse_int::<u32>(s, 10))
+    .filter(|(_, rest)| rest.is_empty())
+    .map(|(num, _)| num)
+    .ok_or(ErrorKind::InvalidPercentage)
 }

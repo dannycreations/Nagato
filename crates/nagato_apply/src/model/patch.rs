@@ -7,57 +7,36 @@ use nagato_core::{IsDevNull, LineWriter};
 
 use crate::{BinaryFragment, Hunk, LineKind};
 
-/// Represents a single patch, which can contain multiple hunks.
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Patch<'a> {
-  /// The SHA1 hash of the old file.
   pub old_hash: Option<&'a [u8]>,
-  /// The SHA1 hash of the new file.
   pub new_hash: Option<&'a [u8]>,
-  /// The path to the old file.
   pub old_file: &'a [u8],
-  /// The path to the new file.
   pub new_file: &'a [u8],
-  /// The hunks in the patch.
   pub hunks: Vec<Hunk<'a>>,
-  /// The source file in a copy operation.
   pub copy_from: Option<&'a [u8]>,
-  /// The destination file in a copy operation.
   pub copy_to: Option<&'a [u8]>,
-  /// The old file name in a rename operation.
   pub rename_from: Option<&'a [u8]>,
-  /// The new file name in a rename operation.
   pub rename_to: Option<&'a [u8]>,
-  /// The new file mode.
   pub new_mode: Option<u32>,
-  /// The old file mode.
   pub old_mode: Option<u32>,
-  /// The similarity index in a rename or copy operation.
   pub similarity: Option<u32>,
-  /// The dissimilarity index in a rename or copy operation.
   pub dissimilarity: Option<u32>,
-  /// Indicates whether the patch is for a binary file.
   pub binary: bool,
-  /// Indicates that the old file has no newline at the end.
   pub old_file_no_newline: bool,
-  /// Indicates that the new file has no newline at the end.
   pub new_file_no_newline: bool,
-  /// Binary patch fragments.
   pub binary_fragments: Vec<BinaryFragment<'a>>,
 }
 
 impl<'a> Patch<'a> {
-  /// Returns the source file for the patch, considering copy operations.
   pub fn source_file(&self) -> &'a [u8] {
     self.copy_from.unwrap_or(self.old_file)
   }
 
-  /// Returns true if this patch contains content changes (hunks or binary fragments).
   pub fn has_content_changes(&self) -> bool {
     !self.hunks.is_empty() || !self.binary_fragments.is_empty()
   }
 
-  /// Returns the target filename for the patch.
   pub fn filename(&self) -> &'a [u8] {
     if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
       self.new_file
@@ -66,7 +45,6 @@ impl<'a> Patch<'a> {
     }
   }
 
-  /// Invert the patch for reverse application.
   pub fn invert(mut self) -> Self {
     mem::swap(&mut self.old_file, &mut self.new_file);
     mem::swap(&mut self.rename_from, &mut self.rename_to);
@@ -81,7 +59,6 @@ impl<'a> Patch<'a> {
     self
   }
 
-  /// Serialize the patch into the Nagato "trimmed" format.
   pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {
     let mut writer = LineWriter::new(out);
 
@@ -90,13 +67,8 @@ impl<'a> Patch<'a> {
     writer.write_newline()?;
 
     for (i, hunk) in self.hunks.iter().enumerate() {
-      // If it's the first hunk and no label, add extra newline after file header
-      // Otherwise, add newline between hunks
-      if i == 0 {
-        if hunk.label.is_none() {
-          writer.write_newline()?;
-        }
-      } else {
+      // Hunk separation is maintained by ensuring a newline precedes every hunk except for the first one when it contains a label.
+      if i > 0 || hunk.label.is_none() {
         writer.write_newline()?;
       }
 

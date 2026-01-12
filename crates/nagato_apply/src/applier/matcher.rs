@@ -2,18 +2,11 @@ use bstr::ByteSlice;
 use memchr::memmem::Finder;
 use nagato_core::{get_line, Error, ErrorKind};
 
-use crate::{Hunk, Line, LineKind};
+use crate::{Hunk, Line};
 
-/// Hunk matching engine.
-///
-/// Implements a line-based search algorithm with support for:
-/// 1. Exact matching (default).
-/// 2. Label-based search optimization (using `label` metadata).
-/// 3. Recovery matching (fuzzy search when exact match fails).
 pub struct Matcher;
 
 impl Matcher {
-  /// Verify if the source matches the expected hunk lines.
   #[inline]
   pub fn verify_match<'s, 'p>(
     &self,
@@ -40,7 +33,6 @@ impl Matcher {
     Ok(source)
   }
 
-  /// Extract the search buffer based on hunk labels if present.
   fn get_search_buffer<'s>(
     &self,
     buffer: &'s [u8],
@@ -69,13 +61,8 @@ impl Matcher {
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8]), Error> {
-    let lines_to_match = hunk
-      .lines
-      .iter()
-      .enumerate()
-      .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
-
-    let mut iter = lines_to_match.clone();
+    // Hunk matching starts by identifying the first non-addition line to use as a search needle in the source buffer.
+    let mut iter = hunk.lines_to_match();
     let first_line_to_match = match iter.next() {
       Some((_, first)) => first,
       None => return Ok((0, buffer)),
@@ -90,25 +77,18 @@ impl Matcher {
     )
   }
 
-  /// Attempt to find a match by skipping the first line of the hunk.
-  /// This provides basic recovery when the context surrounding a change has shifted.
   pub fn find_match_recovery<'s, 'p>(
     &self,
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8], Option<usize>), Error> {
-    let lines_to_match = hunk
-      .lines
-      .iter()
-      .enumerate()
-      .filter(|(_, l)| !matches!(l.kind, LineKind::Addition));
+    // Recovery matching attempts to find a hunk by skipping the first expected line when an exact match fails.
+    let mut iter = hunk.lines_to_match();
+    let first_item = iter.next();
 
-    let mut alt_iter = lines_to_match.clone();
-    let first_item = alt_iter.next();
-
-    match alt_iter.next() {
+    match iter.next() {
       Some((_, second)) => self
-        .search_in_buffer(buffer, hunk, alt_iter, second.text, (buffer, 0))
+        .search_in_buffer(buffer, hunk, iter, second.text, (buffer, 0))
         .map(|(pos, src)| (pos, src, first_item.map(|(i, _)| i))),
       None => Ok((0, buffer, first_item.map(|(i, _)| i))),
     }
@@ -127,6 +107,7 @@ impl Matcher {
     let mut best_error = None;
     let mut max_offset = 0;
 
+    // The search buffer is scanned for potential matches using a precomputed finder for the first line of the hunk.
     for match_pos_rel in finder.find_iter(search_buffer) {
       let match_pos = buffer_offset + match_pos_rel;
       // Ensure match starts at a line boundary.
@@ -134,18 +115,14 @@ impl Matcher {
         continue;
       }
 
-      let end_pos = match_pos + needle.len();
-      let next_source = match buffer.get(end_pos..) {
-        Some([b'\n', rest @ ..])
-        | Some([b'\r', b'\n', rest @ ..])
-        | Some([b'\r', rest @ ..]) => rest,
-        Some([]) => &[],
-        _ => {
-          // If the needle match is at the end of a line but doesn't end the buffer,
-          // it must be followed by a newline. If not, it's a partial line match.
-          continue;
-        }
+      // Line boundary validation and extraction are performed using a unified line utility to ensure consistent handling of various line ending formats.
+      let Some((line, next_source)) = get_line(&buffer[match_pos..]) else {
+        continue;
       };
+
+      if line != needle {
+        continue;
+      }
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {
         Ok(final_source) => return Ok((match_pos, final_source)),

@@ -6,14 +6,10 @@ use sha1::{Digest, Sha1};
 
 use crate::{binary, BinaryKind, Hunk, LineKind, Matcher, Patch};
 
-/// The Applier engine responsible for applying patches to byte slices.
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
   writer: LineWriter<'b, W>,
-  /// The full original source. We use slices to track progress.
   pub source: &'s [u8],
-  /// The current byte offset in the full source.
   pub pos: usize,
-  pub current_source_line: u32,
 }
 
 impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
@@ -22,34 +18,23 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       writer: LineWriter::new(output),
       source,
       pos: 0,
-      current_source_line: 0,
     }
   }
 
-  /// Returns the remaining source content.
   #[inline(always)]
   fn source_at(&self) -> &'s [u8] {
     &self.source[self.pos..]
   }
 
-  /// Write a line to the output, handling line endings.
-  /// We prepend a newline for every line except the first to ensure correct formatting.
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> Result<(), Error> {
     self.writer.write_line(line).map_err(Into::into)
   }
 
-  /// Write a block of data, splitting it into lines and updating the source line counter.
-  /// Uses bstr's line iterator for efficient byte-level line splitting.
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
-    block.lines().try_for_each(|l| {
-      self.write_line(l)?;
-      self.current_source_line += 1;
-      Ok(())
-    })
+    block.lines().try_for_each(|l| self.write_line(l))
   }
 
-  /// Find and apply a single hunk to the source.
   #[inline]
   pub fn find_and_apply_hunk<'p>(
     &mut self,
@@ -58,22 +43,18 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let source = self.source_at();
     let matcher = Matcher;
 
-    // Attempt match
-    let (match_pos, final_source, skipped_line_index) = matcher
-      .find_match(source, hunk)
-      .map(|(pos, src)| (pos, src, None))
-      .or_else(|e| {
-        if !hunk.has_header {
-          matcher.find_match_recovery(source, hunk)
-        } else {
-          Err(e)
+    // Hunk matching logic uses explicit pattern matching to handle recovery attempts for hunkless patches when an exact match fails.
+    let (match_pos, final_source, skipped_line_index) =
+      match matcher.find_match(source, hunk) {
+        Ok((pos, src)) => (pos, src, None),
+        Err(_) if !hunk.has_header => {
+          matcher.find_match_recovery(source, hunk)?
         }
-      })?;
-
+        Err(e) => return Err(e),
+      };
     let skipped = &source[..match_pos];
     self.write_block(skipped)?;
     self.pos += source.len() - final_source.len();
-    self.current_source_line += hunk.old_span;
 
     for (i, line) in hunk.lines.iter().enumerate() {
       if Some(i) != skipped_line_index {
@@ -89,7 +70,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  /// Process a single hunk by advancing to it and applying changes.
   pub fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
     if hunk.old_span == 0 {
       hunk
@@ -103,33 +83,34 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.find_and_apply_hunk(hunk)
   }
 
-  /// Verify that the source matches the expected hash for a binary patch.
   pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
-    if let Some(old_hash_bytes) = patch.old_hash {
-      if old_hash_bytes.len() >= 7 && !old_hash_bytes.iter().all(|&b| b == b'0')
-      {
-        let source = self.source_at();
-        let mut hasher = Sha1::new();
-        let _ = write!(hasher, "blob {}\0", source.len());
-        hasher.update(source);
-        let result = hasher.finalize();
-        let mut hex_hash = [0u8; 40];
-        hex::encode_to_slice(result, &mut hex_hash).unwrap();
+    if let Some(old_hash_bytes) = patch
+      .old_hash
+      .filter(|h| h.len() >= 7 && h.iter().any(|&b| b != b'0'))
+    {
+      let source = self.source_at();
+      let mut hasher = Sha1::new();
+      let _ = write!(hasher, "blob {}\0", source.len());
+      hasher.update(source);
 
-        if !hex_hash.starts_with(old_hash_bytes) {
-          return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
-        }
+      let mut hex_hash = [0u8; 40];
+      hex::encode_to_slice(hasher.finalize(), &mut hex_hash).unwrap();
+
+      if !hex_hash.starts_with(old_hash_bytes) {
+        return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
       }
     }
     Ok(())
   }
 
-  /// Process a binary patch.
   pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
-    for fragment in &patch.binary_fragments {
-      match fragment.kind {
+    // Binary patches are applied by processing fragments until a successful literal decoding or delta application occurs.
+    patch
+      .binary_fragments
+      .iter()
+      .find_map(|fragment| match fragment.kind {
         BinaryKind::Literal => {
-          return binary::decode_base85(&fragment.data, self.writer.output());
+          Some(binary::decode_base85(&fragment.data, self.writer.output()))
         }
         BinaryKind::Delta => {
           let mut decoded = binary::new_base85_decoder(&fragment.data);
@@ -138,36 +119,32 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
             self.source_at(),
             self.writer.output(),
           ) {
-            Ok(_) => return Ok(()),
-            Err(e) if e.kind == ErrorKind::BinaryPatchSourceMismatch => {
-              continue
+            Ok(_) => Some(Ok(())),
+            Err(e)
+              if matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch) =>
+            {
+              None
             }
-            Err(e) => return Err(e),
+            Err(e) => Some(Err(e)),
           }
         }
-      }
-    }
-
-    Err(Error::new(ErrorKind::CouldNotApplyHunk))
+      })
+      .unwrap_or(Err(Error::new(ErrorKind::CouldNotApplyHunk)))
   }
 
-  /// Process the entire patch.
   pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
     // Verify source hash if index header is present.
     self.verify_binary_source(patch)?;
 
+    // Patch content application is dispatched to specialized handlers based on whether the patch contains binary fragments or standard text hunks.
     if !patch.binary_fragments.is_empty() {
       return self.process_binary(patch);
     }
 
-    if !patch.hunks.is_empty() {
-      if !patch.hunks[0].has_header {
-        self.process_hunkless_patches(patch)?;
-      } else {
-        for hunk in patch.hunks.iter() {
-          self.process_hunk(hunk)?;
-        }
-      }
+    // Patch hunks are processed either as a hunkless collection or individually if headers are present.
+    match patch.hunks.first() {
+      Some(h) if !h.has_header => self.process_hunkless_patches(patch)?,
+      _ => patch.hunks.iter().try_for_each(|h| self.process_hunk(h))?,
     }
 
     // Write any remaining source content to the output.
@@ -180,19 +157,21 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  /// Process hunkless patches by sorting them based on their match position.
   fn process_hunkless_patches(
     &mut self,
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
-    // Hunkless patches (no @@ headers) may be out of order.
-    // We sort them by their best match position in the source to ensure sequential application.
-    let mut hunks_with_pos = Vec::with_capacity(patch.hunks.len());
-    let matcher = Matcher;
-    for hunk in patch.hunks.iter() {
-      let (pos, _) = matcher.find_match(self.source_at(), hunk)?;
-      hunks_with_pos.push((pos, hunk));
-    }
+    // Hunkless patches are mapped to their best match positions and sorted to ensure sequential application when headers are missing.
+    let mut hunks_with_pos = patch
+      .hunks
+      .iter()
+      .map(|hunk| {
+        Matcher
+          .find_match(self.source_at(), hunk)
+          .map(|(pos, _)| (pos, hunk))
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
     hunks_with_pos.sort_by_key(|(pos, _)| *pos);
     for (_, hunk) in hunks_with_pos {
       self.process_hunk(hunk)?;
@@ -200,7 +179,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  /// Write remaining source lines to the output.
   fn flush_remaining_source(&mut self) -> Result<(), Error> {
     let source = self.source_at();
     if !source.is_empty() {

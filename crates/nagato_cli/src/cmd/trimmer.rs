@@ -5,7 +5,6 @@ use nagato_core::{AtomicWriter, Error};
 
 use super::source::PatchSource;
 
-/// Processes the trim command for the given files.
 pub fn process_trim(files: &[OsString], split: bool) -> Result<(), Error> {
   for source_res in PatchSource::iter(files.to_vec()) {
     let source = source_res?;

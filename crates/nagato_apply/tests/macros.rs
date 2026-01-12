@@ -67,7 +67,7 @@ macro_rules! test_apply_err {
 macro_rules! test_patch_ok {
   (
     $test_name:ident,
-    reverse: $reverse:expr,
+    $(reverse: $reverse:expr,)?
     initial_fs: { $($initial_path:expr => $initial_content:expr),* },
     diff: $diff:expr,
     assertions: |$root:ident| { $($assertions:tt)* }
@@ -76,28 +76,13 @@ macro_rules! test_patch_ok {
     fn $test_name() {
       let dir = create_test_fs! { $($initial_path => $initial_content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path());
+      let reverse = false $(|| $reverse)?;
       for patch in parse_diff!($diff) {
-        nagato_apply::patch_file(&mut fs, patch.unwrap(), $reverse, false)
-          .unwrap();
+        nagato_apply::patch_file(&mut fs, patch.unwrap(), reverse, false).unwrap();
       }
-
       let $root = dir.path();
       $($assertions)*
     }
-  };
-  (
-    $test_name:ident,
-    initial_fs: { $($initial_path:expr => $initial_content:expr),* },
-    diff: $diff:expr,
-    assertions: |$root:ident| { $($assertions:tt)* }
-  ) => {
-    test_patch_ok!(
-      $test_name,
-      reverse: false,
-      initial_fs: { $($initial_path => $initial_content),* },
-      diff: $diff,
-      assertions: |$root| { $($assertions)* }
-    );
   };
 }
 
@@ -105,7 +90,7 @@ macro_rules! test_patch_ok {
 macro_rules! test_patch_err {
   (
     $test_name:ident,
-    reverse: $reverse:expr,
+    $(reverse: $reverse:expr,)?
     initial_fs: { $($path:expr => $content:expr),* },
     diff: $diff:expr
   ) => {
@@ -113,27 +98,10 @@ macro_rules! test_patch_err {
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path());
-      let mut parser = parse_diff!($diff);
-      assert!(nagato_apply::patch_file(
-        &mut fs,
-        parser.next().unwrap().unwrap(),
-        $reverse,
-        false
-      )
-      .is_err());
+      let patch = parse_diff!($diff).next().unwrap().unwrap();
+      let reverse = false $(|| $reverse)?;
+      assert!(nagato_apply::patch_file(&mut fs, patch, reverse, false).is_err());
     }
-  };
-  (
-    $test_name:ident,
-    initial_fs: { $($path:expr => $content:expr),* },
-    diff: $diff:expr
-  ) => {
-    test_patch_err!(
-      $test_name,
-      reverse: false,
-      initial_fs: { $($path => $content),* },
-      diff: $diff
-    );
   };
 }
 

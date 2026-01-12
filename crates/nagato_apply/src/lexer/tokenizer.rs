@@ -1,5 +1,4 @@
 use bstr::ByteSlice;
-use memchr::memmem;
 use nagato_core::{strip_git_prefix, ErrorKind};
 
 use crate::{lexer::LexerMode, Lexer, TokenKind};
@@ -39,7 +38,6 @@ impl<'a> Lexer<'a> {
     Ok(TokenKind::BinaryData(line))
   }
 
-  /// Dispatches line parsing based on the first character.
   #[inline]
   pub fn tokenize_text(
     &mut self,
@@ -105,31 +103,23 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
+    // Hunk headers are parsed by splitting the line into range and optional label components using byte-level patterns.
     let header = &line[3..];
-    let content_end = memmem::find(header, b" @@").unwrap_or(header.len());
-    let content = &header[..content_end];
+    let (content, label_part) =
+      header.split_once_str(b" @@").unwrap_or((header, &[]));
     let mut parts = content.fields();
 
     let old_range = parts
       .next()
-      .and_then(|s: &[u8]| s.strip_prefix(b"-"))
+      .and_then(|s| s.strip_prefix(b"-"))
       .ok_or(ErrorKind::MissingRange)?;
     let new_range = parts
       .next()
-      .and_then(|s: &[u8]| s.strip_prefix(b"+"))
+      .and_then(|s| s.strip_prefix(b"+"))
       .ok_or(ErrorKind::MissingRange)?;
 
-    let label = if content_end + 3 < header.len() {
-      let l = &header[content_end + 3..];
-      let l = l.trim_start();
-      if l.is_empty() {
-        None
-      } else {
-        Some(l)
-      }
-    } else {
-      None
-    };
+    let label = label_part.trim_start();
+    let label = if label.is_empty() { None } else { Some(label) };
 
     Ok(TokenKind::HunkHeader {
       old_range,
@@ -167,11 +157,11 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    let rest = &line[6..];
-    let mut parts = rest.fields();
-    let hashes_bytes = parts.next().ok_or(ErrorKind::InvalidIndexHeader)?;
-    let (old_hash, new_hash) = hashes_bytes
-      .split_once_str(b"..")
+    // Index lines are processed by extracting the hash pair and optional mode from the space-delimited fields.
+    let mut parts = line[6..].fields();
+    let (old_hash, new_hash) = parts
+      .next()
+      .and_then(|s| s.split_once_str(b".."))
       .ok_or(ErrorKind::InvalidIndexHeader)?;
     let mode = parts.next();
     Ok(TokenKind::Index {
@@ -204,19 +194,17 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    let line_content = line[13..]
+    // Binary file markers are parsed by extracting the file paths from a standardized "Binary files ... differ" message using byte-level split operations.
+    let (old_file, new_file) = line[13..]
       .strip_suffix(b" differ")
+      .and_then(|s| s.split_once_str(b" and "))
       .ok_or(ErrorKind::InvalidBinaryFilesLine)?;
-    let mut parts = line_content.split_str(b" and ");
-    let old_file = parts.next().ok_or(ErrorKind::InvalidBinaryFilesLine)?;
-    let new_file = parts.next().ok_or(ErrorKind::InvalidBinaryFilesLine)?;
     Ok(TokenKind::Binary {
       old_file: strip_git_prefix(old_file),
       new_file: strip_git_prefix(new_file),
     })
   }
 
-  /// Helper to parse mode lines after the initial keyword prefix.
   #[inline]
   fn parse_mode_rest(
     &self,

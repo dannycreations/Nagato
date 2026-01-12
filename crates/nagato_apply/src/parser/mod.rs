@@ -24,21 +24,21 @@ impl<'a> Parser<'a> {
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
     // Ensure label state doesn't leak between patches.
     self.label = None;
+    // Patch initialization involves parsing the header and associated hunks into a default patch structure.
     let mut patch = Patch::default();
-    let mut hunks = Vec::new();
     let mut binary_fragments = Vec::new();
+    let mut hunks = Vec::new();
 
-    let start_line = self
-      .tokens
-      .peek()
-      .and_then(|r| r.as_ref().ok())
-      .map(|i| i.line_num)
-      .unwrap_or(0);
+    let start_line = self.peek_token()?.map(|i| i.line_num).unwrap_or(0);
 
     header::parse_header(self, &mut patch, &mut binary_fragments)?;
     hunk::parse_hunks(self, &mut patch, &mut hunks)?;
 
-    if !hunks.is_empty()
+    patch.binary_fragments = binary_fragments;
+    patch.hunks = hunks;
+
+    // Patch validity is checked by ensuring that any content changes are associated with at least one valid file path.
+    if !patch.hunks.is_empty()
       && patch.old_file.is_empty()
       && patch.new_file.is_empty()
     {
@@ -48,11 +48,7 @@ impl<'a> Parser<'a> {
       ));
     }
 
-    patch.hunks = hunks;
-    patch.binary_fragments = binary_fragments;
-
-    if patch.hunks.is_empty()
-      && patch.binary_fragments.is_empty()
+    if !patch.has_content_changes()
       && patch.old_file.is_empty()
       && patch.new_file.is_empty()
     {
@@ -79,15 +75,11 @@ impl<'a> Parser<'a> {
     Ok(self.peek_token()?.is_some_and(|i| check(&i.token)))
   }
 
-  /// Helper to peek at the next token, handling errors.
   pub fn peek_token(&mut self) -> Result<Option<&crate::LexerItem<'a>>, Error> {
-    match self.tokens.peek() {
-      Some(Ok(_)) => {}
-      Some(Err(_)) => return Err(self.tokens.next().unwrap().unwrap_err()),
-      None => return Ok(None),
+    // Token peeking logic identifies lexer errors by inspecting the next available item without consuming it from the stream.
+    if self.tokens.peek().is_some_and(|r| r.is_err()) {
+      return Err(self.tokens.next().unwrap().unwrap_err());
     }
-
-    // Re-peek to return the reference safely now that we know it's Ok.
     Ok(self.tokens.peek().and_then(|r| r.as_ref().ok()))
   }
 }
@@ -96,16 +88,18 @@ impl<'a> Iterator for Parser<'a> {
   type Item = Result<Patch<'a>, Error>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    self.skip_empty_context_lines().ok()?;
+    // Patch iteration proceeds by skipping leading whitespace and attempting to parse the next patch until the end of the token stream is reached or an error occurs.
+    if let Err(e) = self.skip_empty_context_lines() {
+      return Some(Err(e));
+    }
     self.tokens.peek()?;
 
     let patch_result = self.parse_patch();
     match patch_result {
       Ok(patch)
-        if patch.old_file.is_empty()
-          && patch.new_file.is_empty()
-          && patch.hunks.is_empty()
-          && patch.binary_fragments.is_empty() =>
+        if !patch.has_content_changes()
+          && patch.old_file.is_empty()
+          && patch.new_file.is_empty() =>
       {
         None
       }
@@ -115,7 +109,6 @@ impl<'a> Iterator for Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-  /// Iterate over patches and apply them to the file system.
   pub fn apply_to_fs(
     fs: &nagato_core::FileSystem,
     input: &'a [u8],

@@ -44,7 +44,8 @@ pub fn apply_delta(
 
   let mut written: u64 = 0;
   let mut cmd_buf = [0u8; 1];
-  let mut literal_buf = [0u8; 127]; // Max literal size is 127 bytes
+  // Max literal size is 127 bytes
+  let mut literal_buf = [0u8; 127];
 
   loop {
     match delta.read_exact(&mut cmd_buf) {

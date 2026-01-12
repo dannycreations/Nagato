@@ -11,8 +11,6 @@ mod worker;
 pub use engine::*;
 pub use matcher::*;
 
-/// Apply a patch to the source bytes and write to the output.
-/// This is the core application logic that works on byte slices.
 pub fn apply<'a>(
   output: &mut (impl Write + ?Sized),
   patch: &Patch<'a>,
@@ -28,8 +26,6 @@ pub fn apply<'a>(
   Applier::new(output, source).process(patch)
 }
 
-/// Apply a patch to the file system.
-/// This handles file I/O, renames, and deletions using the provided FileSystem.
 pub fn patch_file(
   fs: &FileSystem,
   patch: Patch<'_>,

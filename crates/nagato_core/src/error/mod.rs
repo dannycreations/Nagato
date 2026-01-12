@@ -1,4 +1,7 @@
-use std::{fmt, io::Error as IoError};
+use std::{
+  fmt,
+  io::{Error as IoError, ErrorKind as IoErrorKind},
+};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
@@ -7,16 +10,11 @@ mod kind;
 
 pub use kind::*;
 
-/// Core error type for Nagato.
 #[derive(ThisError, Debug)]
 pub struct Error {
-  /// Optional line number where the error occurred.
   pub line: Option<u32>,
-  /// Optional file name (target) where the error occurred.
   pub file: Option<Box<str>>,
-  /// Optional origin name (patch file) where the error occurred.
   pub origin: Option<Box<str>>,
-  /// The specific kind of error.
   pub kind: ErrorKind,
 }
 
@@ -24,37 +22,27 @@ impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.kind)?;
 
-    let has_file = self.file.is_some();
-    let has_origin = self.origin.is_some();
-    let has_line = self.line.is_some();
-
-    if has_file || has_origin || has_line {
-      write!(f, "\n  ")?;
-
-      if let Some(line) = self.line {
-        write!(f, "at ")?;
-        match self.origin.as_deref() {
-          Some(src) => write!(f, "{src}:{line}"),
-          None => write!(f, "<stdin>:{line}"),
-        }?;
-        if let Some(target) = self.file.as_deref() {
-          write!(f, " (applying to {target})")?;
+    // Error context is formatted using a structural match to provide a concise summary of the failure location and the affected file.
+    match (self.line, self.origin.as_deref(), self.file.as_deref()) {
+      (Some(line), origin, file) => {
+        let origin = origin.unwrap_or("<stdin>");
+        write!(f, "\n  at {origin}:{line}")?;
+        if let Some(file) = file {
+          write!(f, " (applying to {file})")?;
         }
-      } else {
-        match (self.file.as_deref(), self.origin.as_deref()) {
-          (Some(target), Some(src)) => write!(f, "in {target} (from {src})"),
-          (Some(target), None) => write!(f, "in {target}"),
-          (None, Some(src)) => write!(f, "in {src}"),
-          (None, None) => unreachable!(),
-        }?;
       }
+      (None, Some(origin), Some(file)) => {
+        write!(f, "\n  in {file} (from {origin})")?
+      }
+      (None, Some(origin), None) => write!(f, "\n  in {origin}")?,
+      (None, None, Some(file)) => write!(f, "\n  in {file}")?,
+      _ => {}
     }
     Ok(())
   }
 }
 
 impl Error {
-  /// Create a new error without line or file information.
   #[inline]
   pub const fn new(kind: ErrorKind) -> Self {
     Self {
@@ -65,7 +53,6 @@ impl Error {
     }
   }
 
-  /// Create a new error with specific line information.
   #[inline]
   pub const fn with_line(kind: ErrorKind, line: u32) -> Self {
     Self {
@@ -76,23 +63,26 @@ impl Error {
     }
   }
 
-  /// Attach a file name (target) to the error.
   #[inline]
   pub fn with_file(mut self, file: impl Into<Box<str>>) -> Self {
     self.file = Some(file.into());
     self
   }
 
-  /// Attach an origin name (patch file) to the error.
   #[inline]
   pub fn with_origin(mut self, origin: impl Into<Box<str>>) -> Self {
     self.origin = Some(origin.into());
     self
   }
+
+  #[inline]
+  pub fn is_not_found(&self) -> bool {
+    // Error classification for missing resources is determined by inspecting the underlying I/O error kind for a NotFound status.
+    self.kind.io_kind() == Some(IoErrorKind::NotFound)
+  }
 }
 
 impl From<ErrorKind> for Error {
-  /// Convert ErrorKind directly to Error.
   #[inline]
   fn from(kind: ErrorKind) -> Self {
     Self::new(kind)
@@ -100,14 +90,12 @@ impl From<ErrorKind> for Error {
 }
 
 impl From<IoError> for Error {
-  /// Automatically wrap I/O errors into the core Error type.
   fn from(e: IoError) -> Self {
     Self::new(ErrorKind::Io(e))
   }
 }
 
 impl From<PersistError> for Error {
-  /// Automatically wrap persistence errors into the core Error type.
   fn from(e: PersistError) -> Self {
     Self::new(ErrorKind::Persist(e))
   }

@@ -1,3 +1,4 @@
+use bstr::ByteSlice;
 use nagato_core::{parse_int, Error, ErrorKind};
 
 use crate::{Hunk, Line, LineKind, Parser, Patch, TokenKind};
@@ -54,9 +55,6 @@ pub fn parse_hunks<'a>(
   Ok(())
 }
 
-/// Collects hunk lines from the parser and updates the patch metadata.
-/// Returns the (old_span, new_span) of the collected lines.
-/// The `stop_condition` closure allows customizing when to stop collecting lines.
 pub fn collect_hunk_lines<'a>(
   parser: &mut Parser<'a>,
   lines: &mut Vec<Line<'a>>,
@@ -163,6 +161,7 @@ pub fn parse_hunk<'a>(
   let (actual_old_span, actual_new_span) =
     collect_hunk_lines(parser, &mut lines, patch, |_| false)?;
 
+  // Hunk integrity is verified by comparing the actual line counts accumulated during parsing against the expected spans declared in the hunk header.
   if actual_old_span != old_span || actual_new_span != new_span {
     return Err(Error::with_line(
       ErrorKind::HunkLineCountMismatch,
@@ -182,22 +181,17 @@ pub fn parse_hunk<'a>(
   })
 }
 
-/// Parse a range in the format "line[,span]".
 fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
-  let (line, rest) =
-    parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRange)?;
+  let (line_part, span_part) = range_bytes
+    .split_once_str(b",")
+    .unwrap_or((range_bytes, b"1"));
 
-  if rest.is_empty() {
-    return Ok((line, 1));
-  }
-
-  let rest = rest.strip_prefix(b",").ok_or(ErrorKind::InvalidHunkRange)?;
-  let (span, rest) =
-    parse_int::<u32>(rest, 10).ok_or(ErrorKind::InvalidHunkRange)?;
-
-  if !rest.is_empty() {
-    return Err(ErrorKind::InvalidHunkRange);
-  }
+  let line = parse_int::<u32>(line_part, 10)
+    .map(|(v, _)| v)
+    .ok_or(ErrorKind::InvalidHunkRange)?;
+  let span = parse_int::<u32>(span_part, 10)
+    .map(|(v, _)| v)
+    .ok_or(ErrorKind::InvalidHunkRange)?;
 
   Ok((line, span))
 }

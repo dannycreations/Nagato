@@ -11,13 +11,13 @@ use std::{
 
 use nagato_core::{Error, ErrorKind};
 
-/// Git's base85 alphabet
+// Git's base85 alphabet
 const ENCODE_MAP: &[u8; 85] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
-/// Maximum decoded length of a single git binary line (Z = 52 bytes)
+// Maximum decoded length of a single git binary line (Z = 52 bytes)
 const MAX_DECODED_LINE_LEN: usize = 52;
 
-/// Precomputed lookup table for base85 decoding to avoid linear searches.
-/// Values are stored as i8 where -1 indicates an invalid character.
+// Precomputed lookup table for base85 decoding to avoid linear searches.
+// Values are stored as i8 where -1 indicates an invalid character.
 const DECODE_MAP: [i8; 256] = {
   let mut map = [-1i8; 256];
   let mut i = 0;

@@ -36,7 +36,6 @@ impl<'a> Lexer<'a> {
     }
   }
 
-  /// Set the lexer mode.
   pub(crate) fn set_mode(&mut self, mode: LexerMode) {
     self.mode = mode;
   }
@@ -46,6 +45,7 @@ impl<'a> Lexer<'a> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
+    // Tokenization mode is dynamically toggled between text and binary based on the current lexer state to ensure correct parsing of mixed-content patches.
     let res = match self.mode {
       LexerMode::Binary => self.tokenize_binary(line),
       LexerMode::Text => self.tokenize_text(line),
@@ -56,7 +56,6 @@ impl<'a> Lexer<'a> {
     Some(res)
   }
 
-  /// Advance to the next line and return it, normalized.
   #[inline]
   fn next_line(&mut self) -> Option<&'a [u8]> {
     let (line, next_input) = get_line(&self.input[self.pos..])?;

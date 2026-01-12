@@ -10,9 +10,9 @@ repository = "https://github.com/dannycreations/Nagato"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
-assert_cmd = "2.1.1"
+assert_cmd = "2.1.2"
 bstr = { version = "1.12.1", features = ["std"] }
-clap = { version = "4.5.53", features = ["derive"] }
+clap = { version = "4.5.54", features = ["derive"] }
 criterion = "0.8.1"
 flate2 = "1.1.5"
 hex = "0.4.3"

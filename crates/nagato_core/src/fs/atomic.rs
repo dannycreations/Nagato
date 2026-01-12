@@ -10,16 +10,14 @@ use tempfile::NamedTempFile;
 
 use crate::{Error, ErrorKind};
 
-/// Atomic file writer that uses a temporary file and renames it on commit.
-/// This ensures that the destination file is only updated if the write succeeds.
+const WRITE_BUFFER_SIZE: usize = 1024 * 1024;
+
 pub struct AtomicWriter {
   writer: BufWriter<NamedTempFile>,
   dest_path: PathBuf,
 }
 
 impl AtomicWriter {
-  /// Create a new atomic writer for the given path.
-  /// The temporary file is created in the same directory as the destination file.
   pub fn new(path: &Path) -> Result<Self, Error> {
     let parent = path.parent().ok_or_else(|| {
       Error::new(ErrorKind::Io(IoError::new(
@@ -28,8 +26,7 @@ impl AtomicWriter {
       )))
     })?;
     let tempfile = NamedTempFile::new_in(parent)?;
-    // 1MB buffer for high-performance writes
-    let writer = BufWriter::with_capacity(1024 * 1024, tempfile);
+    let writer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, tempfile);
 
     Ok(Self {
       writer,
@@ -37,7 +34,6 @@ impl AtomicWriter {
     })
   }
 
-  /// Commit the changes by persisting the temporary file to the destination path.
   pub fn commit(mut self) -> Result<(), Error> {
     self.writer.flush()?;
     self

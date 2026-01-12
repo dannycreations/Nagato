@@ -5,7 +5,6 @@ use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
 use crate::{apply, Patch};
 
-/// Read source file into memory map, returning None if path is /dev/null or file not found.
 pub fn read_source_or_empty(
   fs: &FileSystem,
   path: &[u8],
@@ -16,7 +15,6 @@ pub fn read_source_or_empty(
   fs.read(path).map(Some).ignore_not_found()
 }
 
-/// Helper to apply patch to a writer and handle source reading.
 fn apply_to_writer(
   fs: &FileSystem,
   patch: &Patch<'_>,
@@ -26,7 +24,6 @@ fn apply_to_writer(
   apply(writer, patch, source.as_deref().unwrap_or(&[]))
 }
 
-/// Ensure the destination file does not exist when creating a new file.
 fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
   if fs.exists(path) {
     Err(Error::new(ErrorKind::Io(std::io::Error::new(
@@ -38,8 +35,6 @@ fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
   }
 }
 
-/// The main worker for applying a patch to the file system.
-/// Handles content changes, metadata updates, and deletions in a unified pipeline.
 pub fn patch_file_worker(
   fs: &FileSystem,
   patch: &Patch<'_>,
@@ -52,22 +47,15 @@ pub fn patch_file_worker(
   let is_deletion = patch.new_file.is_dev_null();
   let has_content = patch.has_content_changes();
 
+  // Patch application logic is dispatched based on the presence of content changes and the nature of the file operation to minimize redundant I/O.
   let result = if check || is_deletion {
-    // Dry-run for checks, or full application to sink for deletions.
     apply_to_writer(fs, patch, &mut sink())?;
-    if !check && is_deletion {
-      let source_path = patch.source_file();
-      if !source_path.is_dev_null() && !fs.exists(source_path) {
-        return Err(Error::new(ErrorKind::Io(std::io::Error::new(
-          std::io::ErrorKind::NotFound,
-          "Source file to delete not found",
-        ))));
-      }
-      fs.remove_file(source_path).ignore_not_found()?;
+    // File deletion is performed by directly invoking the removal operation on non-null source paths to ensure consistent state after patch application.
+    if !check && is_deletion && !patch.source_file().is_dev_null() {
+      fs.remove_file(patch.source_file())?;
     }
     Ok(())
   } else if has_content {
-    // Atomic content application.
     if patch.old_file.is_dev_null() {
       ensure_not_exists(fs, patch.new_file)?;
     }
@@ -82,8 +70,8 @@ pub fn patch_file_worker(
     }
     Ok(())
   } else {
-    // Metadata-only changes (rename, copy, or create empty).
     let source_path = patch.source_file();
+    // Structural changes like renames, copies, or file creations are handled by mapping the intended operation to the corresponding filesystem primitive.
     if patch.rename_to.is_some() {
       fs.rename(source_path, patch.new_file)?;
     } else if patch.copy_to.is_some() {

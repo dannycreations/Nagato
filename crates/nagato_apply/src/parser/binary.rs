@@ -8,12 +8,8 @@ pub fn parse_binary_patch<'a>(
   binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
   patch.binary = true;
-  while let Some(res) = parser.tokens.peek() {
-    let item = match res {
-      Ok(i) => i,
-      Err(_) => return Err(parser.tokens.next().transpose().unwrap_err()),
-    };
-
+  // Binary patches are parsed by consuming type-specific headers followed by sequential blocks of encoded binary data.
+  while let Some(item) = parser.peek_token()? {
     match item.token {
       TokenKind::BinaryPatchType { kind, size } => {
         parser.tokens.next();
@@ -27,14 +23,7 @@ pub fn parse_binary_patch<'a>(
         // Pre-allocate binary data buffer.
         // Git base85 encodes 5 characters into 4 bytes, with max 52 decoded bytes per line.
         let mut data = Vec::with_capacity((size / 52) as usize + 1);
-        while let Some(res) = parser.tokens.peek() {
-          let item = match res {
-            Ok(i) => i,
-            Err(_) => {
-              return Err(parser.tokens.next().transpose().unwrap_err())
-            }
-          };
-
+        while let Some(item) = parser.peek_token()? {
           if let TokenKind::BinaryData(line) = item.token {
             data.push(line);
             parser.tokens.next();

@@ -4,8 +4,6 @@ use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
-/// Specific types of errors that can occur in Nagato.
-/// Flattened to reduce boilerplate and simplify matching.
 #[derive(ThisError, Debug)]
 pub enum ErrorKind {
   #[error("I/O error")]
@@ -13,7 +11,6 @@ pub enum ErrorKind {
   #[error("Failed to persist temporary file")]
   Persist(#[from] PersistError),
 
-  // Parse Errors
   #[error("Invalid hunk range")]
   InvalidHunkRange,
   #[error("Missing range in hunk header")]
@@ -39,7 +36,6 @@ pub enum ErrorKind {
   #[error("Unexpected end of patch")]
   UnexpectedEof,
 
-  // Apply Errors
   #[error("Could not apply hunk")]
   CouldNotApplyHunk,
   #[error("Binary patch content is not supported")]
@@ -62,6 +58,7 @@ impl PartialEq for ErrorKind {
   fn eq(&self, other: &Self) -> bool {
     match (self, other) {
       (Self::Io(a), Self::Io(b)) => a.kind() == b.kind(),
+      (Self::Persist(a), Self::Persist(b)) => a.error.kind() == b.error.kind(),
       (Self::CantOpenPatch(a, ae), Self::CantOpenPatch(b, be)) => {
         a == b && ae.kind() == be.kind()
       }
@@ -73,11 +70,11 @@ impl PartialEq for ErrorKind {
 }
 
 impl ErrorKind {
-  /// Returns the I/O error kind if this is an I/O error.
   pub fn io_kind(&self) -> Option<IoErrorKind> {
     match self {
       Self::Io(e) => Some(e.kind()),
       Self::CantOpenPatch(_, e) => Some(e.kind()),
+      Self::Persist(e) => Some(e.error.kind()),
       _ => None,
     }
   }

@@ -16,7 +16,6 @@ mod trimmer;
 pub use args::*;
 pub use clap::*;
 
-/// Main entry point for the CLI logic.
 pub fn run(cli: &Cli) -> Result<(), Error> {
   if let Some(command) = &cli.command {
     match command {

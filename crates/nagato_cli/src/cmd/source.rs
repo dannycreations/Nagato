@@ -7,20 +7,18 @@ use std::{
 use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind};
 
-/// Represents a source of patch data.
 pub enum PatchSource {
   Stdin(Vec<u8>),
   File { name: Box<str>, content: Mmap },
 }
 
 impl PatchSource {
-  /// Returns an iterator over patch sources from the provided list of files, or from stdin if empty.
-  /// This allows processing patches one by one without loading all of them into memory at once.
   pub fn iter(
     files: Vec<OsString>,
   ) -> Box<dyn Iterator<Item = Result<Self, Error>>> {
     if files.is_empty() {
       let mut content = Vec::new();
+      // Standard input is read to completion when no files are specified, ensuring that piped patch data is fully captured before processing begins.
       let res = stdin()
         .read_to_end(&mut content)
         .map(|_| Self::Stdin(content))
@@ -28,6 +26,7 @@ impl PatchSource {
       return Box::new(std::iter::once(res));
     }
 
+    // Multiple patch files are processed by mapping each path to a memory-mapped file source, providing efficient read access for the parser.
     Box::new(files.into_iter().map(|path| {
       let file_name: Box<str> = path.to_string_lossy().into();
       let file = File::open(&path).map_err(|e| {
