@@ -7,11 +7,14 @@ use std::{
 use nagato_apply::Parser;
 use nagato_core::{Error, FileSystem};
 use source::PatchSource;
-use trimmer::process_trim;
+use split::process_split;
+use trim::process_trim;
 
 mod args;
 mod source;
-mod trimmer;
+mod split;
+mod trim;
+mod utils;
 
 pub use args::*;
 pub use clap::*;
@@ -19,8 +22,11 @@ pub use clap::*;
 pub fn run(cli: &Cli) -> Result<(), Error> {
   if let Some(command) = &cli.command {
     match command {
-      Commands::Trim { files, split } => {
-        return process_trim(files, *split);
+      Commands::Trim { files, directory } => {
+        return process_trim(files, directory.as_ref().map(PathBuf::from));
+      }
+      Commands::Split { files, directory } => {
+        return process_split(files, directory.as_ref().map(PathBuf::from));
       }
     }
   }

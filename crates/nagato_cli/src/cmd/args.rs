@@ -12,7 +12,7 @@ pub struct Cli {
   #[command(subcommand)]
   pub command: Option<Commands>,
 
-  /// The path to the patch file(s).
+  /// The path to the patch files.
   pub files: Vec<OsString>,
   /// Print version information.
   #[arg(short, long)]
@@ -32,10 +32,18 @@ pub struct Cli {
 pub enum Commands {
   /// Trim optional parts from a patch file.
   Trim {
-    /// The path to the patch file(s) to trim.
+    /// The path to the patch files to trim.
     files: Vec<OsString>,
-    /// Split multi-file patches into independent files.
+    /// The directory to store the trim patches.
     #[arg(short, long)]
-    split: bool,
+    directory: Option<OsString>,
+  },
+  /// Split multi-file patches into independent files.
+  Split {
+    /// The path to the patch files to split.
+    files: Vec<OsString>,
+    /// The directory to store the split patches.
+    #[arg(short, long)]
+    directory: Option<OsString>,
   },
 }
