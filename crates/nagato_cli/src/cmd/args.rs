@@ -46,4 +46,12 @@ pub enum Commands {
     #[arg(short, long)]
     directory: Option<OsString>,
   },
+  /// Merge multiple patch files into a single patch file.
+  Merge {
+    /// The path to the patch files to merge.
+    files: Vec<OsString>,
+    /// The output path for the merged patch.
+    #[arg(short, long)]
+    output: Option<OsString>,
+  },
 }

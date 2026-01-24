@@ -4,6 +4,7 @@ use std::{
   path::PathBuf,
 };
 
+use merge::process_merge;
 use nagato_apply::Parser;
 use nagato_core::{Error, FileSystem};
 use source::PatchSource;
@@ -11,6 +12,7 @@ use split::process_split;
 use trim::process_trim;
 
 mod args;
+mod merge;
 mod source;
 mod split;
 mod trim;
@@ -27,6 +29,9 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
       }
       Commands::Split { files, directory } => {
         return process_split(files, directory.as_ref().map(PathBuf::from));
+      }
+      Commands::Merge { files, output } => {
+        return process_merge(files, output.as_ref().map(PathBuf::from));
       }
     }
   }
