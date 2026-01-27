@@ -304,7 +304,7 @@ test_patch_ok!(
   creates_file_in_new_directory,
   initial_fs: {},
   diff: r#"
-    diff --git a/new/dir/file.txt b/new/dir/file.txt
+    diff --git b/new/dir/file.txt b/new/dir/file.txt
     new file mode 100644
     index 0000000..abcdef0
     --- /dev/null
@@ -436,7 +436,7 @@ test_patch_ok!(
   applies_patch_with_negative_offset,
   initial_fs: { "file.txt" => "line 1\nline 2\nline 3\nline 4\nline 5\n" },
   diff: r#"
-    diff --git a/file.txt b/file.txt
+    diff --git b/file.txt b/file.txt
     --- a/file.txt
     +++ b/file.txt
     @@ -5,1 +4,1 @@
@@ -547,5 +547,23 @@ test_patch_ok!(
     let content = fs::read_to_string(root.join("file.txt")).unwrap();
     let needle = "same context\nwrong place\n\nsame context\nmodified place\n";
     assert_eq!(content, needle);
+  }
+);
+
+test_patch_ok!(
+  handles_quoted_filenames_with_spaces,
+  initial_fs: { "file name with spaces.txt" => "old content\n" },
+  diff: r#"
+    diff --git "a/file name with spaces.txt" "b/file name with spaces.txt"
+    index 0000000..0000000 100644
+    --- "a/file name with spaces.txt"
+    +++ "b/file name with spaces.txt"
+    @@ -1 +1 @@
+    -old content
+    +new content
+  "#,
+  assertions: |root| {
+    let content = fs::read_to_string(root.join("file name with spaces.txt")).unwrap();
+    assert_eq!(content, "new content\n");
   }
 );

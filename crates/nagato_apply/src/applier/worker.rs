@@ -57,15 +57,15 @@ pub fn patch_file_worker(
     Ok(())
   } else if has_content {
     if patch.old_file.is_dev_null() {
-      ensure_not_exists(fs, patch.new_file)?;
+      ensure_not_exists(fs, &patch.new_file)?;
     }
 
-    let mut writer = fs.write(patch.new_file)?;
+    let mut writer = fs.write(&patch.new_file)?;
     apply_to_writer(fs, patch, &mut writer)?;
     writer.commit()?;
 
     let source_path = patch.source_file();
-    if patch.rename_to.is_some() && source_path != patch.new_file {
+    if patch.rename_to.is_some() && patch.new_file != source_path {
       fs.remove_file(source_path).ignore_not_found()?;
     }
     Ok(())
@@ -73,12 +73,12 @@ pub fn patch_file_worker(
     let source_path = patch.source_file();
     // Structural changes like renames, copies, or file creations are handled by mapping the intended operation to the corresponding filesystem primitive.
     if patch.rename_to.is_some() {
-      fs.rename(source_path, patch.new_file)?;
+      fs.rename(source_path, &patch.new_file)?;
     } else if patch.copy_to.is_some() {
-      fs.copy(source_path, patch.new_file)?;
+      fs.copy(source_path, &patch.new_file)?;
     } else if patch.old_file.is_dev_null() {
-      ensure_not_exists(fs, patch.new_file)?;
-      fs.write(patch.new_file)?.commit()?;
+      ensure_not_exists(fs, &patch.new_file)?;
+      fs.write(&patch.new_file)?.commit()?;
     }
     Ok(())
   };
@@ -89,7 +89,7 @@ pub fn patch_file_worker(
 
   if !check && !patch.new_file.is_dev_null() {
     if let Some(mode) = patch.new_mode {
-      fs.set_permissions(patch.new_file, mode)?;
+      fs.set_permissions(&patch.new_file, mode)?;
     }
   }
 

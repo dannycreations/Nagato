@@ -1,4 +1,5 @@
 use std::{
+  borrow::Cow,
   io::{Result as IoResult, Write},
   mem,
 };
@@ -11,13 +12,13 @@ use crate::{BinaryFragment, Hunk, LineKind};
 pub struct Patch<'a> {
   pub old_hash: Option<&'a [u8]>,
   pub new_hash: Option<&'a [u8]>,
-  pub old_file: &'a [u8],
-  pub new_file: &'a [u8],
+  pub old_file: Cow<'a, [u8]>,
+  pub new_file: Cow<'a, [u8]>,
   pub hunks: Vec<Hunk<'a>>,
-  pub copy_from: Option<&'a [u8]>,
-  pub copy_to: Option<&'a [u8]>,
-  pub rename_from: Option<&'a [u8]>,
-  pub rename_to: Option<&'a [u8]>,
+  pub copy_from: Option<Cow<'a, [u8]>>,
+  pub copy_to: Option<Cow<'a, [u8]>>,
+  pub rename_from: Option<Cow<'a, [u8]>>,
+  pub rename_to: Option<Cow<'a, [u8]>>,
   pub new_mode: Option<u32>,
   pub old_mode: Option<u32>,
   pub similarity: Option<u32>,
@@ -29,29 +30,29 @@ pub struct Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
-  pub fn source_file(&self) -> &'a [u8] {
-    self.copy_from.unwrap_or(self.old_file)
+  pub fn source_file(&self) -> &[u8] {
+    self.copy_from.as_deref().unwrap_or(&self.old_file)
   }
 
   pub fn has_content_changes(&self) -> bool {
     !self.hunks.is_empty() || !self.binary_fragments.is_empty()
   }
 
-  pub fn filename(&self) -> &'a [u8] {
+  pub fn filename(&self) -> &[u8] {
     if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
-      self.new_file
+      &self.new_file
     } else {
-      self.old_file
+      &self.old_file
     }
   }
 
   pub fn invert(mut self) -> Self {
     mem::swap(&mut self.old_file, &mut self.new_file);
-    mem::swap(&mut self.rename_from, &mut self.rename_to);
-    mem::swap(&mut self.copy_from, &mut self.copy_to);
-    mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
     mem::swap(&mut self.old_hash, &mut self.new_hash);
     mem::swap(&mut self.old_mode, &mut self.new_mode);
+    mem::swap(&mut self.old_file_no_newline, &mut self.new_file_no_newline);
+    mem::swap(&mut self.copy_from, &mut self.copy_to);
+    mem::swap(&mut self.rename_from, &mut self.rename_to);
 
     for hunk in self.hunks.iter_mut() {
       hunk.invert();

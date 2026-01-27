@@ -1,4 +1,4 @@
-use nagato_apply::TokenKind;
+use nagato_apply::{BinaryPaths, TokenKind};
 
 test_lexer_ok!(
   lexes_new_mode,
@@ -34,24 +34,24 @@ test_lexer_ok!(
 test_lexer_ok!(
   lexes_rename_file,
   "rename from old.txt\nrename to new.txt",
-  TokenKind::RenameFrom(b"old.txt"),
-  TokenKind::RenameTo(b"new.txt")
+  TokenKind::RenameFrom(b"old.txt".into()),
+  TokenKind::RenameTo(b"new.txt".into())
 );
 
 test_lexer_ok!(
   lexes_copy_file,
   "copy from old.txt\ncopy to new.txt",
-  TokenKind::CopyFrom(b"old.txt"),
-  TokenKind::CopyTo(b"new.txt")
+  TokenKind::CopyFrom(b"old.txt".into()),
+  TokenKind::CopyTo(b"new.txt".into())
 );
 
 test_lexer_ok!(
   lexes_binary_files_differ,
   "Binary files a/old.bin and b/new.bin differ",
-  TokenKind::Binary {
-    old_file: b"old.bin",
-    new_file: b"new.bin",
-  }
+  TokenKind::Binary(Box::new(BinaryPaths {
+    old_file: b"old.bin".into(),
+    new_file: b"new.bin".into(),
+  }))
 );
 
 test_lexer_ok!(
@@ -66,17 +66,17 @@ test_lexer_ok!(
     +Hello, world!
      context
   "#,
-  TokenKind::FileHeader {
-    old_file: b"file.txt",
-    new_file: b"file.txt",
-  },
+  TokenKind::FileHeader(Box::new(BinaryPaths {
+    old_file: b"file.txt".into(),
+    new_file: b"file.txt".into(),
+  })),
   TokenKind::Index {
     old_hash: b"1234567",
     new_hash: b"abcdefg",
     mode: Some(b"100644"),
   },
-  TokenKind::OldFile(b"file.txt"),
-  TokenKind::NewFile(b"file.txt"),
+  TokenKind::OldFile(b"file.txt".into()),
+  TokenKind::NewFile(b"file.txt".into()),
   TokenKind::HunkHeader {
     old_range: b"1,2",
     new_range: b"1,2",
@@ -102,17 +102,17 @@ test_lexer_ok!(
     +world
     \ No newline at end of file
   "#,
-  TokenKind::FileHeader {
-    old_file: b"file.txt",
-    new_file: b"file.txt"
-  },
+  TokenKind::FileHeader(Box::new(BinaryPaths {
+    old_file: b"file.txt".into(),
+    new_file: b"file.txt".into()
+  })),
   TokenKind::Index {
     old_hash: b"1234567",
     new_hash: b"abcdefg",
     mode: Some(b"100644")
   },
-  TokenKind::OldFile(b"file.txt"),
-  TokenKind::NewFile(b"file.txt"),
+  TokenKind::OldFile(b"file.txt".into()),
+  TokenKind::NewFile(b"file.txt".into()),
   TokenKind::HunkHeader {
     old_range: b"1,2",
     new_range: b"1,2",
@@ -139,8 +139,8 @@ test_lexer_ok!(
 test_lexer_ok!(
   lexes_malformed_git_prefix,
   "diff --git file.txt b/file.txt",
-  TokenKind::FileHeader {
-    old_file: b"file.txt",
-    new_file: b"file.txt",
-  }
+  TokenKind::FileHeader(Box::new(BinaryPaths {
+    old_file: b"file.txt".into(),
+    new_file: b"file.txt".into(),
+  }))
 );

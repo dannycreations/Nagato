@@ -1,12 +1,100 @@
-use std::io::{Result as IoResult, Write};
+use std::{
+  borrow::Cow,
+  io::{Result as IoResult, Write},
+};
 
 use bstr::ByteSlice;
 
 #[inline(always)]
-pub fn strip_git_prefix(s: &[u8]) -> &[u8] {
+pub fn strip_prefix(s: &[u8]) -> &[u8] {
   s.strip_prefix(b"a/")
     .or_else(|| s.strip_prefix(b"b/"))
     .unwrap_or(s)
+}
+
+pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
+  if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
+    return Cow::Borrowed(strip_prefix(s));
+  }
+
+  let mut res = Vec::with_capacity(s.len() - 2);
+  let mut i = 1;
+  while i < s.len() - 1 {
+    if s[i] == b'\\' && i + 1 < s.len() - 1 {
+      i += 1;
+      match s[i] {
+        b'"' => res.push(b'"'),
+        b'\\' => res.push(b'\\'),
+        b't' => res.push(b'\t'),
+        b'n' => res.push(b'\n'),
+        b'r' => res.push(b'\r'),
+        b'0'..=b'7' => {
+          let mut octal = s[i] - b'0';
+          let mut count = 1;
+          while count < 3 && i + 1 < s.len() - 1 {
+            let next = s[i + 1];
+            if (b'0'..=b'7').contains(&next) {
+              octal = octal * 8 + (next - b'0');
+              i += 1;
+              count += 1;
+            } else {
+              break;
+            }
+          }
+          res.push(octal);
+        }
+        _ => res.push(s[i]),
+      }
+    } else {
+      res.push(s[i]);
+    }
+    i += 1;
+  }
+
+  match strip_prefix(&res) {
+    s if s.len() == res.len() => Cow::Owned(res),
+    s => {
+      let start = res.len() - s.len();
+      let mut v = res;
+      v.drain(0..start);
+      Cow::Owned(v)
+    }
+  }
+}
+
+#[allow(clippy::type_complexity)]
+pub fn split_diff_paths(line: &[u8]) -> Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)> {
+  let line = line.trim();
+  if line.is_empty() {
+    return None;
+  }
+
+  fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
+    if s.is_empty() {
+      return None;
+    }
+    if s[0] == b'"' {
+      let mut i = 1;
+      while i < s.len() {
+        if s[i] == b'"' {
+          return Some((&s[..i + 1], s[i + 1..].trim()));
+        }
+        if s[i] == b'\\' && i + 1 < s.len() {
+          i += 1;
+        }
+        i += 1;
+      }
+      None
+    } else {
+      let (path, rest) = s.split_once_str(b" ").unwrap_or((s, &[]));
+      Some((path, rest.trim()))
+    }
+  }
+
+  let (p1, rest) = next_path(line)?;
+  let (p2, _) = next_path(rest)?;
+
+  Some((unquote_path(p1), unquote_path(p2)))
 }
 
 #[inline]

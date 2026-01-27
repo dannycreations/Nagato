@@ -1,3 +1,4 @@
+#[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum BinaryKind {
   Literal,

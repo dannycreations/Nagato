@@ -1,7 +1,7 @@
 use bstr::ByteSlice;
-use nagato_core::{strip_git_prefix, ErrorKind};
+use nagato_core::{split_diff_paths, unquote_path, ErrorKind};
 
-use crate::{lexer::LexerMode, Lexer, TokenKind};
+use crate::{lexer::LexerMode, BinaryPaths, Lexer, TokenKind};
 
 impl<'a> Lexer<'a> {
   #[inline]
@@ -50,14 +50,14 @@ impl<'a> Lexer<'a> {
     match line[0] {
       b'+' => {
         if let Some(rest) = line.strip_prefix(b"+++ ") {
-          Ok(TokenKind::NewFile(strip_git_prefix(rest)))
+          Ok(TokenKind::NewFile(unquote_path(rest)))
         } else {
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
       b'-' => {
         if let Some(rest) = line.strip_prefix(b"--- ") {
-          Ok(TokenKind::OldFile(strip_git_prefix(rest)))
+          Ok(TokenKind::OldFile(unquote_path(rest)))
         } else {
           Ok(TokenKind::Deletion(&line[1..]))
         }
@@ -66,11 +66,11 @@ impl<'a> Lexer<'a> {
       b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
       b'd' => self.parse_git_header(line),
       b'f' if line.starts_with(b"file ") => {
-        let file = strip_git_prefix(line[5..].trim());
-        Ok(TokenKind::FileHeader {
-          old_file: file,
+        let file = unquote_path(line[5..].trim());
+        Ok(TokenKind::FileHeader(Box::new(BinaryPaths {
+          old_file: file.clone(),
           new_file: file,
-        })
+        })))
       }
       b'G' if line == b"GIT binary patch" => {
         self.set_mode(LexerMode::Binary);
@@ -134,12 +134,11 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"diff --git ") {
-      let mut parts = rest.fields();
-      let old_file = parts.next().map(strip_git_prefix);
-      let new_file = parts.next().map(strip_git_prefix);
-
-      if let (Some(old_file), Some(new_file)) = (old_file, new_file) {
-        Ok(TokenKind::FileHeader { old_file, new_file })
+      if let Some((old_file, new_file)) = split_diff_paths(rest) {
+        Ok(TokenKind::FileHeader(Box::new(BinaryPaths {
+          old_file,
+          new_file,
+        })))
       } else {
         Err(ErrorKind::InvalidFileHeader)
       }
@@ -177,13 +176,13 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"rename from ") {
-      Ok(TokenKind::RenameFrom(rest))
+      Ok(TokenKind::RenameFrom(unquote_path(rest)))
     } else if let Some(rest) = line.strip_prefix(b"rename to ") {
-      Ok(TokenKind::RenameTo(rest))
+      Ok(TokenKind::RenameTo(unquote_path(rest)))
     } else if let Some(rest) = line.strip_prefix(b"copy from ") {
-      Ok(TokenKind::CopyFrom(rest))
+      Ok(TokenKind::CopyFrom(unquote_path(rest)))
     } else if let Some(rest) = line.strip_prefix(b"copy to ") {
-      Ok(TokenKind::CopyTo(rest))
+      Ok(TokenKind::CopyTo(unquote_path(rest)))
     } else {
       Err(ErrorKind::UnexpectedLine)
     }
@@ -195,14 +194,18 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     // Binary file markers are parsed by extracting the file paths from a standardized "Binary files ... differ" message using byte-level split operations.
-    let (old_file, new_file) = line[13..]
-      .strip_suffix(b" differ")
-      .and_then(|s| s.split_once_str(b" and "))
-      .ok_or(ErrorKind::InvalidBinaryFilesLine)?;
-    Ok(TokenKind::Binary {
-      old_file: strip_git_prefix(old_file),
-      new_file: strip_git_prefix(new_file),
-    })
+    let rest = &line[13..];
+    let rest = rest.strip_suffix(b" differ").unwrap_or(rest);
+
+    // This is a bit tricky if paths have " and " in them, but usually git quotes them.
+    // If it's quoted, we should handle it.
+    let (old_file, new_file) =
+      split_and(rest).ok_or(ErrorKind::InvalidBinaryFilesLine)?;
+
+    Ok(TokenKind::Binary(Box::new(BinaryPaths {
+      old_file: unquote_path(old_file),
+      new_file: unquote_path(new_file),
+    })))
   }
 
   #[inline]
@@ -217,4 +220,29 @@ impl<'a> Lexer<'a> {
       .map(f)
       .ok_or(ErrorKind::InvalidFileMode)
   }
+}
+
+fn split_and(s: &[u8]) -> Option<(&[u8], &[u8])> {
+  if s.is_empty() {
+    return None;
+  }
+  if s[0] == b'"' {
+    let mut i = 1;
+    while i < s.len() {
+      if s[i] == b'"' {
+        let path = &s[..i + 1];
+        let rest = s[i + 1..].trim();
+        if let Some(rest) = rest.strip_prefix(b"and ") {
+          return Some((path, rest.trim()));
+        }
+      }
+      if s[i] == b'\\' && i + 1 < s.len() {
+        i += 1;
+      }
+      i += 1;
+    }
+  } else {
+    return s.split_once_str(b" and ");
+  }
+  None
 }

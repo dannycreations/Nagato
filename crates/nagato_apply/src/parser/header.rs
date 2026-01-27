@@ -11,9 +11,9 @@ pub fn parse_header<'a>(
   // Patch headers are processed by iteratively peeking at tokens and updating patch metadata until a non-header token is encountered.
   while let Some(item) = parser.peek_token()? {
     match &item.token {
-      TokenKind::FileHeader { old_file, new_file } => {
-        patch.old_file = old_file;
-        patch.new_file = new_file;
+      TokenKind::FileHeader(paths) => {
+        patch.old_file = paths.old_file.clone();
+        patch.new_file = paths.new_file.clone();
       }
       TokenKind::Index {
         old_hash,
@@ -27,22 +27,22 @@ pub fn parse_header<'a>(
         });
       }
       TokenKind::OldFile(file) => {
-        patch.old_file = file;
+        patch.old_file = file.clone();
       }
       TokenKind::NewFile(file) => {
-        patch.new_file = file;
+        patch.new_file = file.clone();
       }
       TokenKind::CopyFrom(from) => {
-        patch.copy_from = Some(from);
+        patch.copy_from = Some(from.clone());
       }
       TokenKind::CopyTo(to) => {
-        patch.copy_to = Some(to);
+        patch.copy_to = Some(to.clone());
       }
       TokenKind::RenameFrom(from) => {
-        patch.rename_from = Some(from);
+        patch.rename_from = Some(from.clone());
       }
       TokenKind::RenameTo(to) => {
-        patch.rename_to = Some(to);
+        patch.rename_to = Some(to.clone());
       }
       TokenKind::NewFileMode(mode) => {
         patch.new_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
@@ -56,9 +56,9 @@ pub fn parse_header<'a>(
       TokenKind::Dissimilarity(p) => {
         patch.dissimilarity = parse_percentage(p).ok();
       }
-      TokenKind::Binary { old_file, new_file } => {
-        patch.old_file = old_file;
-        patch.new_file = new_file;
+      TokenKind::Binary(paths) => {
+        patch.old_file = paths.old_file.clone();
+        patch.new_file = paths.new_file.clone();
         patch.binary = true;
         parser.tokens.next();
       }

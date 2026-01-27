@@ -1,4 +1,5 @@
-#[derive(Debug, Clone, PartialEq)]
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum LineKind {
   Addition,
   Deletion,

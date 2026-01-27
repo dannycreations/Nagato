@@ -11,6 +11,13 @@ impl IsDevNull for [u8] {
   }
 }
 
+impl IsDevNull for Vec<u8> {
+  #[inline]
+  fn is_dev_null(&self) -> bool {
+    self.as_slice().is_dev_null()
+  }
+}
+
 pub trait IgnoreNotFound<T> {
   fn ignore_not_found(self) -> Result<T, Error>;
 }

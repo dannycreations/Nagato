@@ -1,11 +1,10 @@
+use std::borrow::Cow;
+
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind<'a> {
   // The header of a file diff, containing the old and new file paths.
-  FileHeader {
-    old_file: &'a [u8],
-    new_file: &'a [u8],
-  },
+  FileHeader(Box<BinaryPaths<'a>>),
   // The index line, containing the hashes of the old and new files.
   Index {
     old_hash: &'a [u8],
@@ -13,9 +12,9 @@ pub enum TokenKind<'a> {
     mode: Option<&'a [u8]>,
   },
   // The old file path (`---`).
-  OldFile(&'a [u8]),
+  OldFile(Cow<'a, [u8]>),
   // The new file path (`+++`).
-  NewFile(&'a [u8]),
+  NewFile(Cow<'a, [u8]>),
   // The header of a hunk, containing the line numbers and spans.
   HunkHeader {
     old_range: &'a [u8],
@@ -31,13 +30,13 @@ pub enum TokenKind<'a> {
   // Indicates that there is no newline at the end of the file.
   NoNewline,
   // The source file in a copy operation.
-  CopyFrom(&'a [u8]),
+  CopyFrom(Cow<'a, [u8]>),
   // The destination file in a copy operation.
-  CopyTo(&'a [u8]),
+  CopyTo(Cow<'a, [u8]>),
   // The old file name in a rename operation.
-  RenameFrom(&'a [u8]),
+  RenameFrom(Cow<'a, [u8]>),
   // The new file name in a rename operation.
-  RenameTo(&'a [u8]),
+  RenameTo(Cow<'a, [u8]>),
   // The new file mode.
   NewFileMode(&'a [u8]),
   // The old file mode.
@@ -49,10 +48,7 @@ pub enum TokenKind<'a> {
   // The dissimilarity index in a rename or copy operation.
   Dissimilarity(&'a [u8]),
   // Indicates that two binary files are different.
-  Binary {
-    old_file: &'a [u8],
-    new_file: &'a [u8],
-  },
+  Binary(Box<BinaryPaths<'a>>),
   // The header of a git binary patch.
   GitBinaryPatchHeader,
   // The type and size of a binary patch fragment.
@@ -64,4 +60,10 @@ pub enum TokenKind<'a> {
   BinaryData(&'a [u8]),
   // A label for the following hunk.
   Label(&'a [u8]),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BinaryPaths<'a> {
+  pub old_file: Cow<'a, [u8]>,
+  pub new_file: Cow<'a, [u8]>,
 }
