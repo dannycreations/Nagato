@@ -8,7 +8,7 @@ pub struct Hunk<'a> {
   pub old_span: u32,
   pub new_line: u32,
   pub new_span: u32,
-  pub lines: Vec<Line<'a>>,
+  pub lines: Box<[Line<'a>]>,
   pub patch_line_num: u32,
   pub has_header: bool,
   pub label: Option<&'a [u8]>,
@@ -18,13 +18,13 @@ impl<'a> Hunk<'a> {
   pub fn invert(&mut self) {
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
-    for line in self.lines.iter_mut() {
+    self.lines.iter_mut().for_each(|line| {
       line.kind = match line.kind {
         LineKind::Addition => LineKind::Deletion,
         LineKind::Deletion => LineKind::Addition,
         LineKind::Context => LineKind::Context,
       };
-    }
+    });
   }
 
   #[inline]

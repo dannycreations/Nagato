@@ -34,8 +34,8 @@ impl<'a> Parser<'a> {
     header::parse_header(self, &mut patch, &mut binary_fragments)?;
     hunk::parse_hunks(self, &mut patch, &mut hunks)?;
 
-    patch.binary_fragments = binary_fragments;
-    patch.hunks = hunks;
+    patch.binary_fragments = binary_fragments.into_boxed_slice();
+    patch.hunks = hunks.into_boxed_slice();
 
     // Patch validity is checked by ensuring that any content changes are associated with at least one valid file path.
     if !patch.hunks.is_empty()

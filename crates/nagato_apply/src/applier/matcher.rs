@@ -10,12 +10,12 @@ impl Matcher {
   #[inline]
   pub fn verify_match<'s, 'p>(
     &self,
-    mut source: &'s [u8],
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
+    source: &'s [u8],
+    mut lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
     hunk: &Hunk,
   ) -> Result<&'s [u8], Error> {
-    for (offset, hunk_line) in lines_to_match {
-      let (line, next_source) = get_line(source).ok_or_else(|| {
+    lines_to_match.try_fold(source, |src, (offset, hunk_line)| {
+      let (line, next_source) = get_line(src).ok_or_else(|| {
         Error::with_line(
           ErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
@@ -28,9 +28,8 @@ impl Matcher {
           hunk.patch_line_num + 1 + offset as u32,
         ));
       }
-      source = next_source;
-    }
-    Ok(source)
+      Ok(next_source)
+    })
   }
 
   fn get_search_buffer<'s>(
@@ -106,9 +105,10 @@ impl Matcher {
     let finder = Finder::new(needle);
     let mut best_error = None;
     let mut max_offset = 0;
+    let match_iter = finder.find_iter(search_buffer);
 
     // The search buffer is scanned for potential matches using a precomputed finder for the first line of the hunk.
-    for match_pos_rel in finder.find_iter(search_buffer) {
+    for match_pos_rel in match_iter {
       let match_pos = buffer_offset + match_pos_rel;
       // Ensure match starts at a line boundary.
       if match_pos > 0 && buffer[match_pos - 1] != b'\n' {

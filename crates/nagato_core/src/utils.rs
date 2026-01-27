@@ -17,38 +17,42 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     return Cow::Borrowed(strip_prefix(s));
   }
 
-  let mut res = Vec::with_capacity(s.len() - 2);
-  let mut i = 1;
-  while i < s.len() - 1 {
-    if s[i] == b'\\' && i + 1 < s.len() - 1 {
-      i += 1;
-      match s[i] {
-        b'"' => res.push(b'"'),
-        b'\\' => res.push(b'\\'),
-        b't' => res.push(b'\t'),
-        b'n' => res.push(b'\n'),
-        b'r' => res.push(b'\r'),
-        b'0'..=b'7' => {
-          let mut octal = s[i] - b'0';
-          let mut count = 1;
-          while count < 3 && i + 1 < s.len() - 1 {
-            let next = s[i + 1];
-            if (b'0'..=b'7').contains(&next) {
-              octal = octal * 8 + (next - b'0');
-              i += 1;
-              count += 1;
-            } else {
-              break;
+  let content = &s[1..s.len() - 1];
+  if !content.contains(&b'\\') {
+    return Cow::Borrowed(strip_prefix(content));
+  }
+
+  let mut res = Vec::with_capacity(content.len());
+  let mut it = content.iter().peekable();
+  while let Some(&b) = it.next() {
+    if b == b'\\' {
+      if let Some(&next) = it.next() {
+        match next {
+          b'"' => res.push(b'"'),
+          b'\\' => res.push(b'\\'),
+          b't' => res.push(b'\t'),
+          b'n' => res.push(b'\n'),
+          b'r' => res.push(b'\r'),
+          b'0'..=b'7' => {
+            let mut octal = next - b'0';
+            for _ in 0..2 {
+              if let Some(&&n) =
+                it.peek().filter(|&&&n| (b'0'..=b'7').contains(&n))
+              {
+                octal = octal * 8 + (n - b'0');
+                it.next();
+              } else {
+                break;
+              }
             }
+            res.push(octal);
           }
-          res.push(octal);
+          _ => res.push(next),
         }
-        _ => res.push(s[i]),
       }
     } else {
-      res.push(s[i]);
+      res.push(b);
     }
-    i += 1;
   }
 
   match strip_prefix(&res) {
@@ -74,15 +78,14 @@ pub fn split_diff_paths(line: &[u8]) -> Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)> {
       return None;
     }
     if s[0] == b'"' {
-      let mut i = 1;
-      while i < s.len() {
-        if s[i] == b'"' {
+      let mut it = s.iter().enumerate().skip(1);
+      while let Some((i, &b)) = it.next() {
+        if b == b'"' {
           return Some((&s[..i + 1], s[i + 1..].trim()));
         }
-        if s[i] == b'\\' && i + 1 < s.len() {
-          i += 1;
+        if b == b'\\' {
+          it.next();
         }
-        i += 1;
       }
       None
     } else {

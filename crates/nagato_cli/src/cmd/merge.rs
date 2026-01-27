@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::OsString, io::Write, path::PathBuf};
+use std::{collections::HashMap, ffi::OsString, io::Write, mem, path::PathBuf};
 
 use nagato_apply::{Parser, Patch};
 use nagato_core::{AtomicWriter, Error};
@@ -16,20 +16,26 @@ pub fn process_merge(
     PatchSource::iter(files.to_vec()).collect::<Result<Vec<_>, _>>()?;
 
   for source in &sources {
-    let patches: Vec<Patch> = Parser::new(source.content())
-      .collect::<Result<Vec<_>, _>>()
-      .map_err(|e| e.with_origin(source.name().to_string()))?;
+    let parser = Parser::new(source.content());
 
-    for patch in patches {
-      let filename = patch.filename().to_vec();
-      if let Some(existing_patch) = merged_patches.get_mut(&filename) {
-        existing_patch.hunks.extend(patch.hunks);
-        existing_patch
-          .binary_fragments
-          .extend(patch.binary_fragments);
+    for patch_res in parser {
+      let patch =
+        patch_res.map_err(|e| e.with_origin(source.name().to_string()))?;
+      let filename = patch.filename();
+
+      if let Some(existing_patch) = merged_patches.get_mut(filename) {
+        let mut hunks = mem::take(&mut existing_patch.hunks).into_vec();
+        hunks.extend(Vec::from(patch.hunks));
+        existing_patch.hunks = hunks.into_boxed_slice();
+
+        let mut frags =
+          mem::take(&mut existing_patch.binary_fragments).into_vec();
+        frags.extend(Vec::from(patch.binary_fragments));
+        existing_patch.binary_fragments = frags.into_boxed_slice();
       } else {
-        filenames_order.push(filename.clone());
-        merged_patches.insert(filename, patch);
+        let filename_vec = filename.to_vec();
+        filenames_order.push(filename_vec.clone());
+        merged_patches.insert(filename_vec, patch);
       }
     }
   }

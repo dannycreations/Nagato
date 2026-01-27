@@ -56,16 +56,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.write_block(skipped)?;
     self.pos += source.len() - final_source.len();
 
-    for (i, line) in hunk.lines.iter().enumerate() {
-      if Some(i) != skipped_line_index {
-        match line.kind {
-          LineKind::Addition | LineKind::Context => {
-            self.write_line(line.text)?
-          }
-          LineKind::Deletion => {}
-        }
-      }
-    }
+    hunk
+      .lines
+      .iter()
+      .enumerate()
+      .filter(|(i, _)| Some(*i) != skipped_line_index)
+      .try_for_each(|(_, line)| match line.kind {
+        LineKind::Addition | LineKind::Context => self.write_line(line.text),
+        LineKind::Deletion => Ok(()),
+      })?;
 
     Ok(())
   }
@@ -173,9 +172,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       .collect::<Result<Vec<_>, _>>()?;
 
     hunks_with_pos.sort_by_key(|(pos, _)| *pos);
-    for (_, hunk) in hunks_with_pos {
-      self.process_hunk(hunk)?;
-    }
+    hunks_with_pos
+      .into_iter()
+      .try_for_each(|(_, hunk)| self.process_hunk(hunk))?;
     Ok(())
   }
 

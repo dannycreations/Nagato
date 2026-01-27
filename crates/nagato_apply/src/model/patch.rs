@@ -14,7 +14,7 @@ pub struct Patch<'a> {
   pub new_hash: Option<&'a [u8]>,
   pub old_file: Cow<'a, [u8]>,
   pub new_file: Cow<'a, [u8]>,
-  pub hunks: Vec<Hunk<'a>>,
+  pub hunks: Box<[Hunk<'a>]>,
   pub copy_from: Option<Cow<'a, [u8]>>,
   pub copy_to: Option<Cow<'a, [u8]>>,
   pub rename_from: Option<Cow<'a, [u8]>>,
@@ -26,7 +26,7 @@ pub struct Patch<'a> {
   pub binary: bool,
   pub old_file_no_newline: bool,
   pub new_file_no_newline: bool,
-  pub binary_fragments: Vec<BinaryFragment<'a>>,
+  pub binary_fragments: Box<[BinaryFragment<'a>]>,
 }
 
 impl<'a> Patch<'a> {
@@ -54,9 +54,7 @@ impl<'a> Patch<'a> {
     mem::swap(&mut self.copy_from, &mut self.copy_to);
     mem::swap(&mut self.rename_from, &mut self.rename_to);
 
-    for hunk in self.hunks.iter_mut() {
-      hunk.invert();
-    }
+    self.hunks.iter_mut().for_each(|hunk| hunk.invert());
     self
   }
 
@@ -67,7 +65,7 @@ impl<'a> Patch<'a> {
     writer.write_bytes(self.filename())?;
     writer.write_newline()?;
 
-    for (i, hunk) in self.hunks.iter().enumerate() {
+    self.hunks.iter().enumerate().try_for_each(|(i, hunk)| {
       // Hunk separation is maintained by ensuring a newline precedes every hunk except for the first one when it contains a label.
       if i > 0 || hunk.label.is_none() {
         writer.write_newline()?;
@@ -81,7 +79,7 @@ impl<'a> Patch<'a> {
         writer.write_newline()?;
       }
 
-      for line in &hunk.lines {
+      hunk.lines.iter().try_for_each(|line| {
         let prefix = match line.kind {
           LineKind::Addition => b'+',
           LineKind::Deletion => b'-',
@@ -89,9 +87,9 @@ impl<'a> Patch<'a> {
         };
         writer.write_bytes(&[prefix])?;
         writer.write_bytes(line.text)?;
-        writer.write_newline()?;
-      }
-    }
+        writer.write_newline()
+      })
+    })?;
 
     Ok(())
   }
