@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::Error;
 
 pub trait IsDevNull {
@@ -7,14 +9,14 @@ pub trait IsDevNull {
 impl IsDevNull for [u8] {
   #[inline]
   fn is_dev_null(&self) -> bool {
-    self == b"/dev/null"
+    self == b"dev/null" || self == b"/dev/null"
   }
 }
 
-impl IsDevNull for Vec<u8> {
+impl IsDevNull for Cow<'_, [u8]> {
   #[inline]
   fn is_dev_null(&self) -> bool {
-    self.as_slice().is_dev_null()
+    self.as_ref().is_dev_null()
   }
 }
 

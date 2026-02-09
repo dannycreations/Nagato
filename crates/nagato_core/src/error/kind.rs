@@ -49,6 +49,8 @@ pub enum ErrorKind {
   InvalidPath,
   #[error("Can't open patch '{0}'\n  {1}")]
   CantOpenPatch(Box<str>, IoError),
+  #[error("Destination file already exists")]
+  AlreadyExists,
 }
 
 impl Eq for ErrorKind {}
@@ -75,6 +77,7 @@ impl ErrorKind {
       Self::Io(e) => Some(e.kind()),
       Self::CantOpenPatch(_, e) => Some(e.kind()),
       Self::Persist(e) => Some(e.error.kind()),
+      Self::AlreadyExists => Some(IoErrorKind::AlreadyExists),
       _ => None,
     }
   }

@@ -1,5 +1,5 @@
 use bstr::ByteSlice;
-use nagato_core::{split_diff_paths, unquote_path, ErrorKind};
+use nagato_core::{next_path_pair, split_diff_paths, unquote_path, ErrorKind};
 
 use crate::{lexer::LexerMode, BinaryPaths, Lexer, TokenKind};
 
@@ -48,29 +48,25 @@ impl<'a> Lexer<'a> {
     }
 
     match line[0] {
-      b'+' => {
-        if let Some(rest) = line.strip_prefix(b"+++ ") {
-          Ok(TokenKind::NewFile(unquote_path(rest)))
-        } else {
-          Ok(TokenKind::Addition(&line[1..]))
-        }
-      }
-      b'-' => {
-        if let Some(rest) = line.strip_prefix(b"--- ") {
-          Ok(TokenKind::OldFile(unquote_path(rest)))
-        } else {
-          Ok(TokenKind::Deletion(&line[1..]))
-        }
-      }
+      b'+' => line
+        .strip_prefix(b"+++ ")
+        .map(|rest| TokenKind::NewFile(unquote_path(rest)))
+        .or_else(|| Some(TokenKind::Addition(&line[1..])))
+        .ok_or(ErrorKind::UnexpectedLine),
+      b'-' => line
+        .strip_prefix(b"--- ")
+        .map(|rest| TokenKind::OldFile(unquote_path(rest)))
+        .or_else(|| Some(TokenKind::Deletion(&line[1..])))
+        .ok_or(ErrorKind::UnexpectedLine),
       b' ' => Ok(TokenKind::Context(&line[1..])),
       b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
       b'd' => self.parse_git_header(line),
       b'f' if line.starts_with(b"file ") => {
         let file = unquote_path(line[5..].trim());
-        Ok(TokenKind::FileHeader(Box::new(BinaryPaths {
+        Ok(TokenKind::FileHeader(BinaryPaths {
           old_file: file.clone(),
           new_file: file,
-        })))
+        }))
       }
       b'G' if line == b"GIT binary patch" => {
         self.set_mode(LexerMode::Binary);
@@ -86,7 +82,7 @@ impl<'a> Lexer<'a> {
       }
       b'r' | b'c' => self.parse_rename_copy_line(line),
       b's' if line.starts_with(b"similarity index ") => {
-        Ok(TokenKind::Similarity(&line[17..]))
+        self.parse_percentage_token(&line[17..], TokenKind::Similarity)
       }
       b'B' if line.starts_with(b"Binary files ") => {
         self.parse_binary_files_line(line)
@@ -135,15 +131,12 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if let Some(rest) = line.strip_prefix(b"diff --git ") {
       if let Some((old_file, new_file)) = split_diff_paths(rest) {
-        Ok(TokenKind::FileHeader(Box::new(BinaryPaths {
-          old_file,
-          new_file,
-        })))
+        Ok(TokenKind::FileHeader(BinaryPaths { old_file, new_file }))
       } else {
         Err(ErrorKind::InvalidFileHeader)
       }
     } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
-      Ok(TokenKind::Dissimilarity(rest))
+      self.parse_percentage_token(rest, TokenKind::Dissimilarity)
     } else if let Some(rest) = line.strip_prefix(b"deleted ") {
       self.parse_mode_rest(rest, TokenKind::DeletedFileMode)
     } else {
@@ -197,15 +190,10 @@ impl<'a> Lexer<'a> {
     let rest = &line[13..];
     let rest = rest.strip_suffix(b" differ").unwrap_or(rest);
 
-    // This is a bit tricky if paths have " and " in them, but usually git quotes them.
-    // If it's quoted, we should handle it.
     let (old_file, new_file) =
-      split_and(rest).ok_or(ErrorKind::InvalidBinaryFilesLine)?;
+      next_path_pair(rest, b"and ").ok_or(ErrorKind::InvalidBinaryFilesLine)?;
 
-    Ok(TokenKind::Binary(Box::new(BinaryPaths {
-      old_file: unquote_path(old_file),
-      new_file: unquote_path(new_file),
-    })))
+    Ok(TokenKind::Binary(BinaryPaths { old_file, new_file }))
   }
 
   #[inline]
@@ -220,29 +208,17 @@ impl<'a> Lexer<'a> {
       .map(f)
       .ok_or(ErrorKind::InvalidFileMode)
   }
-}
 
-fn split_and(s: &[u8]) -> Option<(&[u8], &[u8])> {
-  if s.is_empty() {
-    return None;
+  #[inline]
+  fn parse_percentage_token(
+    &self,
+    s: &[u8],
+    f: impl FnOnce(u32) -> TokenKind<'a>,
+  ) -> Result<TokenKind<'a>, ErrorKind> {
+    s.strip_suffix(b"%")
+      .and_then(|s| nagato_core::parse_int::<u32>(s, 10))
+      .filter(|(_, rest)| rest.is_empty())
+      .map(|(num, _)| f(num))
+      .ok_or(ErrorKind::InvalidPercentage)
   }
-  if s[0] == b'"' {
-    let mut i = 1;
-    while i < s.len() {
-      if s[i] == b'"' {
-        let path = &s[..i + 1];
-        let rest = s[i + 1..].trim();
-        if let Some(rest) = rest.strip_prefix(b"and ") {
-          return Some((path, rest.trim()));
-        }
-      }
-      if s[i] == b'\\' && i + 1 < s.len() {
-        i += 1;
-      }
-      i += 1;
-    }
-  } else {
-    return s.split_once_str(b" and ");
-  }
-  None
 }

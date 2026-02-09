@@ -89,7 +89,7 @@ impl FileSystem {
             // Windows 8.3 short names (e.g., PROGRA~1) can be used to bypass filters.
             if let Some(tilde_idx) = s.find('~') {
               let suffix = &s[tilde_idx + 1..];
-              if suffix.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+              if suffix.as_bytes().first().is_some_and(u8::is_ascii_digit) {
                 return Err(Error::new(ErrorKind::InvalidPath));
               }
             }

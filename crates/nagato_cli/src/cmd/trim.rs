@@ -1,25 +1,20 @@
 use std::{ffi::OsString, io::Write, path::PathBuf};
 
-use nagato_apply::Parser;
-use nagato_core::{AtomicWriter, Error};
+use nagato_core::{ensure_dir, get_unique_path, AtomicWriter, Error};
 
-use super::{source::PatchSource, utils::get_unique_path};
+use super::{source::PatchSource, utils::parse_patches};
 
 pub fn process_trim(
   files: &[OsString],
   directory: Option<PathBuf>,
 ) -> Result<(), Error> {
-  if let Some(ref dir) = directory {
-    if !dir.exists() {
-      std::fs::create_dir_all(dir)?;
-    }
+  if let Some(dir) = directory.as_deref() {
+    ensure_dir(dir)?;
   }
 
   for source_res in PatchSource::iter(files.to_vec()) {
     let source = source_res?;
-    let patches: Vec<_> = Parser::new(source.content())
-      .collect::<Result<Vec<_>, _>>()
-      .map_err(|e| e.with_origin(source.name().to_string()))?;
+    let patches = parse_patches(&source)?;
 
     let source_path = match &source {
       PatchSource::File { name, .. } => PathBuf::from(name.as_ref()),

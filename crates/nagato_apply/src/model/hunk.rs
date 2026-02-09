@@ -18,13 +18,7 @@ impl<'a> Hunk<'a> {
   pub fn invert(&mut self) {
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
-    self.lines.iter_mut().for_each(|line| {
-      line.kind = match line.kind {
-        LineKind::Addition => LineKind::Deletion,
-        LineKind::Deletion => LineKind::Addition,
-        LineKind::Context => LineKind::Context,
-      };
-    });
+    self.lines.iter_mut().for_each(|line| line.invert());
   }
 
   #[inline]

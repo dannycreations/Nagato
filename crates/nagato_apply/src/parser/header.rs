@@ -1,4 +1,4 @@
-use nagato_core::{parse_int, Error, ErrorKind};
+use nagato_core::{parse_int, Error};
 
 use super::binary::parse_binary_patch;
 use crate::{BinaryFragment, Parser, Patch, TokenKind};
@@ -51,10 +51,10 @@ pub fn parse_header<'a>(
         patch.old_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
       }
       TokenKind::Similarity(percent) => {
-        patch.similarity = parse_percentage(percent).ok();
+        patch.similarity = Some(*percent);
       }
       TokenKind::Dissimilarity(p) => {
-        patch.dissimilarity = parse_percentage(p).ok();
+        patch.dissimilarity = Some(*p);
       }
       TokenKind::Binary(paths) => {
         patch.old_file = paths.old_file.clone();
@@ -72,12 +72,4 @@ pub fn parse_header<'a>(
     parser.tokens.next();
   }
   Ok(())
-}
-
-fn parse_percentage(s: &[u8]) -> Result<u32, ErrorKind> {
-  s.strip_suffix(b"%")
-    .and_then(|s| parse_int::<u32>(s, 10))
-    .filter(|(_, rest)| rest.is_empty())
-    .map(|(num, _)| num)
-    .ok_or(ErrorKind::InvalidPercentage)
 }

@@ -4,7 +4,7 @@ use std::borrow::Cow;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind<'a> {
   // The header of a file diff, containing the old and new file paths.
-  FileHeader(Box<BinaryPaths<'a>>),
+  FileHeader(BinaryPaths<'a>),
   // The index line, containing the hashes of the old and new files.
   Index {
     old_hash: &'a [u8],
@@ -44,11 +44,11 @@ pub enum TokenKind<'a> {
   // The deleted file mode.
   DeletedFileMode(&'a [u8]),
   // The similarity index in a rename or copy operation.
-  Similarity(&'a [u8]),
+  Similarity(u32),
   // The dissimilarity index in a rename or copy operation.
-  Dissimilarity(&'a [u8]),
+  Dissimilarity(u32),
   // Indicates that two binary files are different.
-  Binary(Box<BinaryPaths<'a>>),
+  Binary(BinaryPaths<'a>),
   // The header of a git binary patch.
   GitBinaryPatchHeader,
   // The type and size of a binary patch fragment.

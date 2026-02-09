@@ -26,10 +26,7 @@ fn apply_to_writer(
 
 fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
   if fs.exists(path) {
-    Err(Error::new(ErrorKind::Io(std::io::Error::new(
-      std::io::ErrorKind::AlreadyExists,
-      "Destination file already exists",
-    ))))
+    Err(Error::new(ErrorKind::AlreadyExists))
   } else {
     Ok(())
   }

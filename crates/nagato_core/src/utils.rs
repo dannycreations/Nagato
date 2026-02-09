@@ -6,7 +6,7 @@ use std::{
 use bstr::ByteSlice;
 
 #[inline(always)]
-pub fn strip_prefix(s: &[u8]) -> &[u8] {
+pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
   s.strip_prefix(b"a/")
     .or_else(|| s.strip_prefix(b"b/"))
     .unwrap_or(s)
@@ -14,12 +14,12 @@ pub fn strip_prefix(s: &[u8]) -> &[u8] {
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
-    return Cow::Borrowed(strip_prefix(s));
+    return Cow::Borrowed(strip_diff_prefix(s));
   }
 
   let content = &s[1..s.len() - 1];
   if !content.contains(&b'\\') {
-    return Cow::Borrowed(strip_prefix(content));
+    return Cow::Borrowed(strip_diff_prefix(content));
   }
 
   let mut res = Vec::with_capacity(content.len());
@@ -55,7 +55,7 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     }
   }
 
-  match strip_prefix(&res) {
+  match strip_diff_prefix(&res) {
     s if s.len() == res.len() => Cow::Owned(res),
     s => {
       let start = res.len() - s.len();
@@ -73,28 +73,44 @@ pub fn split_diff_paths(line: &[u8]) -> Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)> {
     return None;
   }
 
-  fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
-    if s.is_empty() {
-      return None;
-    }
-    if s[0] == b'"' {
-      let mut it = s.iter().enumerate().skip(1);
-      while let Some((i, &b)) = it.next() {
-        if b == b'"' {
-          return Some((&s[..i + 1], s[i + 1..].trim()));
-        }
-        if b == b'\\' {
-          it.next();
-        }
-      }
-      None
-    } else {
-      let (path, rest) = s.split_once_str(b" ").unwrap_or((s, &[]));
-      Some((path, rest.trim()))
-    }
-  }
-
   let (p1, rest) = next_path(line)?;
+  let (p2, _) = next_path(rest.trim())?;
+
+  Some((unquote_path(p1), unquote_path(p2)))
+}
+
+pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
+  if s.is_empty() {
+    return None;
+  }
+  if s[0] == b'"' {
+    let mut it = s.iter().enumerate().skip(1);
+    while let Some((i, &b)) = it.next() {
+      if b == b'"' {
+        return Some((&s[..i + 1], s[i + 1..].trim()));
+      }
+      if b == b'\\' {
+        it.next();
+      }
+    }
+    None
+  } else {
+    let (path, rest) = s.split_once_str(b" ").unwrap_or((s, &[]));
+    Some((path, rest.trim()))
+  }
+}
+
+#[allow(clippy::type_complexity)]
+pub fn next_path_pair<'a>(
+  s: &'a [u8],
+  separator: &[u8],
+) -> Option<(Cow<'a, [u8]>, Cow<'a, [u8]>)> {
+  let (p1, rest) = next_path(s)?;
+  let rest = if !separator.is_empty() {
+    rest.strip_prefix(separator)?.trim()
+  } else {
+    rest
+  };
   let (p2, _) = next_path(rest)?;
 
   Some((unquote_path(p1), unquote_path(p2)))
@@ -158,7 +174,7 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> IoResult<()> {
     self.ensure_newline()?;
-    self.output.write_all(line)
+    self.write_bytes(line)
   }
 
   #[inline]
