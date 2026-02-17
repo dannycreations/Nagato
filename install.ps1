@@ -36,7 +36,7 @@ if (-not $DownloadUrl) {
   exit 1
 }
 
-$InstallDir = Join-Path $HOME ".nagato\bin"
+$InstallDir = Join-Path $HOME ".local\bin"
 if (-not (Test-Path $InstallDir)) {
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }

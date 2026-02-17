@@ -29,7 +29,7 @@ if [ -z "$DOWNLOAD_URL" ]; then
   exit 1
 fi
 
-INSTALL_DIR="$HOME/.nagato/bin"
+INSTALL_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR"
 
 DEST_PATH="$INSTALL_DIR/$BINARY_NAME"
