@@ -4,12 +4,13 @@ use std::{
   path::PathBuf,
 };
 
-use merge::process_merge;
 use nagato_apply::Parser;
 use nagato_core::{Error, FileSystem};
-use source::PatchSource;
-use split::process_split;
-use trim::process_trim;
+
+use crate::cmd::{
+  merge::process_merge, source::PatchSource, split::process_split,
+  trim::process_trim,
+};
 
 mod args;
 mod merge;

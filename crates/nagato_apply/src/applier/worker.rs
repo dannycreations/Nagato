@@ -1,6 +1,5 @@
-use std::io::{sink, Write as IoWrite};
+use std::io::Write as IoWrite;
 
-use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
 use crate::{apply, Patch};
@@ -8,20 +7,21 @@ use crate::{apply, Patch};
 pub fn read_source_or_empty(
   fs: &FileSystem,
   path: &[u8],
-) -> Result<Option<Mmap>, Error> {
+) -> Result<Option<Vec<u8>>, Error> {
   if path.is_dev_null() {
     return Ok(None);
   }
-  fs.read(path).map(Some).ignore_not_found()
+  fs.read_to_vec(path).map(Some).ignore_not_found()
 }
 
-fn apply_to_writer(
+fn apply_to_content(
   fs: &FileSystem,
   patch: &Patch<'_>,
-  writer: &mut (impl IoWrite + ?Sized),
-) -> Result<(), Error> {
+) -> Result<Vec<u8>, Error> {
   let source = read_source_or_empty(fs, patch.source_file())?;
-  apply(writer, patch, source.as_deref().unwrap_or(&[]))
+  let mut output = Vec::new();
+  apply(&mut output, patch, source.as_deref().unwrap_or(&[]))?;
+  Ok(output)
 }
 
 fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
@@ -45,10 +45,17 @@ pub fn patch_file_worker(
   let has_content = patch.has_content_changes();
 
   // Patch application logic is dispatched based on the presence of content changes and the nature of the file operation to minimize redundant I/O.
-  let result = if check || is_deletion {
-    apply_to_writer(fs, patch, &mut sink())?;
-    // File deletion is performed by directly invoking the removal operation on non-null source paths to ensure consistent state after patch application.
-    if !check && is_deletion && !patch.source_file().is_dev_null() {
+  let result = if check {
+    let content = apply_to_content(fs, patch)?;
+    if is_deletion {
+      fs.remove_file(patch.source_file())?;
+    } else if has_content {
+      fs.virtual_write(&patch.new_file, content)?;
+    }
+    Ok(())
+  } else if is_deletion {
+    apply_to_content(fs, patch)?;
+    if !patch.source_file().is_dev_null() {
       fs.remove_file(patch.source_file())?;
     }
     Ok(())
@@ -57,8 +64,9 @@ pub fn patch_file_worker(
       ensure_not_exists(fs, &patch.new_file)?;
     }
 
+    let content = apply_to_content(fs, patch)?;
     let mut writer = fs.write(&patch.new_file)?;
-    apply_to_writer(fs, patch, &mut writer)?;
+    writer.write_all(&content)?;
     writer.commit()?;
 
     let source_path = patch.source_file();

@@ -3,7 +3,7 @@ use std::{collections::HashMap, ffi::OsString, io::Write, path::PathBuf};
 use nagato_apply::Patch;
 use nagato_core::{AtomicWriter, Error};
 
-use super::{source::PatchSource, utils::parse_patches};
+use crate::cmd::{source::PatchSource, utils::parse_patches};
 
 pub fn process_merge(
   files: &[OsString],

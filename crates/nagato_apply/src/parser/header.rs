@@ -1,7 +1,8 @@
 use nagato_core::{parse_int, Error};
 
-use super::binary::parse_binary_patch;
-use crate::{BinaryFragment, Parser, Patch, TokenKind};
+use crate::{
+  parser::binary::parse_binary_patch, BinaryFragment, Parser, Patch, TokenKind,
+};
 
 pub fn parse_header<'a>(
   parser: &mut Parser<'a>,

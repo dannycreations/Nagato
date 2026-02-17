@@ -2,7 +2,7 @@ use std::{ffi::OsString, io::Write, path::PathBuf};
 
 use nagato_core::{ensure_dir, get_unique_path, AtomicWriter, Error};
 
-use super::{source::PatchSource, utils::parse_patches};
+use crate::cmd::{source::PatchSource, utils::parse_patches};
 
 pub fn process_trim(
   files: &[OsString],

@@ -1,4 +1,6 @@
 use std::{
+  cell::RefCell,
+  collections::HashMap,
   env, fs,
   fs::File,
   path::{Component, PathBuf},
@@ -7,11 +9,12 @@ use std::{
 use bstr::ByteSlice;
 use memmap2::Mmap;
 
-use crate::{AtomicWriter, Error, ErrorKind};
+use crate::{traits::IsDevNull, AtomicWriter, Error, ErrorKind};
 
 #[derive(Debug, Default)]
 pub struct FileSystem {
   root: PathBuf,
+  overlay: RefCell<HashMap<PathBuf, Vec<u8>>>,
 }
 
 impl FileSystem {
@@ -26,12 +29,27 @@ impl FileSystem {
         .map(|cwd| cwd.join(&root))
         .unwrap_or_else(|_| root)
     };
-    Self { root }
+    Self {
+      root,
+      overlay: RefCell::new(HashMap::new()),
+    }
   }
 
   #[inline]
   pub fn exists(&self, path: &[u8]) -> bool {
-    self.resolve(path).is_ok_and(|p| p.exists())
+    let resolved = match self.resolve(path) {
+      Ok(p) => p,
+      Err(_) => return false,
+    };
+    self.overlay.borrow().contains_key(&resolved) || resolved.exists()
+  }
+
+  pub fn read_to_vec(&self, path: &[u8]) -> Result<Vec<u8>, Error> {
+    let resolved = self.resolve(path)?;
+    if let Some(content) = self.overlay.borrow().get(&resolved) {
+      return Ok(content.clone());
+    }
+    fs::read(resolved).map_err(Into::into)
   }
 
   #[inline]
@@ -52,7 +70,13 @@ impl FileSystem {
   }
 
   pub fn remove_file(&self, path: &[u8]) -> Result<(), Error> {
-    fs::remove_file(self.resolve(path)?).map_err(Into::into)
+    if path.is_dev_null() {
+      return Ok(());
+    }
+    let resolved = self.resolve(path)?;
+    self.overlay.borrow_mut().remove(&resolved);
+    let _ = fs::remove_file(resolved);
+    Ok(())
   }
 
   pub fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
@@ -67,6 +91,16 @@ impl FileSystem {
       use std::os::unix::fs::PermissionsExt;
       fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
     }
+    Ok(())
+  }
+
+  pub fn virtual_write(
+    &self,
+    path: &[u8],
+    content: Vec<u8>,
+  ) -> Result<(), Error> {
+    let resolved = self.resolve(path)?;
+    self.overlay.borrow_mut().insert(resolved, content);
     Ok(())
   }
 

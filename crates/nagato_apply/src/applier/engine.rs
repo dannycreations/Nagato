@@ -89,11 +89,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     {
       let source = self.source_at();
       let mut hasher = Sha1::new();
-      let _ = write!(hasher, "blob {}\0", source.len());
+      hasher.update(b"blob ");
+      hasher.update(source.len().to_string().as_bytes());
+      hasher.update(b"\0");
       hasher.update(source);
 
       let mut hex_hash = [0u8; 40];
-      hex::encode_to_slice(hasher.finalize(), &mut hex_hash).unwrap();
+      // SAFETY: 20 bytes Sha1 hash always results in 40 bytes hex.
+      hex::encode_to_slice(hasher.finalize(), &mut hex_hash)
+        .expect("fixed-size hex encoding failed");
 
       if !hex_hash.starts_with(old_hash_bytes) {
         return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
