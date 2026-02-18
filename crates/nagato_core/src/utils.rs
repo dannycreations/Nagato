@@ -14,12 +14,21 @@ pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
-    return Cow::Borrowed(strip_diff_prefix(s));
+    let stripped = strip_diff_prefix(s);
+    if stripped.as_ptr() == s.as_ptr() && stripped.len() == s.len() {
+      return Cow::Borrowed(s);
+    }
+    return Cow::Borrowed(stripped);
   }
 
   let content = &s[1..s.len() - 1];
   if !content.contains(&b'\\') {
-    return Cow::Borrowed(strip_diff_prefix(content));
+    let stripped = strip_diff_prefix(content);
+    if stripped.as_ptr() == content.as_ptr() && stripped.len() == content.len()
+    {
+      return Cow::Borrowed(content);
+    }
+    return Cow::Borrowed(stripped);
   }
 
   let mut res = Vec::with_capacity(content.len());

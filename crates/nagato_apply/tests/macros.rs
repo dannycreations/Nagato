@@ -75,10 +75,10 @@ macro_rules! test_patch_ok {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($initial_path => $initial_content),* };
-      let mut fs = nagato_core::FileSystem::new(dir.path());
+      let mut fs = nagato_core::FileSystem::new(dir.path(), false);
       let reverse = false $(|| $reverse)?;
       for patch in parse_diff!($diff) {
-        nagato_apply::patch_file(&mut fs, patch.unwrap(), reverse, false).unwrap();
+        nagato_apply::patch_file(&mut fs, patch.unwrap(), reverse).unwrap();
       }
       let $root = dir.path();
       $($assertions)*
@@ -97,10 +97,10 @@ macro_rules! test_patch_err {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
-      let mut fs = nagato_core::FileSystem::new(dir.path());
+      let mut fs = nagato_core::FileSystem::new(dir.path(), false);
       let patch = parse_diff!($diff).next().unwrap().unwrap();
       let reverse = false $(|| $reverse)?;
-      assert!(nagato_apply::patch_file(&mut fs, patch, reverse, false).is_err());
+      assert!(nagato_apply::patch_file(&mut fs, patch, reverse).is_err());
     }
   };
 }
@@ -156,9 +156,9 @@ macro_rules! test_patch_err_with_line {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
-      let mut fs = nagato_core::FileSystem::new(dir.path());
+      let mut fs = nagato_core::FileSystem::new(dir.path(), false);
       let patch = parse_diff!($diff).next().unwrap().unwrap();
-      let result = nagato_apply::patch_file(&mut fs, patch, false, false);
+      let result = nagato_apply::patch_file(&mut fs, patch, false);
       match result {
         Err(e) => {
           assert_eq!(e.line, Some($expected_line));

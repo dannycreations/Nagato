@@ -113,10 +113,9 @@ impl<'a> Parser<'a> {
     fs: &nagato_core::FileSystem,
     input: &'a [u8],
     reverse: bool,
-    check: bool,
   ) -> Result<(), Error> {
     for patch in Self::new(input) {
-      crate::patch_file(fs, patch?, reverse, check)?;
+      crate::patch_file(fs, patch?, reverse)?;
     }
     Ok(())
   }

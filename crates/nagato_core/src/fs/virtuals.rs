@@ -1,24 +1,36 @@
 use std::{
   cell::RefCell,
-  collections::HashMap,
+  collections::HashSet,
   env, fs,
   fs::File,
-  path::{Component, PathBuf},
+  path::{Component, Path, PathBuf},
 };
 
 use bstr::ByteSlice;
 use memmap2::Mmap;
+use tempfile::TempDir;
 
 use crate::{traits::IsDevNull, AtomicWriter, Error, ErrorKind};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FileSystem {
   root: PathBuf,
-  overlay: RefCell<HashMap<PathBuf, Vec<u8>>>,
+  check: bool,
+  staging: Option<TempDir>,
+  deleted: RefCell<HashSet<PathBuf>>,
+}
+
+impl Default for FileSystem {
+  fn default() -> Self {
+    Self::new(
+      env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+      false,
+    )
+  }
 }
 
 impl FileSystem {
-  pub fn new(root: impl Into<PathBuf>) -> Self {
+  pub fn new(root: impl Into<PathBuf>, check: bool) -> Self {
     let root = root.into();
     // We try to make the root absolute to ensure consistent behavior.
     // canonicalize() is avoided here because it requires the path to exist.
@@ -29,87 +41,179 @@ impl FileSystem {
         .map(|cwd| cwd.join(&root))
         .unwrap_or_else(|_| root)
     };
+
+    let staging = if check {
+      Some(TempDir::new().expect("failed to create staging directory"))
+    } else {
+      None
+    };
+
     Self {
       root,
-      overlay: RefCell::new(HashMap::new()),
+      check,
+      staging,
+      deleted: RefCell::new(HashSet::new()),
     }
   }
 
   #[inline]
   pub fn exists(&self, path: &[u8]) -> bool {
-    let resolved = match self.resolve(path) {
+    let rel = match self.resolve_relative(path) {
       Ok(p) => p,
       Err(_) => return false,
     };
-    self.overlay.borrow().contains_key(&resolved) || resolved.exists()
-  }
-
-  pub fn read_to_vec(&self, path: &[u8]) -> Result<Vec<u8>, Error> {
-    let resolved = self.resolve(path)?;
-    if let Some(content) = self.overlay.borrow().get(&resolved) {
-      return Ok(content.clone());
+    if self.deleted.borrow().contains(&rel) {
+      return false;
     }
-    fs::read(resolved).map_err(Into::into)
+    if let Some(staged) = self.get_staged_path(&rel) {
+      if staged.exists() {
+        return true;
+      }
+    }
+    self.root.join(rel).exists()
   }
 
   #[inline]
   pub fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
-    let path = self.resolve(path)?;
-    let file = File::open(path)?;
+    let rel = self.resolve_relative(path)?;
+    if self.deleted.borrow().contains(&rel) {
+      return Err(
+        ErrorKind::Io(std::io::Error::from(std::io::ErrorKind::NotFound))
+          .into(),
+      );
+    }
+    let full_path = if let Some(staged) = self.get_staged_path(&rel) {
+      if staged.exists() {
+        staged
+      } else {
+        self.root.join(rel)
+      }
+    } else {
+      self.root.join(rel)
+    };
+    let file = File::open(full_path)?;
     // SAFETY: Mmap is used for efficient reading.
     unsafe { Mmap::map(&file) }.map_err(Into::into)
   }
 
   pub fn write(&self, path: &[u8]) -> Result<AtomicWriter, Error> {
-    AtomicWriter::new(&self.resolve_mut(path)?)
+    let rel = self.resolve_relative(path)?;
+    self.deleted.borrow_mut().remove(&rel);
+    if let Some(staged) = self.get_staged_path(&rel) {
+      if let Some(parent) = staged.parent() {
+        fs::create_dir_all(parent)?;
+      }
+      AtomicWriter::new(&staged)
+    } else {
+      let full = self.root.join(&rel);
+      if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent)?;
+      }
+      AtomicWriter::new(&full)
+    }
   }
 
   pub fn copy(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
-    fs::copy(self.resolve(from)?, self.resolve_mut(to)?)?;
+    let from_rel = self.resolve_relative(from)?;
+    let to_rel = self.resolve_relative(to)?;
+
+    let from_path = if let Some(staged) = self.get_staged_path(&from_rel) {
+      if staged.exists() {
+        staged
+      } else {
+        self.root.join(&from_rel)
+      }
+    } else {
+      self.root.join(&from_rel)
+    };
+
+    self.deleted.borrow_mut().remove(&to_rel);
+    if let Some(to_staged) = self.get_staged_path(&to_rel) {
+      if let Some(parent) = to_staged.parent() {
+        fs::create_dir_all(parent)?;
+      }
+      fs::copy(from_path, to_staged)?;
+    } else {
+      let to_full = self.root.join(&to_rel);
+      if let Some(parent) = to_full.parent() {
+        fs::create_dir_all(parent)?;
+      }
+      fs::copy(from_path, to_full)?;
+    }
     Ok(())
   }
 
-  pub fn remove_file(&self, path: &[u8]) -> Result<(), Error> {
+  pub fn remove(&self, path: &[u8]) -> Result<(), Error> {
     if path.is_dev_null() {
       return Ok(());
     }
-    let resolved = self.resolve(path)?;
-    self.overlay.borrow_mut().remove(&resolved);
-    let _ = fs::remove_file(resolved);
+    let rel = self.resolve_relative(path)?;
+    self.deleted.borrow_mut().insert(rel.clone());
+    if let Some(staged) = self.get_staged_path(&rel) {
+      if staged.exists() {
+        let _ = fs::remove_file(staged);
+      }
+    }
+    if !self.check {
+      let full = self.root.join(rel);
+      if full.exists() {
+        fs::remove_file(full)?;
+      }
+    }
     Ok(())
   }
 
   pub fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
-    fs::rename(self.resolve(from)?, self.resolve_mut(to)?).map_err(Into::into)
+    let from_rel = self.resolve_relative(from)?;
+    let to_rel = self.resolve_relative(to)?;
+
+    // If we are in check mode, rename is simulated via copy and remove.
+    if self.check {
+      self.copy(from, to)?;
+      self.remove(from)?;
+      return Ok(());
+    }
+
+    // Normal rename
+    let from_full = self.root.join(&from_rel);
+    let to_full = self.root.join(&to_rel);
+    if let Some(parent) = to_full.parent() {
+      fs::create_dir_all(parent)?;
+    }
+    fs::rename(from_full, to_full).map_err(Into::into)
   }
 
   #[allow(unused_variables)]
   pub fn set_permissions(&self, path: &[u8], mode: u32) -> Result<(), Error> {
     #[cfg(unix)]
     {
-      let path = self.resolve(path)?;
-      use std::os::unix::fs::PermissionsExt;
-      fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+      let rel = self.resolve_relative(path)?;
+      let full_path = if let Some(staged) = self.get_staged_path(&rel) {
+        if staged.exists() {
+          staged
+        } else {
+          self.root.join(rel)
+        }
+      } else {
+        self.root.join(rel)
+      };
+
+      if !self.check
+        || full_path.starts_with(self.staging.as_ref().unwrap().path())
+      {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(full_path, fs::Permissions::from_mode(mode))?;
+      }
     }
     Ok(())
   }
 
-  pub fn virtual_write(
-    &self,
-    path: &[u8],
-    content: Vec<u8>,
-  ) -> Result<(), Error> {
-    let resolved = self.resolve(path)?;
-    self.overlay.borrow_mut().insert(resolved, content);
-    Ok(())
-  }
-
-  fn resolve(&self, path: &[u8]) -> Result<PathBuf, Error> {
+  fn resolve_relative(&self, path: &[u8]) -> Result<PathBuf, Error> {
     let path = path
       .to_path()
       .map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
-    let mut dest = self.root.clone();
+    let mut rel = PathBuf::new();
     // Path resolution is restricted to normal components and current directory references within the root to prevent unauthorized directory traversal.
     for component in path.components() {
       match component {
@@ -133,22 +237,17 @@ impl FileSystem {
               return Err(Error::new(ErrorKind::InvalidPath));
             }
           }
-          dest.push(c);
+          rel.push(c);
         }
         Component::CurDir => {}
         _ => return Err(Error::new(ErrorKind::InvalidPath)),
       }
     }
-    Ok(dest)
+    Ok(rel)
   }
 
-  fn resolve_mut(&self, path: &[u8]) -> Result<PathBuf, Error> {
-    let p = self.resolve(path)?;
-    if let Some(parent) = p.parent() {
-      // Ensure all parent directories exist before attempting to write.
-      fs::create_dir_all(parent)?;
-    }
-    Ok(p)
+  fn get_staged_path(&self, rel: &Path) -> Option<PathBuf> {
+    self.staging.as_ref().map(|s| s.path().join(rel))
   }
 }
 

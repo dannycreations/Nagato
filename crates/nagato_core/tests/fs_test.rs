@@ -4,7 +4,7 @@ use tempfile::tempdir;
 #[test]
 fn resolves_valid_path() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   // Should fail because file doesn't exist, but path is valid
   assert!(fs.read(b"file.txt").is_err());
 }
@@ -12,7 +12,7 @@ fn resolves_valid_path() {
 #[test]
 fn rejects_parent_dir() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   assert!(fs.read(b"../outside.txt").is_err());
   assert!(fs.read(b"subdir/../../outside.txt").is_err());
 }
@@ -20,7 +20,7 @@ fn rejects_parent_dir() {
 #[test]
 fn rejects_absolute_path() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   #[cfg(unix)]
   assert!(fs.read(b"/etc/passwd").is_err());
   #[cfg(windows)]
@@ -30,7 +30,7 @@ fn rejects_absolute_path() {
 #[test]
 fn rejects_prefix_component() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   // On Windows, this is a prefix. On Unix, it's just a relative path component "C:".
   // However, our implementation rejects Prefix components which are specific to Windows path parsing.
   #[cfg(windows)]
@@ -40,7 +40,7 @@ fn rejects_prefix_component() {
 #[test]
 fn rejects_reserved_names() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   assert!(fs.read(b"con").is_err());
   assert!(fs.read(b"PRN.txt").is_err());
   assert!(fs.read(b"aux/file").is_err());
@@ -53,7 +53,7 @@ fn rejects_reserved_names() {
 #[test]
 fn rejects_trailing_dots_and_spaces() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   assert!(fs.read(b"file.txt.").is_err());
   assert!(fs.read(b"file.txt ").is_err());
   assert!(fs.read(b"space /file").is_err());
@@ -62,7 +62,7 @@ fn rejects_trailing_dots_and_spaces() {
 #[test]
 fn rejects_short_names() {
   let root = tempdir().unwrap();
-  let fs = FileSystem::new(root.path());
+  let fs = FileSystem::new(root.path(), false);
   assert!(fs.read(b"PROGRA~1").is_err());
   assert!(fs.read(b"docume~2.txt").is_err());
   // Valid use of tilde (not followed by digit) should pass validation.

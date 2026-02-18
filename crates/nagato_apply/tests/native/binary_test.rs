@@ -64,11 +64,11 @@ fn fails_on_base85_overflow() {
   );
 
   let dir = Builder::new().prefix("test_overflow").tempdir().unwrap();
-  let fs = FileSystem::new(dir.path());
+  let fs = FileSystem::new(dir.path(), false);
 
   let patch = Parser::new(diff.as_bytes()).next().unwrap().unwrap();
 
-  let result = nagato_apply::patch_file(&fs, patch, false, false);
+  let result = nagato_apply::patch_file(&fs, patch, false);
 
   match result {
     Err(e) => {

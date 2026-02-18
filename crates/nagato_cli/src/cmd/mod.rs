@@ -49,12 +49,12 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   } else {
     env::current_dir()?
   };
-  let fs = FileSystem::new(root);
+  let fs = FileSystem::new(root, cli.check);
 
   // Process patches from stdin or specified files.
   for source_res in PatchSource::iter(cli.files.clone()) {
     let source = source_res?;
-    Parser::apply_to_fs(&fs, source.content(), cli.reverse, cli.check)
+    Parser::apply_to_fs(&fs, source.content(), cli.reverse)
       .map_err(|e| e.with_origin(source.name().to_string()))?;
   }
 
