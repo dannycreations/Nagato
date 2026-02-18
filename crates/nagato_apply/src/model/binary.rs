@@ -1,8 +1,8 @@
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum BinaryKind {
-  Literal,
-  Delta,
+  Literal = 0,
+  Delta = 1,
 }
 
 #[derive(Debug, PartialEq, Clone)]

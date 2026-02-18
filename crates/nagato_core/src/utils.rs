@@ -1,6 +1,7 @@
 use std::{
   borrow::Cow,
   io::{Result as IoResult, Write},
+  path::PathBuf,
 };
 
 use bstr::ByteSlice;
@@ -27,29 +28,28 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   let mut it = content.iter().peekable();
   while let Some(&b) = it.next() {
     if b == b'\\' {
-      if let Some(&next) = it.next() {
-        match next {
-          b'"' => res.push(b'"'),
-          b'\\' => res.push(b'\\'),
-          b't' => res.push(b'\t'),
-          b'n' => res.push(b'\n'),
-          b'r' => res.push(b'\r'),
-          b'0'..=b'7' => {
-            let mut octal = next - b'0';
-            for _ in 0..2 {
-              if let Some(&&n) =
-                it.peek().filter(|&&&n| (b'0'..=b'7').contains(&n))
-              {
-                octal = octal * 8 + (n - b'0');
-                it.next();
-              } else {
-                break;
-              }
+      match it.next() {
+        Some(b'n') => res.push(b'\n'),
+        Some(b'r') => res.push(b'\r'),
+        Some(b't') => res.push(b'\t'),
+        Some(b'\\') => res.push(b'\\'),
+        Some(b'"') => res.push(b'"'),
+        Some(n @ b'0'..=b'7') => {
+          let mut octal = (n - b'0') as u32;
+          for _ in 0..2 {
+            if let Some(&&n) =
+              it.peek().filter(|&&&n| (b'0'..=b'7').contains(&n))
+            {
+              octal = (octal << 3) | ((n - b'0') as u32);
+              it.next();
+            } else {
+              break;
             }
-            res.push(octal);
           }
-          _ => res.push(next),
+          res.push(octal as u8);
         }
+        Some(&next) => res.push(next),
+        None => break,
       }
     } else {
       res.push(b);
@@ -123,9 +123,10 @@ where
   T: TryFrom<u64>,
 {
   let mut num = 0u64;
+  let mut it = bytes.iter().peekable();
   let mut len = 0;
 
-  for &b in bytes {
+  while let Some(&&b) = it.peek() {
     let digit = match b {
       b'0'..=b'9' => (b - b'0') as u32,
       b'a'..=b'z' => (b - b'a') as u32 + 10,
@@ -137,8 +138,11 @@ where
       break;
     }
 
-    num = num.checked_mul(radix as u64)?.checked_add(digit as u64)?;
+    num = num
+      .checked_mul(u64::from(radix))?
+      .checked_add(u64::from(digit))?;
     len += 1;
+    it.next();
   }
 
   if len > 0 {
@@ -210,5 +214,21 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   #[inline]
   pub fn output(&mut self) -> &mut W {
     self.output
+  }
+}
+
+#[inline]
+pub fn to_path_buf(bytes: &[u8]) -> Result<PathBuf, crate::Error> {
+  #[cfg(unix)]
+  {
+    use std::os::unix::ffi::OsStrExt;
+    Ok(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+  }
+  #[cfg(windows)]
+  {
+    bytes
+      .to_str()
+      .map(PathBuf::from)
+      .map_err(|_| crate::Error::new(crate::ErrorKind::InvalidPath))
   }
 }

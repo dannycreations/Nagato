@@ -1,3 +1,5 @@
+use std::io::sink;
+
 use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
 use crate::{apply, Patch};
@@ -36,11 +38,7 @@ pub fn patch_file_worker(
   let result = if is_deletion {
     let source = read_source_mapped(fs, source_path)?;
     // To ensure the patch applies even on deletion, we apply to a sink.
-    apply(
-      &mut std::io::sink(),
-      patch,
-      source.as_deref().unwrap_or(&[]),
-    )?;
+    apply(&mut sink(), patch, source.as_deref().unwrap_or(&[]))?;
 
     if !source_path.is_dev_null() {
       fs.remove(source_path)?;

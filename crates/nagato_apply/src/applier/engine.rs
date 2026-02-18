@@ -1,6 +1,7 @@
 use std::io::Write;
 
 use bstr::ByteSlice;
+use hex::encode_to_slice;
 use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
@@ -32,6 +33,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
+    if block.is_empty() {
+      return Ok(());
+    }
     block.lines().try_for_each(|l| self.write_line(l))
   }
 
@@ -71,12 +75,11 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   pub fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
     if hunk.old_span == 0 {
-      hunk
+      return hunk
         .lines
         .iter()
         .filter(|l| matches!(l.kind, LineKind::Addition))
-        .try_for_each(|l| self.write_line(l.text))?;
-      return Ok(());
+        .try_for_each(|l| self.write_line(l.text));
     }
 
     self.find_and_apply_hunk(hunk)
@@ -96,7 +99,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
       let mut hex_hash = [0u8; 40];
       // SAFETY: 20 bytes Sha1 hash always results in 40 bytes hex.
-      hex::encode_to_slice(hasher.finalize(), &mut hex_hash)
+      // This is a fixed-size buffer operation with zero risk of overflow or indexing errors.
+      encode_to_slice(hasher.finalize(), &mut hex_hash)
         .expect("fixed-size hex encoding failed");
 
       if !hex_hash.starts_with(old_hash_bytes) {

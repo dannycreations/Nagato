@@ -4,6 +4,7 @@ use std::{
   path::PathBuf,
 };
 
+use clap::CommandFactory;
 use nagato_apply::Parser;
 use nagato_core::{Error, FileSystem};
 
@@ -20,7 +21,6 @@ mod trim;
 mod utils;
 
 pub use args::*;
-pub use clap::*;
 
 pub fn run(cli: &Cli) -> Result<(), Error> {
   if let Some(command) = &cli.command {

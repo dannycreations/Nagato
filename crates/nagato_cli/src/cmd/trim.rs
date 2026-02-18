@@ -1,4 +1,8 @@
-use std::{ffi::OsString, io::Write, path::PathBuf};
+use std::{
+  ffi::OsString,
+  io::Write,
+  path::{Path, PathBuf},
+};
 
 use nagato_core::{ensure_dir, get_unique_path, AtomicWriter, Error};
 
@@ -35,7 +39,7 @@ pub fn process_trim(
       get_unique_path(dir, &base_name.to_string_lossy())
     } else {
       source_path.with_file_name(get_unique_path(
-        source_path.parent().unwrap_or(std::path::Path::new(".")),
+        source_path.parent().unwrap_or(Path::new(".")),
         &base_name.to_string_lossy(),
       ))
     };

@@ -1,9 +1,12 @@
-use core::mem::discriminant;
-use std::io::{Error as IoError, ErrorKind as IoErrorKind};
+use std::{
+  io::{Error as IoError, ErrorKind as IoErrorKind},
+  mem::discriminant,
+};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
 
+#[non_exhaustive]
 #[derive(ThisError, Debug)]
 pub enum ErrorKind {
   #[error("I/O error")]

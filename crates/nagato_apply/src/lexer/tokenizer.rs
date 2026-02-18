@@ -1,5 +1,7 @@
 use bstr::ByteSlice;
-use nagato_core::{next_path_pair, split_diff_paths, unquote_path, ErrorKind};
+use nagato_core::{
+  next_path_pair, parse_int, split_diff_paths, unquote_path, ErrorKind,
+};
 
 use crate::{lexer::LexerMode, BinaryPaths, Lexer, TokenKind};
 
@@ -48,16 +50,20 @@ impl<'a> Lexer<'a> {
     }
 
     match line[0] {
-      b'+' => line
-        .strip_prefix(b"+++ ")
-        .map(|rest| TokenKind::NewFile(unquote_path(rest)))
-        .or_else(|| Some(TokenKind::Addition(&line[1..])))
-        .ok_or(ErrorKind::UnexpectedLine),
-      b'-' => line
-        .strip_prefix(b"--- ")
-        .map(|rest| TokenKind::OldFile(unquote_path(rest)))
-        .or_else(|| Some(TokenKind::Deletion(&line[1..])))
-        .ok_or(ErrorKind::UnexpectedLine),
+      b'+' => {
+        if let Some(rest) = line.strip_prefix(b"+++ ") {
+          Ok(TokenKind::NewFile(unquote_path(rest)))
+        } else {
+          Ok(TokenKind::Addition(&line[1..]))
+        }
+      }
+      b'-' => {
+        if let Some(rest) = line.strip_prefix(b"--- ") {
+          Ok(TokenKind::OldFile(unquote_path(rest)))
+        } else {
+          Ok(TokenKind::Deletion(&line[1..]))
+        }
+      }
       b' ' => Ok(TokenKind::Context(&line[1..])),
       b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
       b'd' => self.parse_git_header(line),
@@ -73,7 +79,9 @@ impl<'a> Lexer<'a> {
         Ok(TokenKind::GitBinaryPatchHeader)
       }
       b'i' if line.starts_with(b"index ") => self.parse_index_line(line),
-      b'l' if line.starts_with(b"label ") => Ok(TokenKind::Label(&line[6..])),
+      b'l' if line.starts_with(b"label ") => {
+        Ok(TokenKind::Label(line[6..].trim_start()))
+      }
       b'n' if line.starts_with(b"new ") => {
         self.parse_mode_rest(&line[4..], TokenKind::NewFileMode)
       }
@@ -216,7 +224,7 @@ impl<'a> Lexer<'a> {
     f: impl FnOnce(u32) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {
     s.strip_suffix(b"%")
-      .and_then(|s| nagato_core::parse_int::<u32>(s, 10))
+      .and_then(|s| parse_int::<u32>(s, 10))
       .filter(|(_, rest)| rest.is_empty())
       .map(|(num, _)| f(num))
       .ok_or(ErrorKind::InvalidPercentage)

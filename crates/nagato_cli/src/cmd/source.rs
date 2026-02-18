@@ -2,6 +2,7 @@ use std::{
   ffi::OsString,
   fs::File,
   io::{stdin, Read},
+  iter::once,
 };
 
 use memmap2::Mmap;
@@ -23,7 +24,7 @@ impl PatchSource {
         .read_to_end(&mut content)
         .map(|_| Self::Stdin(content))
         .map_err(Error::from);
-      return Box::new(std::iter::once(res));
+      return Box::new(once(res));
     }
 
     // Multiple patch files are processed by mapping each path to a memory-mapped file source, providing efficient read access for the parser.

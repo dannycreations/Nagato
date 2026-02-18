@@ -1,16 +1,18 @@
 use std::{
   cell::RefCell,
   collections::HashSet,
-  env, fs,
-  fs::File,
+  env,
+  fs::{self, remove_file, File},
+  io::{Error as IoError, ErrorKind as IoErrorKind},
   path::{Component, Path, PathBuf},
 };
 
-use bstr::ByteSlice;
 use memmap2::Mmap;
 use tempfile::TempDir;
 
-use crate::{traits::IsDevNull, AtomicWriter, Error, ErrorKind};
+use crate::{
+  traits::IsDevNull, utils::to_path_buf, AtomicWriter, Error, ErrorKind,
+};
 
 #[derive(Debug)]
 pub struct FileSystem {
@@ -77,10 +79,7 @@ impl FileSystem {
   pub fn read(&self, path: &[u8]) -> Result<Mmap, Error> {
     let rel = self.resolve_relative(path)?;
     if self.deleted.borrow().contains(&rel) {
-      return Err(
-        ErrorKind::Io(std::io::Error::from(std::io::ErrorKind::NotFound))
-          .into(),
-      );
+      return Err(ErrorKind::Io(IoError::from(IoErrorKind::NotFound)).into());
     }
     let full_path = if let Some(staged) = self.get_staged_path(&rel) {
       if staged.exists() {
@@ -151,13 +150,13 @@ impl FileSystem {
     self.deleted.borrow_mut().insert(rel.clone());
     if let Some(staged) = self.get_staged_path(&rel) {
       if staged.exists() {
-        let _ = fs::remove_file(staged);
+        let _ = remove_file(staged);
       }
     }
     if !self.check {
       let full = self.root.join(rel);
       if full.exists() {
-        fs::remove_file(full)?;
+        remove_file(full)?;
       }
     }
     Ok(())
@@ -209,33 +208,32 @@ impl FileSystem {
   }
 
   fn resolve_relative(&self, path: &[u8]) -> Result<PathBuf, Error> {
-    let path = path
-      .to_path()
-      .map_err(|_| Error::new(ErrorKind::InvalidPath))?;
+    let path =
+      to_path_buf(path).map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
     let mut rel = PathBuf::new();
     // Path resolution is restricted to normal components and current directory references within the root to prevent unauthorized directory traversal.
     for component in path.components() {
       match component {
         Component::Normal(c) => {
-          if let Some(s) = c.to_str() {
-            // Windows ignores trailing dots and spaces, which can lead to collisions or security bypasses.
-            if s.ends_with('.') || s.ends_with(' ') {
+          let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
+
+          // Windows ignores trailing dots and spaces, which can lead to collisions or security bypasses.
+          if s.ends_with('.') || s.ends_with(' ') {
+            return Err(Error::new(ErrorKind::InvalidPath));
+          }
+
+          // Windows 8.3 short names (e.g., PROGRA~1) can be used to bypass filters.
+          if let Some(tilde_idx) = s.find('~') {
+            let suffix = &s[tilde_idx + 1..];
+            if suffix.as_bytes().first().is_some_and(u8::is_ascii_digit) {
               return Err(Error::new(ErrorKind::InvalidPath));
             }
+          }
 
-            // Windows 8.3 short names (e.g., PROGRA~1) can be used to bypass filters.
-            if let Some(tilde_idx) = s.find('~') {
-              let suffix = &s[tilde_idx + 1..];
-              if suffix.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-                return Err(Error::new(ErrorKind::InvalidPath));
-              }
-            }
-
-            let base = s.split('.').next().unwrap_or(s);
-            if is_reserved_name(base) {
-              return Err(Error::new(ErrorKind::InvalidPath));
-            }
+          let base = s.split('.').next().unwrap_or(s);
+          if is_reserved_name(base) {
+            return Err(Error::new(ErrorKind::InvalidPath));
           }
           rel.push(c);
         }

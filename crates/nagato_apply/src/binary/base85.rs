@@ -110,10 +110,15 @@ impl<'a> Read for Base85Reader<'a> {
 
         let mut val: u32 = 0;
         for &c in chunk {
-          val = val * 85
-            + (decode_char(c).ok_or_else(|| {
+          let decoded = decode_char(c).ok_or_else(|| {
+            IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
+          })?;
+          val = val
+            .checked_mul(85)
+            .and_then(|v| v.checked_add(decoded as u32))
+            .ok_or_else(|| {
               IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
-            })? as u32);
+            })?;
         }
 
         if self.buf_len + 4 <= self.buffer.len() {

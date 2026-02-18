@@ -1,6 +1,6 @@
-use std::process;
+use std::process::exit;
 
-use nagato_cli::{ClapParser, Cli};
+use nagato_cli::{run, Cli, Parser};
 
 fn main() {
   let cli = Cli::parse();
@@ -8,12 +8,12 @@ fn main() {
   if cli.version {
     let version =
       option_env!("NAGATO_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
-    println!("{version}",);
-    process::exit(0);
+    println!("{version}");
+    exit(0);
   }
 
-  if let Err(e) = nagato_cli::run(&cli) {
+  if let Err(e) = run(&cli) {
     eprintln!("Error: {e}");
-    process::exit(1);
+    exit(1);
   }
 }

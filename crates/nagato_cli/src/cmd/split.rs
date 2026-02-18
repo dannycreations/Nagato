@@ -27,7 +27,7 @@ pub fn process_split(
         .unwrap_or_else(|| target.clone());
       let base_name = format!("{}.trim.patch", file_name);
 
-      let out_path = if let Some(ref dir) = directory {
+      let out_path = if let Some(dir) = directory.as_ref() {
         get_unique_path(dir, &base_name)
       } else {
         get_unique_path(Path::new("."), &base_name)

@@ -1,9 +1,9 @@
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum LineKind {
-  Addition,
-  Deletion,
-  Context,
+  Addition = 0,
+  Deletion = 1,
+  Context = 2,
 }
 
 impl LineKind {

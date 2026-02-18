@@ -1,4 +1,4 @@
 mod cmd;
 
-pub use clap::Parser as ClapParser;
+pub use clap::Parser;
 pub use cmd::{run, Cli};
