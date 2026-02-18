@@ -252,21 +252,28 @@ impl FileSystem {
 }
 
 fn is_reserved_name(name: &str) -> bool {
-  // Windows reserved device names are identified by performing case-insensitive matches against known three-character base names and validating trailing digits for COM and LPT devices.
+  // Windows reserved device names are identified by performing case-insensitive matches using a pre-calculated bitmask for the first 3 characters to minimize string comparisons.
   let bytes = name.as_bytes();
+  if bytes.len() < 3 || bytes.len() > 6 {
+    return false;
+  }
+
+  let head = (bytes[0].to_ascii_uppercase() as u32) << 16
+    | (bytes[1].to_ascii_uppercase() as u32) << 8
+    | (bytes[2].to_ascii_uppercase() as u32);
+
   match bytes.len() {
-    3 => {
-      bytes.eq_ignore_ascii_case(b"CON")
-        || bytes.eq_ignore_ascii_case(b"PRN")
-        || bytes.eq_ignore_ascii_case(b"AUX")
-        || bytes.eq_ignore_ascii_case(b"NUL")
-    }
+    3 => matches!(head, 0x434F4E | 0x50524E | 0x415558 | 0x4E554C), // CON, PRN, AUX, NUL
     4 => {
-      (bytes[..3].eq_ignore_ascii_case(b"COM")
-        || bytes[..3].eq_ignore_ascii_case(b"LPT"))
-        && bytes[3].is_ascii_digit()
+      (head == 0x434F4D || head == 0x4C5054) && bytes[3].is_ascii_digit() // COM0-9, LPT0-9
     }
-    6 => bytes.eq_ignore_ascii_case(b"CLOCK$"),
+    6 => {
+      // CLOCK$
+      head == 0x434C4F
+        && bytes[3].eq_ignore_ascii_case(&b'C')
+        && bytes[4].eq_ignore_ascii_case(&b'K')
+        && bytes[5] == b'$'
+    }
     _ => false,
   }
 }

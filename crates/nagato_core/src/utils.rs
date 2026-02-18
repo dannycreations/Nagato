@@ -13,22 +13,14 @@ pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
 }
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
+  // Path unquoting logic uses an early-exit strategy for unquoted and non-escaped paths to minimize allocations and redundant prefix checks.
   if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
-    let stripped = strip_diff_prefix(s);
-    if stripped.as_ptr() == s.as_ptr() && stripped.len() == s.len() {
-      return Cow::Borrowed(s);
-    }
-    return Cow::Borrowed(stripped);
+    return Cow::Borrowed(strip_diff_prefix(s));
   }
 
   let content = &s[1..s.len() - 1];
   if !content.contains(&b'\\') {
-    let stripped = strip_diff_prefix(content);
-    if stripped.as_ptr() == content.as_ptr() && stripped.len() == content.len()
-    {
-      return Cow::Borrowed(content);
-    }
-    return Cow::Borrowed(stripped);
+    return Cow::Borrowed(strip_diff_prefix(content));
   }
 
   let mut res = Vec::with_capacity(content.len());

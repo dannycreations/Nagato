@@ -11,25 +11,36 @@ impl Matcher {
   pub fn verify_match<'s, 'p>(
     &self,
     source: &'s [u8],
-    mut lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
+    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
     hunk: &Hunk,
   ) -> Result<&'s [u8], Error> {
-    lines_to_match.try_fold(source, |src, (offset, hunk_line)| {
-      let (line, next_source) = get_line(src).ok_or_else(|| {
-        Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + offset as u32,
-        )
-      })?;
+    let mut current_source = source;
+    for (offset, hunk_line) in lines_to_match {
+      let expected = hunk_line.text;
+      let len = expected.len();
 
-      if line != hunk_line.text {
+      if current_source.len() < len || &current_source[..len] != expected {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
           hunk.patch_line_num + 1 + offset as u32,
         ));
       }
-      Ok(next_source)
-    })
+
+      let after_text = &current_source[len..];
+      if after_text.starts_with(b"\r\n") {
+        current_source = &after_text[2..];
+      } else if after_text.starts_with(b"\n") {
+        current_source = &after_text[1..];
+      } else if after_text.is_empty() {
+        current_source = after_text;
+      } else {
+        return Err(Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
+          hunk.patch_line_num + 1 + offset as u32,
+        ));
+      }
+    }
+    Ok(current_source)
   }
 
   fn get_search_buffer<'s>(

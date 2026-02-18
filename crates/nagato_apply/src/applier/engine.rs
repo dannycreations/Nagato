@@ -164,16 +164,46 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     &mut self,
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
-    // Hunkless patches are mapped to their best match positions and sorted to ensure sequential application when headers are missing.
-    let mut hunks_with_pos = patch
-      .hunks
-      .iter()
-      .map(|hunk| {
-        Matcher
-          .find_match(self.source_at(), hunk)
-          .map(|(pos, _)| (pos, hunk))
-      })
-      .collect::<Result<Vec<_>, _>>()?;
+    // Hunkless patches are matched in a single pass over the source buffer by identifying potential match positions for all hunks simultaneously to avoid quadratic search complexity.
+    let mut pending_hunks: Vec<_> = patch.hunks.iter().collect();
+    let mut hunks_with_pos = Vec::with_capacity(pending_hunks.len());
+    let source = self.source_at();
+
+    let mut current_pos = 0;
+    while !pending_hunks.is_empty() && current_pos < source.len() {
+      let mut found_idx = None;
+      for (i, hunk) in pending_hunks.iter().enumerate() {
+        if let Ok((match_pos, _)) =
+          Matcher.find_match(&source[current_pos..], hunk)
+        {
+          hunks_with_pos.push((current_pos + match_pos, *hunk));
+          found_idx = Some(i);
+          break;
+        }
+      }
+
+      if let Some(i) = found_idx {
+        let (pos, _hunk) = hunks_with_pos.last().unwrap();
+        // Skip ahead past the matched hunk's first line to continue searching for others.
+        let matched_text = &source[*pos..];
+        let next_line_pos = matched_text
+          .find_byte(b'\n')
+          .map(|idx| idx + 1)
+          .unwrap_or(matched_text.len());
+        current_pos = *pos + next_line_pos;
+        pending_hunks.remove(i);
+      } else {
+        break;
+      }
+    }
+
+    if !pending_hunks.is_empty() {
+      // Attempt recovery or return error for remaining hunks.
+      for hunk in pending_hunks {
+        let (pos, _) = Matcher.find_match(source, hunk)?;
+        hunks_with_pos.push((pos, hunk));
+      }
+    }
 
     hunks_with_pos.sort_by_key(|(pos, _)| *pos);
     hunks_with_pos
