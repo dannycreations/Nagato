@@ -181,7 +181,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     &mut self,
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
-    // Hunkless patches are matched in a single pass over the source buffer by identifying potential match positions for all hunks simultaneously to avoid quadratic search complexity.
     let mut pending_hunks: Vec<_> = patch.hunks.iter().collect();
     let mut hunks_with_pos = Vec::with_capacity(pending_hunks.len());
     let source = self.source_at();
@@ -214,7 +213,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     if !pending_hunks.is_empty() {
-      // Attempt recovery or return error for remaining hunks.
       for hunk in pending_hunks {
         let (pos, _) = Matcher.find_match(source, hunk)?;
         hunks_with_pos.push((pos, hunk));
@@ -224,8 +222,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     hunks_with_pos.sort_by_key(|(pos, _)| *pos);
     hunks_with_pos
       .into_iter()
-      .try_for_each(|(_, hunk)| self.process_hunk(hunk))?;
-    Ok(())
+      .try_for_each(|(_, hunk)| self.process_hunk(hunk))
   }
 
   fn flush_remaining_source(&mut self) -> Result<(), Error> {

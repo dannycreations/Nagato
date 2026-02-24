@@ -19,12 +19,14 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   }
 
   let content = &s[1..s.len() - 1];
-  if !content.contains(&b'\\') {
-    return Cow::Borrowed(strip_diff_prefix(content));
-  }
+  let mut i = match content.find_byte(b'\\') {
+    Some(idx) => idx,
+    None => return Cow::Borrowed(strip_diff_prefix(content)),
+  };
 
   let mut res = Vec::with_capacity(content.len());
-  let mut i = 0;
+  res.extend_from_slice(&content[..i]);
+
   while i < content.len() {
     match content[i] {
       b'\\' if i + 1 < content.len() => {
@@ -57,9 +59,8 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     i += 1;
   }
 
-  let stripped_len = strip_diff_prefix(&res).len();
-  if stripped_len != res.len() {
-    res.drain(..res.len() - stripped_len);
+  if res.starts_with(b"a/") || res.starts_with(b"b/") {
+    res.drain(..2);
   }
   Cow::Owned(res)
 }
@@ -78,23 +79,25 @@ pub fn split_diff_paths(line: &[u8]) -> Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)> {
 }
 
 pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
+  let s = s.trim_start();
   if s.is_empty() {
     return None;
   }
   if s[0] == b'"' {
-    let mut it = s.iter().enumerate().skip(1);
-    while let Some((i, &b)) = it.next() {
-      if b == b'"' {
-        return Some((&s[..i + 1], s[i + 1..].trim()));
+    let mut i = 1;
+    while i < s.len() {
+      if s[i] == b'"' {
+        return Some((&s[..i + 1], s[i + 1..].trim_start()));
       }
-      if b == b'\\' {
-        it.next();
+      if s[i] == b'\\' {
+        i += 1;
       }
+      i += 1;
     }
     None
   } else {
     let (path, rest) = s.split_once_str(b" ").unwrap_or((s, &[]));
-    Some((path, rest.trim()))
+    Some((path, rest.trim_start()))
   }
 }
 

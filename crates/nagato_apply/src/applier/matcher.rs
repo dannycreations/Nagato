@@ -17,8 +17,6 @@ impl Matcher {
     let mut current_source = source;
     for (offset, hunk_line) in lines_to_match {
       let expected = hunk_line.text;
-      let len = expected.len();
-
       if !current_source.starts_with(expected) {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
@@ -26,17 +24,18 @@ impl Matcher {
         ));
       }
 
-      let after_text = &current_source[len..];
-      current_source = match after_text {
-        [b'\n', rest @ ..] => rest,
-        [b'\r', b'\n', rest @ ..] => rest,
-        [] => after_text,
-        _ => {
-          return Err(Error::with_line(
-            ErrorKind::CouldNotApplyHunk,
-            hunk.patch_line_num + 1 + *offset as u32,
-          ))
-        }
+      let after_text = &current_source[expected.len()..];
+      current_source = if after_text.is_empty() {
+        after_text
+      } else if let Some(rest) = after_text.strip_prefix(b"\n") {
+        rest
+      } else if let Some(rest) = after_text.strip_prefix(b"\r\n") {
+        rest
+      } else {
+        return Err(Error::with_line(
+          ErrorKind::CouldNotApplyHunk,
+          hunk.patch_line_num + 1 + *offset as u32,
+        ));
       };
     }
     Ok(current_source)
@@ -70,8 +69,8 @@ impl Matcher {
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8]), Error> {
-    let lines: Vec<_> = hunk.lines_to_match().collect();
-    let first_line = match lines.first() {
+    let mut it = hunk.lines_to_match();
+    let first_line = match it.next() {
       Some((_, first)) => first,
       None => return Ok((0, buffer)),
     };
@@ -83,10 +82,11 @@ impl Matcher {
       None
     };
 
+    let remaining_lines: Vec<_> = it.collect();
     self.search_in_buffer(
       buffer,
       hunk,
-      &lines[1..],
+      &remaining_lines,
       needle,
       finder.as_ref(),
       self.get_search_buffer(buffer, hunk),
@@ -98,29 +98,34 @@ impl Matcher {
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8], Option<usize>), Error> {
-    let lines: Vec<_> = hunk.lines_to_match().collect();
-    if lines.len() < 2 {
-      return Ok((0, buffer, lines.first().map(|(i, _)| *i)));
+    let mut it = hunk.lines_to_match();
+    let first = it.next();
+    let second = it.next();
+
+    match (first, second) {
+      (None, _) => Ok((0, buffer, None)),
+      (Some((i, _)), None) => Ok((0, buffer, Some(i))),
+      (Some((first_idx, _)), Some((_, second_line))) => {
+        let needle = second_line.text;
+        let finder = if !needle.is_empty() {
+          Some(Finder::new(needle))
+        } else {
+          None
+        };
+
+        let remaining_lines: Vec<_> = it.collect();
+        self
+          .search_in_buffer(
+            buffer,
+            hunk,
+            &remaining_lines,
+            needle,
+            finder.as_ref(),
+            (buffer, 0),
+          )
+          .map(|(pos, src)| (pos, src, Some(first_idx)))
+      }
     }
-
-    let first_idx = lines[0].0;
-    let needle = lines[1].1.text;
-    let finder = if !needle.is_empty() {
-      Some(Finder::new(needle))
-    } else {
-      None
-    };
-
-    self
-      .search_in_buffer(
-        buffer,
-        hunk,
-        &lines[2..],
-        needle,
-        finder.as_ref(),
-        (buffer, 0),
-      )
-      .map(|(pos, src)| (pos, src, Some(first_idx)))
   }
 
   #[inline]

@@ -211,7 +211,7 @@ impl FileSystem {
     let path =
       to_path_buf(path).map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
-    let mut rel = PathBuf::new();
+    let mut rel = PathBuf::with_capacity(path.as_os_str().len());
     // Path resolution is restricted to normal components and current directory references within the root to prevent unauthorized directory traversal.
     for component in path.components() {
       match component {
@@ -219,14 +219,18 @@ impl FileSystem {
           let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
 
           // Windows ignores trailing dots and spaces, which can lead to collisions or security bypasses.
-          if s.ends_with('.') || s.ends_with(' ') {
+          let last_byte = s.as_bytes().last();
+          if last_byte == Some(&b'.') || last_byte == Some(&b' ') {
             return Err(Error::new(ErrorKind::InvalidPath));
           }
 
           // Windows 8.3 short names (e.g., PROGRA~1) can be used to bypass filters.
           if let Some(tilde_idx) = s.find('~') {
-            let suffix = &s[tilde_idx + 1..];
-            if suffix.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+            if s
+              .as_bytes()
+              .get(tilde_idx + 1)
+              .is_some_and(u8::is_ascii_digit)
+            {
               return Err(Error::new(ErrorKind::InvalidPath));
             }
           }

@@ -49,23 +49,26 @@ impl<'a> Lexer<'a> {
       return Ok(TokenKind::Gap);
     }
 
-    match line[0] {
+    let first = line[0];
+    match first {
       b'+' => {
-        if let Some(rest) = line.strip_prefix(b"+++ ") {
-          Ok(TokenKind::NewFile(unquote_path(rest)))
+        if line.starts_with(b"+++ ") {
+          Ok(TokenKind::NewFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
       b'-' => {
-        if let Some(rest) = line.strip_prefix(b"--- ") {
-          Ok(TokenKind::OldFile(unquote_path(rest)))
+        if line.starts_with(b"--- ") {
+          Ok(TokenKind::OldFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Deletion(&line[1..]))
         }
       }
       b' ' => Ok(TokenKind::Context(&line[1..])),
-      b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
+      b'@' if line.len() >= 3 && line[1] == b'@' && line[2] == b' ' => {
+        self.parse_hunk_header(line)
+      }
       b'd' => self.parse_git_header(line),
       b'f' if line.starts_with(b"file ") => {
         let file = unquote_path(line[5..].trim());
@@ -137,16 +140,16 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    if let Some(rest) = line.strip_prefix(b"diff --git ") {
-      if let Some((old_file, new_file)) = split_diff_paths(rest) {
+    if line.starts_with(b"diff --git ") {
+      if let Some((old_file, new_file)) = split_diff_paths(&line[11..]) {
         Ok(TokenKind::FileHeader(BinaryPaths { old_file, new_file }))
       } else {
         Err(ErrorKind::InvalidFileHeader)
       }
-    } else if let Some(rest) = line.strip_prefix(b"dissimilarity index ") {
-      self.parse_percentage_token(rest, TokenKind::Dissimilarity)
-    } else if let Some(rest) = line.strip_prefix(b"deleted ") {
-      self.parse_mode_rest(rest, TokenKind::DeletedFileMode)
+    } else if line.starts_with(b"dissimilarity index ") {
+      self.parse_percentage_token(&line[20..], TokenKind::Dissimilarity)
+    } else if line.starts_with(b"deleted ") {
+      self.parse_mode_rest(&line[8..], TokenKind::DeletedFileMode)
     } else {
       Err(ErrorKind::UnexpectedLine)
     }
@@ -176,14 +179,22 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    if let Some(rest) = line.strip_prefix(b"rename from ") {
-      Ok(TokenKind::RenameFrom(unquote_path(rest)))
-    } else if let Some(rest) = line.strip_prefix(b"rename to ") {
-      Ok(TokenKind::RenameTo(unquote_path(rest)))
-    } else if let Some(rest) = line.strip_prefix(b"copy from ") {
-      Ok(TokenKind::CopyFrom(unquote_path(rest)))
-    } else if let Some(rest) = line.strip_prefix(b"copy to ") {
-      Ok(TokenKind::CopyTo(unquote_path(rest)))
+    if line.starts_with(b"rename ") {
+      if line.starts_with(b"rename from ") {
+        Ok(TokenKind::RenameFrom(unquote_path(&line[12..])))
+      } else if line.starts_with(b"rename to ") {
+        Ok(TokenKind::RenameTo(unquote_path(&line[10..])))
+      } else {
+        Err(ErrorKind::UnexpectedLine)
+      }
+    } else if line.starts_with(b"copy ") {
+      if line.starts_with(b"copy from ") {
+        Ok(TokenKind::CopyFrom(unquote_path(&line[10..])))
+      } else if line.starts_with(b"copy to ") {
+        Ok(TokenKind::CopyTo(unquote_path(&line[8..])))
+      } else {
+        Err(ErrorKind::UnexpectedLine)
+      }
     } else {
       Err(ErrorKind::UnexpectedLine)
     }
