@@ -1,6 +1,6 @@
 use bstr::ByteSlice;
 use memchr::memmem::Finder;
-use nagato_core::{get_line, Error, ErrorKind};
+use nagato_core::{Error, ErrorKind};
 
 use crate::{Hunk, Line};
 
@@ -113,22 +113,64 @@ impl Matcher {
     needle: &[u8],
     (search_buffer, buffer_offset): (&'s [u8], usize),
   ) -> Result<(usize, &'s [u8]), Error> {
-    let finder = Finder::new(needle);
     let mut best_error = None;
     let mut max_offset = 0;
-    let match_iter = finder.find_iter(search_buffer);
+
+    if needle.is_empty() {
+      let mut match_pos = buffer_offset;
+      while match_pos <= buffer.len() {
+        let remaining = &buffer[match_pos..];
+        let (line, next_source) = match remaining.split_once_str(b"\n") {
+          Some((l, r)) => (l.strip_suffix(b"\r").unwrap_or(l), r),
+          None => (remaining, &[][..]),
+        };
+
+        if line.is_empty() {
+          match self.verify_match(next_source, lines_to_match.clone(), hunk) {
+            Ok(final_source) => return Ok((match_pos, final_source)),
+            Err(e) => {
+              let offset =
+                e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
+              if offset > max_offset || best_error.is_none() {
+                max_offset = offset;
+                best_error = Some(e);
+              }
+            }
+          }
+        }
+
+        if remaining.is_empty() {
+          break;
+        }
+        match_pos += line.len()
+          + if remaining[line.len()..].starts_with(b"\r\n") {
+            2
+          } else {
+            1
+          };
+      }
+
+      return Err(best_error.unwrap_or_else(|| {
+        let error_line =
+          hunk.patch_line_num + if hunk.has_header { 0 } else { 1 };
+        Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
+      }));
+    }
+
+    let finder = Finder::new(needle);
 
     // The search buffer is scanned for potential matches using a precomputed finder for the first line of the hunk.
-    for match_pos_rel in match_iter {
+    for match_pos_rel in finder.find_iter(search_buffer) {
       let match_pos = buffer_offset + match_pos_rel;
       // Ensure match starts at a line boundary.
       if match_pos > 0 && buffer[match_pos - 1] != b'\n' {
         continue;
       }
 
-      // Line boundary validation and extraction are performed using a unified line utility to ensure consistent handling of various line ending formats.
-      let Some((line, next_source)) = get_line(&buffer[match_pos..]) else {
-        continue;
+      let remaining = &buffer[match_pos..];
+      let (line, next_source) = match remaining.split_once_str(b"\n") {
+        Some((l, r)) => (l.strip_suffix(b"\r").unwrap_or(l), r),
+        None => (remaining, &[][..]),
       };
 
       if line != needle {
@@ -139,7 +181,7 @@ impl Matcher {
         Ok(final_source) => return Ok((match_pos, final_source)),
         Err(e) => {
           let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
-          if offset >= max_offset {
+          if offset > max_offset || best_error.is_none() {
             max_offset = offset;
             best_error = Some(e);
           }

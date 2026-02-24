@@ -17,26 +17,16 @@ const ENCODE_MAP: &[u8; 85] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
 const MAX_DECODED_LINE_LEN: usize = 52;
 
 // Precomputed lookup table for base85 decoding to avoid linear searches.
-// Values are stored as i8 where -1 indicates an invalid character.
-const DECODE_MAP: [i8; 256] = {
-  let mut map = [-1i8; 256];
+// Values are stored as u8 where 0xFF indicates an invalid character.
+const DECODE_MAP: [u8; 256] = {
+  let mut map = [0xFFu8; 256];
   let mut i = 0;
   while i < 85 {
-    map[ENCODE_MAP[i] as usize] = i as i8;
+    map[ENCODE_MAP[i] as usize] = i as u8;
     i += 1;
   }
   map
 };
-
-#[inline(always)]
-fn decode_char(c: u8) -> Option<u8> {
-  let val = DECODE_MAP[c as usize];
-  if val >= 0 {
-    Some(val as u8)
-  } else {
-    None
-  }
-}
 
 fn decode_len_char(c: u8) -> Option<usize> {
   match c {
@@ -103,29 +93,33 @@ impl<'a> Read for Base85Reader<'a> {
       })?;
 
       let data = &line[1..];
-      for chunk in data.chunks(5) {
-        if chunk.len() < 5 {
-          break;
+      let mut i = 0;
+      while i + 5 <= data.len() {
+        let mut val = 0u64;
+        for j in 0..5 {
+          let c = data[i + j];
+          let decoded = DECODE_MAP[c as usize];
+          if decoded == 0xFF {
+            return Err(IoError::new(
+              IoErrorKind::InvalidData,
+              InvalidBinaryLineError,
+            ));
+          }
+          val = val * 85 + decoded as u64;
         }
 
-        let mut val: u32 = 0;
-        for &c in chunk {
-          let decoded = decode_char(c).ok_or_else(|| {
-            IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
-          })?;
-          val = val
-            .checked_mul(85)
-            .and_then(|v| v.checked_add(decoded as u32))
-            .ok_or_else(|| {
-              IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
-            })?;
+        if val > u32::MAX as u64 {
+          return Err(IoError::new(
+            IoErrorKind::InvalidData,
+            InvalidBinaryLineError,
+          ));
         }
 
-        if self.buf_len + 4 <= self.buffer.len() {
-          self.buffer[self.buf_len..self.buf_len + 4]
-            .copy_from_slice(&val.to_be_bytes());
-          self.buf_len += 4;
-        }
+        let val = val as u32;
+        self.buffer[self.buf_len..self.buf_len + 4]
+          .copy_from_slice(&val.to_be_bytes());
+        self.buf_len += 4;
+        i += 5;
       }
 
       if self.buf_len > expected_len {

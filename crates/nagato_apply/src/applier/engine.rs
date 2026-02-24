@@ -189,8 +189,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
 
       if let Some(i) = found_idx {
-        let (pos, _hunk) = hunks_with_pos.last().unwrap();
-        // Skip ahead past the matched hunk's first line to continue searching for others.
+        let (pos, _) = hunks_with_pos.last().unwrap();
         let matched_text = &source[*pos..];
         let next_line_pos = matched_text
           .find_byte(b'\n')
