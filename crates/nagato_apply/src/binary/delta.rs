@@ -26,7 +26,7 @@ pub fn apply_delta(
   source: &[u8],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
-  let mut delta_buf = Vec::new();
+  let mut delta_buf = Vec::with_capacity(4096);
   delta_reader.read_to_end(&mut delta_buf)?;
   let mut delta = delta_buf.as_slice();
 

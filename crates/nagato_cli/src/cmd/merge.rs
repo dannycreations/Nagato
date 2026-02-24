@@ -13,7 +13,7 @@ pub fn process_merge(
   let mut filenames_order: Vec<Vec<u8>> = Vec::new();
 
   let sources: Vec<PatchSource> =
-    PatchSource::iter(files.to_vec()).collect::<Result<Vec<_>, _>>()?;
+    PatchSource::iter(files.to_vec()).collect::<Result<_, _>>()?;
 
   for source in &sources {
     for patch_res in parse_patches(source)? {

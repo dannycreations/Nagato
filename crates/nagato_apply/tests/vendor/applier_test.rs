@@ -250,6 +250,6 @@ test_apply_ok!(
     -			if (b) {
     -			b
   "#,
-  "label a(b) {\n\n				break\n			}\n\n			if (b) {\n			a\n\nlabel a(b) {\n\n				break\n			}\n\n			if (b) {\n			b\n",
-  "label a(b) {\n\n				break\n			}\n\n\nlabel a(b) {\n\n				break\n			}\n\n"
+  "label a(b) {\n\n				break\n			}\n\n			if (b) {\n			a\n				break\n			}\n\n			if (b) {\n			b\n",
+  "label a(b) {\n\n				break\n			}\n\n				break\n			}\n\n"
 );

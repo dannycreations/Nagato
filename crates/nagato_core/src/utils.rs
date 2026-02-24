@@ -56,15 +56,12 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     }
   }
 
-  match strip_diff_prefix(&res) {
-    s if s.len() == res.len() => Cow::Owned(res),
-    s => {
-      let start = res.len() - s.len();
-      let mut v = res;
-      v.drain(0..start);
-      Cow::Owned(v)
-    }
+  let stripped = strip_diff_prefix(&res);
+  let start = res.len() - stripped.len();
+  if start > 0 {
+    res.drain(0..start);
   }
+  Cow::Owned(res)
 }
 
 #[allow(clippy::type_complexity)]

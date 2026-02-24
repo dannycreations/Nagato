@@ -27,10 +27,10 @@ impl Matcher {
       }
 
       let after_text = &current_source[len..];
-      if after_text.starts_with(b"\r\n") {
-        current_source = &after_text[2..];
-      } else if after_text.starts_with(b"\n") {
-        current_source = &after_text[1..];
+      if let Some(rest) = after_text.strip_prefix(b"\n") {
+        current_source = rest;
+      } else if let Some(rest) = after_text.strip_prefix(b"\r\n") {
+        current_source = rest;
       } else if after_text.is_empty() {
         current_source = after_text;
       } else {
@@ -120,12 +120,21 @@ impl Matcher {
       let mut match_pos = buffer_offset;
       while match_pos <= buffer.len() {
         let remaining = &buffer[match_pos..];
-        let (line, next_source) = match remaining.split_once_str(b"\n") {
-          Some((l, r)) => (l.strip_suffix(b"\r").unwrap_or(l), r),
-          None => (remaining, &[][..]),
-        };
+        let line_end = remaining.find_byte(b'\n').unwrap_or(remaining.len());
+        let line = &remaining[..line_end];
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
 
         if line.is_empty() {
+          let next_source = if line_end < remaining.len() {
+            if remaining[line_end..].starts_with(b"\r\n") {
+              &remaining[line_end + 2..]
+            } else {
+              &remaining[line_end + 1..]
+            }
+          } else {
+            &[][..]
+          };
+
           match self.verify_match(next_source, lines_to_match.clone(), hunk) {
             Ok(final_source) => return Ok((match_pos, final_source)),
             Err(e) => {
@@ -142,12 +151,7 @@ impl Matcher {
         if remaining.is_empty() {
           break;
         }
-        match_pos += line.len()
-          + if remaining[line.len()..].starts_with(b"\r\n") {
-            2
-          } else {
-            1
-          };
+        match_pos += line_end + 1;
       }
 
       return Err(best_error.unwrap_or_else(|| {
@@ -168,14 +172,23 @@ impl Matcher {
       }
 
       let remaining = &buffer[match_pos..];
-      let (line, next_source) = match remaining.split_once_str(b"\n") {
-        Some((l, r)) => (l.strip_suffix(b"\r").unwrap_or(l), r),
-        None => (remaining, &[][..]),
-      };
+      let line_end = remaining.find_byte(b'\n').unwrap_or(remaining.len());
+      let line = &remaining[..line_end];
+      let line = line.strip_suffix(b"\r").unwrap_or(line);
 
       if line != needle {
         continue;
       }
+
+      let next_source = if line_end < remaining.len() {
+        if remaining[line_end..].starts_with(b"\r\n") {
+          &remaining[line_end + 2..]
+        } else {
+          &remaining[line_end + 1..]
+        }
+      } else {
+        &[][..]
+      };
 
       match self.verify_match(next_source, lines_to_match.clone(), hunk) {
         Ok(final_source) => return Ok((match_pos, final_source)),

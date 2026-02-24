@@ -97,8 +97,7 @@ impl<'a> Read for Base85Reader<'a> {
       while i + 5 <= data.len() {
         let mut val = 0u64;
         for j in 0..5 {
-          let c = data[i + j];
-          let decoded = DECODE_MAP[c as usize];
+          let decoded = DECODE_MAP[data[i + j] as usize];
           if decoded == 0xFF {
             return Err(IoError::new(
               IoErrorKind::InvalidData,
@@ -115,9 +114,8 @@ impl<'a> Read for Base85Reader<'a> {
           ));
         }
 
-        let val = val as u32;
         self.buffer[self.buf_len..self.buf_len + 4]
-          .copy_from_slice(&val.to_be_bytes());
+          .copy_from_slice(&(val as u32).to_be_bytes());
         self.buf_len += 4;
         i += 5;
       }

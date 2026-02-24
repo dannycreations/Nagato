@@ -60,11 +60,11 @@ impl<'a> Patch<'a> {
 
   pub fn append(&mut self, other: Self) {
     let mut hunks = mem::take(&mut self.hunks).into_vec();
-    hunks.extend(Vec::from(other.hunks));
+    hunks.extend(other.hunks);
     self.hunks = hunks.into_boxed_slice();
 
     let mut frags = mem::take(&mut self.binary_fragments).into_vec();
-    frags.extend(Vec::from(other.binary_fragments));
+    frags.extend(other.binary_fragments);
     self.binary_fragments = frags.into_boxed_slice();
   }
 
