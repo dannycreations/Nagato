@@ -66,7 +66,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       .enumerate()
       .filter(|(i, _)| Some(*i) != skipped_line_index)
       .try_for_each(|(_, line)| match line.kind {
-        LineKind::Addition | LineKind::Context => self.write_line(line.text),
+        LineKind::Addition | LineKind::Context | LineKind::Gap => {
+          self.write_line(line.text)
+        }
         LineKind::Deletion => Ok(()),
       })?;
 

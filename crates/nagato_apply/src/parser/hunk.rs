@@ -25,15 +25,15 @@ pub fn parse_hunks<'a>(
       }
       TokenKind::Addition(_)
       | TokenKind::Deletion(_)
-      | TokenKind::Context(_) => {
+      | TokenKind::Context(_)
+      | TokenKind::Gap => {
         let initial_line = item.line_num;
         let mut lines = Vec::new();
-        let (old_span, new_span) = collect_hunk_lines(
-          parser,
-          &mut lines,
-          patch,
-          |t| matches!(t, TokenKind::Context(s) if s.is_empty()),
-        )?;
+        let (old_span, new_span) =
+          collect_hunk_lines(parser, &mut lines, patch, |t| {
+            matches!(t, TokenKind::Gap)
+              || matches!(t, TokenKind::Context(s) if s.is_empty())
+          })?;
 
         if !lines.is_empty() {
           hunks.push(Hunk {
@@ -95,6 +95,16 @@ pub fn collect_hunk_lines<'a>(
         Some(Line {
           kind: LineKind::Context,
           text,
+        })
+      }
+      TokenKind::Gap => {
+        old_span += 1;
+        new_span += 1;
+        patch.old_file_no_newline = false;
+        patch.new_file_no_newline = false;
+        Some(Line {
+          kind: LineKind::Gap,
+          text: &[],
         })
       }
       TokenKind::NoNewline => {

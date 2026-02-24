@@ -27,6 +27,8 @@ pub enum TokenKind<'a> {
   Deletion(&'a [u8]),
   // A line that is part of the context.
   Context(&'a [u8]),
+  // An empty line that acts as a gap between patches or hunks.
+  Gap,
   // Indicates that there is no newline at the end of the file.
   NoNewline,
   // The source file in a copy operation.

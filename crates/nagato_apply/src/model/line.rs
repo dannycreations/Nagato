@@ -4,6 +4,7 @@ pub enum LineKind {
   Addition = 0,
   Deletion = 1,
   Context = 2,
+  Gap = 3,
 }
 
 impl LineKind {
@@ -13,6 +14,7 @@ impl LineKind {
       Self::Addition => Self::Deletion,
       Self::Deletion => Self::Addition,
       Self::Context => Self::Context,
+      Self::Gap => Self::Gap,
     };
   }
 }

@@ -12,7 +12,7 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line.is_empty() {
-      return Ok(TokenKind::Context(&[]));
+      return Ok(TokenKind::Gap);
     }
 
     // Fast path for binary data lines which usually start with base85 chars.
@@ -46,7 +46,7 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line.is_empty() {
-      return Ok(TokenKind::Context(&[]));
+      return Ok(TokenKind::Gap);
     }
 
     match line[0] {

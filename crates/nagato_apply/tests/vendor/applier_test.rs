@@ -229,3 +229,18 @@ test_apply_ok!(
   "line1\nline2",
   "line1\nline3"
 );
+
+test_apply_ok!(
+  applies_hunkless_with_gap_vs_context_empty,
+  r#"
+    file a/file.ts
+    label a(b) {
+
+     				break
+     			}
+     
+    -			if (b) {
+  "#,
+  "label a(b) {\n				break\n			}\n\n			if (b) {",
+  "label a(b) {\n				break\n			}\n\n"
+);

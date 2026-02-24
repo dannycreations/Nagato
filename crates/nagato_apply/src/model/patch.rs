@@ -91,11 +91,14 @@ impl<'a> Patch<'a> {
 
       hunk.lines.iter().try_for_each(|line| {
         let prefix = match line.kind {
-          LineKind::Addition => b'+',
-          LineKind::Deletion => b'-',
-          LineKind::Context => b' ',
+          LineKind::Addition => Some(b'+'),
+          LineKind::Deletion => Some(b'-'),
+          LineKind::Context => Some(b' '),
+          LineKind::Gap => None,
         };
-        writer.write_bytes(&[prefix])?;
+        if let Some(p) = prefix {
+          writer.write_bytes(&[p])?;
+        }
         writer.write_bytes(line.text)?;
         writer.write_newline()
       })

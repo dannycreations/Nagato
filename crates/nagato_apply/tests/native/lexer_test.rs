@@ -144,3 +144,16 @@ test_lexer_ok!(
     new_file: b"file.txt".into(),
   })
 );
+
+test_lexer_ok!(
+  lexes_gap_vs_context_empty,
+  "@@ -1,3 +1,3 @@\n \n\n ",
+  TokenKind::HunkHeader {
+    old_range: b"1,3",
+    new_range: b"1,3",
+    label: None,
+  },
+  TokenKind::Context(b""),
+  TokenKind::Gap,
+  TokenKind::Context(b"")
+);

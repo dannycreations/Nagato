@@ -60,9 +60,10 @@ impl<'a> Parser<'a> {
   }
 
   pub fn skip_empty_context_lines(&mut self) -> Result<(), Error> {
-    while self
-      .peek_is(|t| matches!(t, TokenKind::Context(s) if s.is_empty()))?
-    {
+    while self.peek_is(|t| {
+      matches!(t, TokenKind::Gap)
+        || matches!(t, TokenKind::Context(s) if s.is_empty())
+    })? {
       self.tokens.next();
     }
     Ok(())
