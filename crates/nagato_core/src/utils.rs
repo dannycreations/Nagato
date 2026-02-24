@@ -14,7 +14,6 @@ pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
 }
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
-  // Path unquoting logic uses an early-exit strategy for unquoted and non-escaped paths to minimize allocations and redundant prefix checks.
   if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
     return Cow::Borrowed(strip_diff_prefix(s));
   }
@@ -25,41 +24,42 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   }
 
   let mut res = Vec::with_capacity(content.len());
-  let mut it = content.iter().peekable();
-  while let Some(&b) = it.next() {
-    if b == b'\\' {
-      match it.next() {
-        Some(b'n') => res.push(b'\n'),
-        Some(b'r') => res.push(b'\r'),
-        Some(b't') => res.push(b'\t'),
-        Some(b'\\') => res.push(b'\\'),
-        Some(b'"') => res.push(b'"'),
-        Some(n @ b'0'..=b'7') => {
-          let mut octal = (n - b'0') as u32;
-          for _ in 0..2 {
-            if let Some(&&n) =
-              it.peek().filter(|&&&n| (b'0'..=b'7').contains(&n))
-            {
-              octal = (octal << 3) | ((n - b'0') as u32);
-              it.next();
-            } else {
-              break;
+  let mut i = 0;
+  while i < content.len() {
+    match content[i] {
+      b'\\' if i + 1 < content.len() => {
+        i += 1;
+        match content[i] {
+          b'n' => res.push(b'\n'),
+          b'r' => res.push(b'\r'),
+          b't' => res.push(b'\t'),
+          b'\\' => res.push(b'\\'),
+          b'"' => res.push(b'"'),
+          n @ b'0'..=b'7' => {
+            let mut octal = (n - b'0') as u32;
+            for _ in 0..2 {
+              if i + 1 < content.len()
+                && (b'0'..=b'7').contains(&content[i + 1])
+              {
+                i += 1;
+                octal = (octal << 3) | ((content[i] - b'0') as u32);
+              } else {
+                break;
+              }
             }
+            res.push(octal as u8);
           }
-          res.push(octal as u8);
+          next => res.push(next),
         }
-        Some(&next) => res.push(next),
-        None => break,
       }
-    } else {
-      res.push(b);
+      b => res.push(b),
     }
+    i += 1;
   }
 
-  let stripped = strip_diff_prefix(&res);
-  let start = res.len() - stripped.len();
-  if start > 0 {
-    res.drain(0..start);
+  let stripped_len = strip_diff_prefix(&res).len();
+  if stripped_len != res.len() {
+    res.drain(..res.len() - stripped_len);
   }
   Cow::Owned(res)
 }

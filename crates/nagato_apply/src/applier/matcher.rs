@@ -11,7 +11,7 @@ impl Matcher {
   pub fn verify_match<'s, 'p>(
     &self,
     source: &'s [u8],
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)>,
+    lines_to_match: &[(usize, &Line<'p>)],
     hunk: &Hunk,
   ) -> Result<&'s [u8], Error> {
     let mut current_source = source;
@@ -19,26 +19,25 @@ impl Matcher {
       let expected = hunk_line.text;
       let len = expected.len();
 
-      if current_source.len() < len || &current_source[..len] != expected {
+      if !current_source.starts_with(expected) {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + offset as u32,
+          hunk.patch_line_num + 1 + *offset as u32,
         ));
       }
 
       let after_text = &current_source[len..];
-      if let Some(rest) = after_text.strip_prefix(b"\n") {
-        current_source = rest;
-      } else if let Some(rest) = after_text.strip_prefix(b"\r\n") {
-        current_source = rest;
-      } else if after_text.is_empty() {
-        current_source = after_text;
-      } else {
-        return Err(Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + offset as u32,
-        ));
-      }
+      current_source = match after_text {
+        [b'\n', rest @ ..] => rest,
+        [b'\r', b'\n', rest @ ..] => rest,
+        [] => after_text,
+        _ => {
+          return Err(Error::with_line(
+            ErrorKind::CouldNotApplyHunk,
+            hunk.patch_line_num + 1 + *offset as u32,
+          ))
+        }
+      };
     }
     Ok(current_source)
   }
@@ -71,18 +70,25 @@ impl Matcher {
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8]), Error> {
-    // Hunk matching starts by identifying the first non-addition line to use as a search needle in the source buffer.
-    let mut iter = hunk.lines_to_match();
-    let first_line_to_match = match iter.next() {
+    let lines: Vec<_> = hunk.lines_to_match().collect();
+    let first_line = match lines.first() {
       Some((_, first)) => first,
       None => return Ok((0, buffer)),
+    };
+
+    let needle = first_line.text;
+    let finder = if !needle.is_empty() {
+      Some(Finder::new(needle))
+    } else {
+      None
     };
 
     self.search_in_buffer(
       buffer,
       hunk,
-      iter,
-      first_line_to_match.text,
+      &lines[1..],
+      needle,
+      finder.as_ref(),
       self.get_search_buffer(buffer, hunk),
     )
   }
@@ -92,16 +98,29 @@ impl Matcher {
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8], Option<usize>), Error> {
-    // Recovery matching attempts to find a hunk by skipping the first expected line when an exact match fails.
-    let mut iter = hunk.lines_to_match();
-    let first_item = iter.next();
-
-    match iter.next() {
-      Some((_, second)) => self
-        .search_in_buffer(buffer, hunk, iter, second.text, (buffer, 0))
-        .map(|(pos, src)| (pos, src, first_item.map(|(i, _)| i))),
-      None => Ok((0, buffer, first_item.map(|(i, _)| i))),
+    let lines: Vec<_> = hunk.lines_to_match().collect();
+    if lines.len() < 2 {
+      return Ok((0, buffer, lines.first().map(|(i, _)| *i)));
     }
+
+    let first_idx = lines[0].0;
+    let needle = lines[1].1.text;
+    let finder = if !needle.is_empty() {
+      Some(Finder::new(needle))
+    } else {
+      None
+    };
+
+    self
+      .search_in_buffer(
+        buffer,
+        hunk,
+        &lines[2..],
+        needle,
+        finder.as_ref(),
+        (buffer, 0),
+      )
+      .map(|(pos, src)| (pos, src, Some(first_idx)))
   }
 
   #[inline]
@@ -109,14 +128,15 @@ impl Matcher {
     &self,
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
-    lines_to_match: impl Iterator<Item = (usize, &'p Line<'p>)> + Clone,
+    lines_to_match: &[(usize, &Line<'p>)],
     needle: &[u8],
+    finder: Option<&Finder>,
     (search_buffer, buffer_offset): (&'s [u8], usize),
   ) -> Result<(usize, &'s [u8]), Error> {
     let mut best_error = None;
     let mut max_offset = 0;
 
-    if needle.is_empty() {
+    if let (true, None) = (needle.is_empty(), finder) {
       let mut match_pos = buffer_offset;
       while match_pos <= buffer.len() {
         let remaining = &buffer[match_pos..];
@@ -135,7 +155,7 @@ impl Matcher {
             &[][..]
           };
 
-          match self.verify_match(next_source, lines_to_match.clone(), hunk) {
+          match self.verify_match(next_source, lines_to_match, hunk) {
             Ok(final_source) => return Ok((match_pos, final_source)),
             Err(e) => {
               let offset =
@@ -161,7 +181,7 @@ impl Matcher {
       }));
     }
 
-    let finder = Finder::new(needle);
+    let finder = finder.expect("finder must be present for non-empty needle");
 
     // The search buffer is scanned for potential matches using a precomputed finder for the first line of the hunk.
     for match_pos_rel in finder.find_iter(search_buffer) {
@@ -181,16 +201,12 @@ impl Matcher {
       }
 
       let next_source = if line_end < remaining.len() {
-        if remaining[line_end..].starts_with(b"\r\n") {
-          &remaining[line_end + 2..]
-        } else {
-          &remaining[line_end + 1..]
-        }
+        &remaining[line_end + 1..]
       } else {
         &[][..]
       };
 
-      match self.verify_match(next_source, lines_to_match.clone(), hunk) {
+      match self.verify_match(next_source, lines_to_match, hunk) {
         Ok(final_source) => return Ok((match_pos, final_source)),
         Err(e) => {
           let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);

@@ -26,7 +26,7 @@ pub fn apply_delta(
   source: &[u8],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
-  let mut delta_buf = Vec::with_capacity(4096);
+  let mut delta_buf = Vec::new();
   delta_reader.read_to_end(&mut delta_buf)?;
   let mut delta = delta_buf.as_slice();
 
@@ -40,46 +40,76 @@ pub fn apply_delta(
 
   let mut written: u64 = 0;
 
-  while !delta.is_empty() {
-    let cmd = delta[0];
-    delta = &delta[1..];
+  while let Some((&cmd, rest)) = delta.split_first() {
+    delta = rest;
 
     if (cmd & 0x80) != 0 {
       let mut offset: usize = 0;
       let mut size: usize = 0;
 
-      for i in 0..4 {
-        if (cmd & (1 << i)) != 0 {
-          let (&byte, rest) = delta
-            .split_first()
-            .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-          delta = rest;
-          offset |= (byte as usize) << (i * 8);
-        }
+      if (cmd & 0x01) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        offset = byte as usize;
+      }
+      if (cmd & 0x02) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        offset |= (byte as usize) << 8;
+      }
+      if (cmd & 0x04) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        offset |= (byte as usize) << 16;
+      }
+      if (cmd & 0x08) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        offset |= (byte as usize) << 24;
       }
 
-      for i in 0..3 {
-        if (cmd & (1 << (i + 4))) != 0 {
-          let (&byte, rest) = delta
-            .split_first()
-            .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-          delta = rest;
-          size |= (byte as usize) << (i * 8);
-        }
+      if (cmd & 0x10) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        size = byte as usize;
+      }
+      if (cmd & 0x20) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        size |= (byte as usize) << 8;
+      }
+      if (cmd & 0x40) != 0 {
+        let (&byte, rest) = delta
+          .split_first()
+          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+        delta = rest;
+        size |= (byte as usize) << 16;
       }
 
       if size == 0 {
         size = 0x10000;
       }
 
-      if offset
+      let end = offset
         .checked_add(size)
-        .is_none_or(|end| end > source.len())
-      {
+        .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
+      if end > source.len() {
         return Err(Error::new(ErrorKind::InvalidBinaryPatch));
       }
 
-      writer.write_all(&source[offset..offset + size])?;
+      writer.write_all(&source[offset..end])?;
       written += size as u64;
     } else if cmd != 0 {
       let size = cmd as usize;

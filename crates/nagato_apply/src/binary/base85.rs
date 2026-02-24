@@ -93,31 +93,29 @@ impl<'a> Read for Base85Reader<'a> {
       })?;
 
       let data = &line[1..];
-      let mut i = 0;
-      while i + 5 <= data.len() {
-        let mut val = 0u64;
-        for j in 0..5 {
-          let decoded = DECODE_MAP[data[i + j] as usize];
-          if decoded == 0xFF {
-            return Err(IoError::new(
-              IoErrorKind::InvalidData,
-              InvalidBinaryLineError,
-            ));
-          }
-          val = val * 85 + decoded as u64;
-        }
+      for chunk in data.chunks_exact(5) {
+        let d0 = DECODE_MAP[chunk[0] as usize];
+        let d1 = DECODE_MAP[chunk[1] as usize];
+        let d2 = DECODE_MAP[chunk[2] as usize];
+        let d3 = DECODE_MAP[chunk[3] as usize];
+        let d4 = DECODE_MAP[chunk[4] as usize];
 
-        if val > u32::MAX as u64 {
+        if (d0 | d1 | d2 | d3 | d4) == 0xFF {
           return Err(IoError::new(
             IoErrorKind::InvalidData,
             InvalidBinaryLineError,
           ));
         }
 
-        self.buffer[self.buf_len..self.buf_len + 4]
-          .copy_from_slice(&(val as u32).to_be_bytes());
+        let val = (d0 as u32) * 52200625
+          + (d1 as u32) * 614125
+          + (d2 as u32) * 7225
+          + (d3 as u32) * 85
+          + (d4 as u32);
+
+        let bytes = val.to_be_bytes();
+        self.buffer[self.buf_len..self.buf_len + 4].copy_from_slice(&bytes);
         self.buf_len += 4;
-        i += 5;
       }
 
       if self.buf_len > expected_len {

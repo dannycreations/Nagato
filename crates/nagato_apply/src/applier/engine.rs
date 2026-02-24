@@ -36,7 +36,18 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     if block.is_empty() {
       return Ok(());
     }
-    block.lines().try_for_each(|l| self.write_line(l))
+
+    let mut remaining = block;
+    while !remaining.is_empty() {
+      let (line, rest) = match remaining.split_once_str(b"\n") {
+        Some((l, r)) => (l, r),
+        None => (remaining, &[][..]),
+      };
+      let line = line.strip_suffix(b"\r").unwrap_or(line);
+      self.write_line(line)?;
+      remaining = rest;
+    }
+    Ok(())
   }
 
   #[inline]
@@ -51,8 +62,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let (match_pos, final_source, skipped_line_index) =
       match matcher.find_match(source, hunk) {
         Ok((pos, src)) => (pos, src, None),
-        Err(_) if !hunk.has_header => {
-          matcher.find_match_recovery(source, hunk)?
+        Err(e) if !hunk.has_header => {
+          matcher.find_match_recovery(source, hunk).map_err(|_| e)?
         }
         Err(e) => return Err(e),
       };
@@ -60,17 +71,17 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.write_block(skipped)?;
     self.pos += source.len() - final_source.len();
 
-    hunk
-      .lines
-      .iter()
-      .enumerate()
-      .filter(|(i, _)| Some(*i) != skipped_line_index)
-      .try_for_each(|(_, line)| match line.kind {
+    for (i, line) in hunk.lines.iter().enumerate() {
+      if Some(i) == skipped_line_index {
+        continue;
+      }
+      match line.kind {
         LineKind::Addition | LineKind::Context | LineKind::Gap => {
-          self.write_line(line.text)
+          self.write_line(line.text)?
         }
-        LineKind::Deletion => Ok(()),
-      })?;
+        LineKind::Deletion => {}
+      }
+    }
 
     Ok(())
   }
