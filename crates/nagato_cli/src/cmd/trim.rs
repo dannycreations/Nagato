@@ -18,7 +18,7 @@ pub fn process_trim(
 
   for source_res in PatchSource::iter(files.to_vec()) {
     let source = source_res?;
-    let patches = parse_patches(&source)?;
+    let patches_iter = parse_patches(&source)?;
 
     let source_path = match &source {
       PatchSource::File { name, .. } => PathBuf::from(name.as_ref()),
@@ -45,7 +45,8 @@ pub fn process_trim(
     };
 
     let mut writer = AtomicWriter::new(&out_path)?;
-    for (i, patch) in patches.iter().enumerate() {
+    for (i, patch_res) in patches_iter.enumerate() {
+      let patch = patch_res?;
       if i > 0 {
         writer.write_all(b"\n")?;
       }

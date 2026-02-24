@@ -16,7 +16,8 @@ pub fn process_merge(
     PatchSource::iter(files.to_vec()).collect::<Result<Vec<_>, _>>()?;
 
   for source in &sources {
-    for patch in parse_patches(source)? {
+    for patch_res in parse_patches(source)? {
+      let patch = patch_res?;
       let filename = patch.filename();
 
       if let Some(existing_patch) = merged_patches.get_mut(filename) {

@@ -240,7 +240,16 @@ test_apply_ok!(
      			}
      
     -			if (b) {
+    -			a
+
+    label a(b) {
+
+     				break
+     			}
+     
+    -			if (b) {
+    -			b
   "#,
-  "label a(b) {\n				break\n			}\n\n			if (b) {",
-  "label a(b) {\n				break\n			}\n\n"
+  "label a(b) {\n\n				break\n			}\n\n			if (b) {\n			a\n\nlabel a(b) {\n\n				break\n			}\n\n			if (b) {\n			b\n",
+  "label a(b) {\n\n				break\n			}\n\n\nlabel a(b) {\n\n				break\n			}\n\n"
 );

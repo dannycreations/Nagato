@@ -17,9 +17,10 @@ pub fn process_split(
 
   for source_res in PatchSource::iter(files.to_vec()) {
     let source = source_res?;
-    let patches = parse_patches(&source)?;
+    let patches_iter = parse_patches(&source)?;
 
-    for patch in patches {
+    for patch_res in patches_iter {
+      let patch = patch_res?;
       let target = String::from_utf8_lossy(patch.filename());
       let file_name = Path::new(target.as_ref())
         .file_name()

@@ -123,14 +123,12 @@ where
   T: TryFrom<u64>,
 {
   let mut num = 0u64;
-  let mut it = bytes.iter().peekable();
   let mut len = 0;
 
-  while let Some(&&b) = it.peek() {
+  for &b in bytes {
     let digit = match b {
       b'0'..=b'9' => (b - b'0') as u32,
-      b'a'..=b'z' => (b - b'a') as u32 + 10,
-      b'A'..=b'Z' => (b - b'A') as u32 + 10,
+      b'a'..=b'z' | b'A'..=b'Z' => (b.to_ascii_uppercase() - b'A') as u32 + 10,
       _ => break,
     };
 
@@ -142,7 +140,6 @@ where
       .checked_mul(u64::from(radix))?
       .checked_add(u64::from(digit))?;
     len += 1;
-    it.next();
   }
 
   if len > 0 {
