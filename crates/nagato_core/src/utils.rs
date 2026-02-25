@@ -53,12 +53,14 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
       }
 
       let res_final = if res.starts_with(b"a/") || res.starts_with(b"b/") {
-        &res[2..]
+        res.remove(0);
+        res.remove(0);
+        res
       } else {
-        &res[..]
+        res
       };
 
-      return Cow::Owned(res_final.to_vec());
+      return Cow::Owned(res_final);
     }
     return Cow::Borrowed(strip_diff_prefix(s));
   }
@@ -128,7 +130,8 @@ where
   for &b in bytes {
     let digit = match b {
       b'0'..=b'9' => (b - b'0') as u32,
-      b'a'..=b'z' | b'A'..=b'Z' => (b.to_ascii_uppercase() - b'A') as u32 + 10,
+      b'a'..=b'z' => (b - b'a') as u32 + 10,
+      b'A'..=b'Z' => (b - b'A') as u32 + 10,
       _ => break,
     };
 

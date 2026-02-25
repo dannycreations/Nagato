@@ -193,6 +193,11 @@ impl Matcher {
         continue;
       }
 
+      // Fast path: if the rest of the buffer is shorter than the minimum expected length, skip.
+      if (buffer.len() - match_pos) < needle.len() {
+        continue;
+      }
+
       let end_pos = match_pos + needle.len();
       let next_source = if end_pos < buffer.len() {
         let b = buffer[end_pos];
