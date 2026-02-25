@@ -1,4 +1,5 @@
 use bstr::ByteSlice;
+use memchr::memmem;
 use nagato_core::{
   next_path_pair, parse_int, split_diff_paths, unquote_path, ErrorKind,
 };
@@ -16,17 +17,19 @@ impl<'a> Lexer<'a> {
     }
 
     // Fast path for binary data lines which usually start with base85 chars.
-    if let Some(rest) = line.strip_prefix(b"literal ") {
-      return Ok(TokenKind::BinaryPatchType {
-        kind: b"literal",
-        size: rest,
-      });
-    }
-    if let Some(rest) = line.strip_prefix(b"delta ") {
-      return Ok(TokenKind::BinaryPatchType {
-        kind: b"delta",
-        size: rest,
-      });
+    if line.len() > 8 {
+      if line.starts_with(b"literal ") {
+        return Ok(TokenKind::BinaryPatchType {
+          kind: b"literal",
+          size: &line[8..],
+        });
+      }
+      if line.starts_with(b"delta ") {
+        return Ok(TokenKind::BinaryPatchType {
+          kind: b"delta",
+          size: &line[6..],
+        });
+      }
     }
 
     if line.starts_with(b"diff --git")
@@ -52,14 +55,14 @@ impl<'a> Lexer<'a> {
     let first = line[0];
     match first {
       b'+' => {
-        if line.starts_with(b"+++ ") {
+        if line.len() > 4 && line.starts_with(b"+++ ") {
           Ok(TokenKind::NewFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
       b'-' => {
-        if line.starts_with(b"--- ") {
+        if line.len() > 4 && line.starts_with(b"--- ") {
           Ok(TokenKind::OldFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Deletion(&line[1..]))
@@ -112,8 +115,10 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     // Hunk headers are parsed by splitting the line into range and optional label components using byte-level patterns.
     let header = &line[3..];
-    let (content, label_part) =
-      header.split_once_str(b" @@").unwrap_or((header, &[]));
+    let (content, label_part) = match memmem::find(header, b" @@") {
+      Some(idx) => (&header[..idx], &header[idx + 3..]),
+      None => (header, &[][..]),
+    };
     let mut parts = content.fields();
 
     let old_range = parts

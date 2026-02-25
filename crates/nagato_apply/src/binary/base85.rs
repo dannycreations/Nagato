@@ -28,11 +28,24 @@ const DECODE_MAP: [u8; 256] = {
   map
 };
 
+const DECODE_LEN_MAP: [u8; 256] = {
+  let mut map = [0xFFu8; 256];
+  let mut i = 0u8;
+  while i < 26 {
+    map[(b'A' + i) as usize] = i + 1;
+    map[(b'a' + i) as usize] = i + 27;
+    i += 1;
+  }
+  map
+};
+
+#[inline]
 fn decode_len_char(c: u8) -> Option<usize> {
-  match c {
-    b'A'..=b'Z' => Some((c - b'A' + 1) as usize),
-    b'a'..=b'z' => Some((c - b'a' + 27) as usize),
-    _ => None,
+  let res = DECODE_LEN_MAP[c as usize];
+  if res == 0xFF {
+    None
+  } else {
+    Some(res as usize)
   }
 }
 
@@ -113,8 +126,8 @@ impl<'a> Read for Base85Reader<'a> {
           + (d3 as u32) * 85
           + (d4 as u32);
 
-        let bytes = val.to_be_bytes();
-        self.buffer[self.buf_len..self.buf_len + 4].copy_from_slice(&bytes);
+        self.buffer[self.buf_len..self.buf_len + 4]
+          .copy_from_slice(&val.to_be_bytes());
         self.buf_len += 4;
       }
 

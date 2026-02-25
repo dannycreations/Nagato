@@ -608,6 +608,7 @@ name = "nagato_core"
 version = "0.1.0"
 dependencies = [
  "bstr",
+ "memchr",
  "memmap2",
  "tempfile",
  "thiserror",

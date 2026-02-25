@@ -2,7 +2,7 @@ use bstr::ByteSlice;
 use memchr::memmem::Finder;
 use nagato_core::{Error, ErrorKind};
 
-use crate::{Hunk, Line};
+use crate::Hunk;
 
 pub struct Matcher;
 
@@ -11,16 +11,20 @@ impl Matcher {
   pub fn verify_match<'s, 'p>(
     &self,
     source: &'s [u8],
-    lines_to_match: &[(usize, &Line<'p>)],
-    hunk: &Hunk,
+    hunk: &Hunk<'p>,
+    start_at_hunk_line: usize,
   ) -> Result<&'s [u8], Error> {
     let mut current_source = source;
-    for (offset, hunk_line) in lines_to_match {
+    for (i, hunk_line) in hunk.lines[start_at_hunk_line..].iter().enumerate() {
+      if matches!(hunk_line.kind, crate::LineKind::Addition) {
+        continue;
+      }
+
       let expected = hunk_line.text;
       if !current_source.starts_with(expected) {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + *offset as u32,
+          hunk.patch_line_num + 1 + (start_at_hunk_line + i) as u32,
         ));
       }
 
@@ -34,7 +38,7 @@ impl Matcher {
       } else {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + *offset as u32,
+          hunk.patch_line_num + 1 + (start_at_hunk_line + i) as u32,
         ));
       };
     }
@@ -53,8 +57,7 @@ impl Matcher {
           .find(label)
           .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
           .map(|pos| {
-            let line_end = buffer[pos..]
-              .find_byte(b'\n')
+            let line_end = memchr::memchr(b'\n', &buffer[pos..])
               .map(|i| pos + i + 1)
               .unwrap_or(buffer.len());
             (&buffer[line_end..], line_end)
@@ -70,8 +73,8 @@ impl Matcher {
     hunk: &Hunk<'p>,
   ) -> Result<(usize, &'s [u8]), Error> {
     let mut it = hunk.lines_to_match();
-    let first_line = match it.next() {
-      Some((_, first)) => first,
+    let (first_idx, first_line) = match it.next() {
+      Some((idx, line)) => (idx, line),
       None => return Ok((0, buffer)),
     };
 
@@ -82,11 +85,10 @@ impl Matcher {
       None
     };
 
-    let remaining_lines: Vec<_> = it.collect();
     self.search_in_buffer(
       buffer,
       hunk,
-      &remaining_lines,
+      first_idx + 1,
       needle,
       finder.as_ref(),
       self.get_search_buffer(buffer, hunk),
@@ -105,7 +107,7 @@ impl Matcher {
     match (first, second) {
       (None, _) => Ok((0, buffer, None)),
       (Some((i, _)), None) => Ok((0, buffer, Some(i))),
-      (Some((first_idx, _)), Some((_, second_line))) => {
+      (Some((first_idx, _)), Some((second_idx, second_line))) => {
         let needle = second_line.text;
         let finder = if !needle.is_empty() {
           Some(Finder::new(needle))
@@ -113,12 +115,11 @@ impl Matcher {
           None
         };
 
-        let remaining_lines: Vec<_> = it.collect();
         self
           .search_in_buffer(
             buffer,
             hunk,
-            &remaining_lines,
+            second_idx + 1,
             needle,
             finder.as_ref(),
             (buffer, 0),
@@ -133,7 +134,7 @@ impl Matcher {
     &self,
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
-    lines_to_match: &[(usize, &Line<'p>)],
+    start_at_hunk_line: usize,
     needle: &[u8],
     finder: Option<&Finder>,
     (search_buffer, buffer_offset): (&'s [u8], usize),
@@ -143,24 +144,24 @@ impl Matcher {
 
     if let (true, None) = (needle.is_empty(), finder) {
       let mut match_pos = buffer_offset;
-      while match_pos <= buffer.len() {
+      loop {
         let remaining = &buffer[match_pos..];
-        let line_end = remaining.find_byte(b'\n').unwrap_or(remaining.len());
+        let (line_end, has_lf) = match memchr::memchr(b'\n', remaining) {
+          Some(idx) => (idx, true),
+          None => (remaining.len(), false),
+        };
+
         let line = &remaining[..line_end];
         let line = line.strip_suffix(b"\r").unwrap_or(line);
 
         if line.is_empty() {
-          let next_source = if line_end < remaining.len() {
-            if remaining[line_end..].starts_with(b"\r\n") {
-              &remaining[line_end + 2..]
-            } else {
-              &remaining[line_end + 1..]
-            }
+          let next_source = if has_lf {
+            &remaining[line_end + 1..]
           } else {
             &[][..]
           };
 
-          match self.verify_match(next_source, lines_to_match, hunk) {
+          match self.verify_match(next_source, hunk, start_at_hunk_line) {
             Ok(final_source) => return Ok((match_pos, final_source)),
             Err(e) => {
               let offset =
@@ -173,7 +174,7 @@ impl Matcher {
           }
         }
 
-        if remaining.is_empty() {
+        if !has_lf {
           break;
         }
         match_pos += line_end + 1;
@@ -196,22 +197,21 @@ impl Matcher {
         continue;
       }
 
-      let remaining = &buffer[match_pos..];
-      let line_end = remaining.find_byte(b'\n').unwrap_or(remaining.len());
-      let line = &remaining[..line_end];
-      let line = line.strip_suffix(b"\r").unwrap_or(line);
-
-      if line != needle {
-        continue;
-      }
-
-      let next_source = if line_end < remaining.len() {
-        &remaining[line_end + 1..]
+      let end_pos = match_pos + needle.len();
+      let next_source = if end_pos < buffer.len() {
+        let b = buffer[end_pos];
+        if b == b'\n' {
+          &buffer[end_pos + 1..]
+        } else if b == b'\r' && buffer.get(end_pos + 1) == Some(&b'\n') {
+          &buffer[end_pos + 2..]
+        } else {
+          continue;
+        }
       } else {
         &[][..]
       };
 
-      match self.verify_match(next_source, lines_to_match, hunk) {
+      match self.verify_match(next_source, hunk, start_at_hunk_line) {
         Ok(final_source) => return Ok((match_pos, final_source)),
         Err(e) => {
           let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);

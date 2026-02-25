@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use bstr::ByteSlice;
 use hex::encode_to_slice;
 use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
@@ -39,13 +38,20 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     let mut remaining = block;
     while !remaining.is_empty() {
-      let (line, rest) = match remaining.split_once_str(b"\n") {
-        Some((l, r)) => (l, r),
-        None => (remaining, &[][..]),
+      let (line_end, has_lf) = match memchr::memchr(b'\n', remaining) {
+        Some(idx) => (idx, true),
+        None => (remaining.len(), false),
       };
+
+      let line = &remaining[..line_end];
       let line = line.strip_suffix(b"\r").unwrap_or(line);
       self.write_line(line)?;
-      remaining = rest;
+
+      remaining = if has_lf {
+        &remaining[line_end + 1..]
+      } else {
+        &[][..]
+      };
     }
     Ok(())
   }
@@ -67,8 +73,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         }
         Err(e) => return Err(e),
       };
-    let skipped = &source[..match_pos];
-    self.write_block(skipped)?;
+
+    if match_pos > 0 {
+      self.write_block(&source[..match_pos])?;
+    }
     self.pos += source.len() - final_source.len();
 
     for (i, line) in hunk.lines.iter().enumerate() {
@@ -77,7 +85,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
       match line.kind {
         LineKind::Addition | LineKind::Context | LineKind::Gap => {
-          self.write_line(line.text)?
+          self.write_line(line.text)?;
         }
         LineKind::Deletion => {}
       }
@@ -125,12 +133,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
     // Binary patches are applied by processing fragments until a successful literal decoding or delta application occurs.
-    patch
-      .binary_fragments
-      .iter()
-      .find_map(|fragment| match fragment.kind {
+    for fragment in patch.binary_fragments.iter() {
+      let res = match fragment.kind {
         BinaryKind::Literal => {
-          Some(binary::decode_base85(&fragment.data, self.writer.output()))
+          binary::decode_base85(&fragment.data, self.writer.output())
         }
         BinaryKind::Delta => {
           let mut decoded = binary::new_base85_decoder(&fragment.data);
@@ -139,17 +145,24 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
             self.source_at(),
             self.writer.output(),
           ) {
-            Ok(_) => Some(Ok(())),
+            Ok(_) => Ok(()),
             Err(e)
               if matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch) =>
             {
-              None
+              continue;
             }
-            Err(e) => Some(Err(e)),
+            Err(e) => Err(e),
           }
         }
-      })
-      .unwrap_or(Err(Error::new(ErrorKind::CouldNotApplyHunk)))
+      };
+
+      return match res {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
+      };
+    }
+
+    Err(Error::new(ErrorKind::CouldNotApplyHunk))
   }
 
   pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
@@ -201,8 +214,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       if let Some(i) = found_idx {
         let (pos, _) = hunks_with_pos.last().unwrap();
         let matched_text = &source[*pos..];
-        let next_line_pos = matched_text
-          .find_byte(b'\n')
+        let next_line_pos = memchr::memchr(b'\n', matched_text)
           .map(|idx| idx + 1)
           .unwrap_or(matched_text.len());
         current_pos = *pos + next_line_pos;

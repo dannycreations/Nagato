@@ -1,4 +1,3 @@
-use bstr::ByteSlice;
 use nagato_core::{parse_int, Error, ErrorKind};
 
 use crate::{Hunk, Line, LineKind, Parser, Patch, TokenKind};
@@ -185,9 +184,10 @@ pub fn parse_hunk<'a>(
 }
 
 fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
-  let (line_part, span_part) = range_bytes
-    .split_once_str(b",")
-    .unwrap_or((range_bytes, b"1"));
+  let (line_part, span_part) = match memchr::memchr(b',', range_bytes) {
+    Some(idx) => (&range_bytes[..idx], &range_bytes[idx + 1..]),
+    None => (range_bytes, &b"1"[..]),
+  };
 
   let line = parse_int::<u32>(line_part, 10)
     .map(|(v, _)| v)

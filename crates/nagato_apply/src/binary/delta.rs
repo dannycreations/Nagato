@@ -2,12 +2,14 @@ use std::io::{Read, Write};
 
 use nagato_core::{Error, ErrorKind};
 
-fn read_variable_length_int(data: &mut &[u8]) -> Result<u64, Error> {
+fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
   let mut result: u64 = 0;
   let mut shift = 0;
+  let mut buf = [0u8; 1];
 
-  while let Some((&byte, rest)) = data.split_first() {
-    *data = rest;
+  loop {
+    reader.read_exact(&mut buf)?;
+    let byte = buf[0];
     let byte_val = (byte & 0x7f) as u64;
     if shift >= 64 || (byte_val << shift) >> shift != byte_val {
       return Err(Error::new(ErrorKind::InvalidBinaryPatch));
@@ -18,17 +20,14 @@ fn read_variable_length_int(data: &mut &[u8]) -> Result<u64, Error> {
       return Ok(result);
     }
   }
-  Err(Error::new(ErrorKind::InvalidBinaryPatch))
 }
 
 pub fn apply_delta(
-  mut delta_reader: impl Read,
+  delta_reader: impl Read,
   source: &[u8],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
-  let mut delta_buf = Vec::new();
-  delta_reader.read_to_end(&mut delta_buf)?;
-  let mut delta = delta_buf.as_slice();
+  let mut delta = std::io::BufReader::with_capacity(8192, delta_reader);
 
   let source_size = read_variable_length_int(&mut delta)?;
 
@@ -39,63 +38,43 @@ pub fn apply_delta(
   let target_size = read_variable_length_int(&mut delta)?;
 
   let mut written: u64 = 0;
+  let mut buf = [0u8; 1];
 
-  while let Some((&cmd, rest)) = delta.split_first() {
-    delta = rest;
+  while delta.read(&mut buf)? != 0 {
+    let cmd = buf[0];
 
     if (cmd & 0x80) != 0 {
       let mut offset: usize = 0;
       let mut size: usize = 0;
 
       if (cmd & 0x01) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        offset = byte as usize;
+        delta.read_exact(&mut buf)?;
+        offset = buf[0] as usize;
       }
       if (cmd & 0x02) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        offset |= (byte as usize) << 8;
+        delta.read_exact(&mut buf)?;
+        offset |= (buf[0] as usize) << 8;
       }
       if (cmd & 0x04) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        offset |= (byte as usize) << 16;
+        delta.read_exact(&mut buf)?;
+        offset |= (buf[0] as usize) << 16;
       }
       if (cmd & 0x08) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        offset |= (byte as usize) << 24;
+        delta.read_exact(&mut buf)?;
+        offset |= (buf[0] as usize) << 24;
       }
 
       if (cmd & 0x10) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        size = byte as usize;
+        delta.read_exact(&mut buf)?;
+        size = buf[0] as usize;
       }
       if (cmd & 0x20) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        size |= (byte as usize) << 8;
+        delta.read_exact(&mut buf)?;
+        size |= (buf[0] as usize) << 8;
       }
       if (cmd & 0x40) != 0 {
-        let (&byte, rest) = delta
-          .split_first()
-          .ok_or_else(|| Error::new(ErrorKind::InvalidBinaryPatch))?;
-        delta = rest;
-        size |= (byte as usize) << 16;
+        delta.read_exact(&mut buf)?;
+        size |= (buf[0] as usize) << 16;
       }
 
       if size == 0 {
@@ -113,11 +92,9 @@ pub fn apply_delta(
       written += size as u64;
     } else if cmd != 0 {
       let size = cmd as usize;
-      if delta.len() < size {
-        return Err(Error::new(ErrorKind::InvalidBinaryPatch));
-      }
-      writer.write_all(&delta[..size])?;
-      delta = &delta[size..];
+      let mut literal_buf = vec![0u8; size];
+      delta.read_exact(&mut literal_buf)?;
+      writer.write_all(&literal_buf)?;
       written += size as u64;
     } else {
       return Err(Error::new(ErrorKind::InvalidBinaryPatch));

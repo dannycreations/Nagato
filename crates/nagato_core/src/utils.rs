@@ -14,47 +14,47 @@ pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
 }
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
-  if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
+  let s = if s.len() >= 2 && s[0] == b'"' && s[s.len() - 1] == b'"' {
+    &s[1..s.len() - 1]
+  } else {
     return Cow::Borrowed(strip_diff_prefix(s));
-  }
-
-  let content = &s[1..s.len() - 1];
-  let mut i = match content.find_byte(b'\\') {
-    Some(idx) => idx,
-    None => return Cow::Borrowed(strip_diff_prefix(content)),
   };
 
-  let mut res = Vec::with_capacity(content.len());
-  res.extend_from_slice(&content[..i]);
+  let first_esc = match s.find_byte(b'\\') {
+    Some(idx) => idx,
+    None => return Cow::Borrowed(strip_diff_prefix(s)),
+  };
 
-  while i < content.len() {
-    match content[i] {
-      b'\\' if i + 1 < content.len() => {
-        i += 1;
-        match content[i] {
-          b'n' => res.push(b'\n'),
-          b'r' => res.push(b'\r'),
-          b't' => res.push(b'\t'),
-          b'\\' => res.push(b'\\'),
-          b'"' => res.push(b'"'),
-          n @ b'0'..=b'7' => {
-            let mut octal = (n - b'0') as u32;
-            for _ in 0..2 {
-              if i + 1 < content.len()
-                && (b'0'..=b'7').contains(&content[i + 1])
-              {
-                i += 1;
-                octal = (octal << 3) | ((content[i] - b'0') as u32);
-              } else {
-                break;
-              }
+  let mut res = Vec::with_capacity(s.len());
+  res.extend_from_slice(&s[..first_esc]);
+
+  let mut i = first_esc;
+  while i < s.len() {
+    let b = s[i];
+    if b == b'\\' && i + 1 < s.len() {
+      i += 1;
+      match s[i] {
+        b'n' => res.push(b'\n'),
+        b'r' => res.push(b'\r'),
+        b't' => res.push(b'\t'),
+        b'\\' => res.push(b'\\'),
+        b'"' => res.push(b'"'),
+        n @ b'0'..=b'7' => {
+          let mut octal = (n - b'0') as u32;
+          if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
+            i += 1;
+            octal = (octal << 3) | ((s[i] - b'0') as u32);
+            if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
+              i += 1;
+              octal = (octal << 3) | ((s[i] - b'0') as u32);
             }
-            res.push(octal as u8);
           }
-          next => res.push(next),
+          res.push(octal as u8);
         }
+        next => res.push(next),
       }
-      b => res.push(b),
+    } else {
+      res.push(b);
     }
     i += 1;
   }
@@ -155,8 +155,14 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
     return None;
   }
 
-  let (line, rest) = source.split_once_str(b"\n").unwrap_or((source, &[]));
-  Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
+  match memchr::memchr(b'\n', source) {
+    Some(idx) => {
+      let line = &source[..idx];
+      let rest = &source[idx + 1..];
+      Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
+    }
+    None => Some((source.strip_suffix(b"\r").unwrap_or(source), &[])),
+  }
 }
 
 pub struct LineWriter<'a, W: Write + ?Sized> {
