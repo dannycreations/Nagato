@@ -239,10 +239,13 @@ impl<'a> Lexer<'a> {
     s: &[u8],
     f: impl FnOnce(u32) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    s.strip_suffix(b"%")
-      .and_then(|s| parse_int::<u32>(s, 10))
-      .filter(|(_, rest)| rest.is_empty())
-      .map(|(num, _)| f(num))
-      .ok_or(ErrorKind::InvalidPercentage)
+    let s = s.strip_suffix(b"%").ok_or(ErrorKind::InvalidPercentage)?;
+    let (num, rest) =
+      parse_int::<u32>(s, 10).ok_or(ErrorKind::InvalidPercentage)?;
+    if rest.is_empty() {
+      Ok(f(num))
+    } else {
+      Err(ErrorKind::InvalidPercentage)
+    }
   }
 }

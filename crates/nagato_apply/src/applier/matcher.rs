@@ -29,12 +29,12 @@ impl Matcher {
       }
 
       let after_text = &current_source[expected.len()..];
-      current_source = if after_text.is_empty() {
-        after_text
-      } else if let Some(rest) = after_text.strip_prefix(b"\n") {
+      current_source = if let Some(rest) = after_text.strip_prefix(b"\n") {
         rest
       } else if let Some(rest) = after_text.strip_prefix(b"\r\n") {
         rest
+      } else if after_text.is_empty() {
+        after_text
       } else {
         return Err(Error::with_line(
           ErrorKind::CouldNotApplyHunk,
@@ -144,24 +144,17 @@ impl Matcher {
 
     if let (true, None) = (needle.is_empty(), finder) {
       let mut match_pos = buffer_offset;
-      loop {
+      while match_pos <= buffer.len() {
         let remaining = &buffer[match_pos..];
-        let (line_end, has_lf) = match memchr::memchr(b'\n', remaining) {
-          Some(idx) => (idx, true),
-          None => (remaining.len(), false),
+        let (line, rest) = match memchr::memchr(b'\n', remaining) {
+          Some(idx) => (&remaining[..idx], &remaining[idx + 1..]),
+          None => (remaining, &[][..]),
         };
 
-        let line = &remaining[..line_end];
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let line_stripped = line.strip_suffix(b"\r").unwrap_or(line);
 
-        if line.is_empty() {
-          let next_source = if has_lf {
-            &remaining[line_end + 1..]
-          } else {
-            &[][..]
-          };
-
-          match self.verify_match(next_source, hunk, start_at_hunk_line) {
+        if line_stripped.is_empty() {
+          match self.verify_match(rest, hunk, start_at_hunk_line) {
             Ok(final_source) => return Ok((match_pos, final_source)),
             Err(e) => {
               let offset =
@@ -174,10 +167,13 @@ impl Matcher {
           }
         }
 
-        if !has_lf {
+        if rest.is_empty()
+          && !remaining.is_empty()
+          && remaining.last() != Some(&b'\n')
+        {
           break;
         }
-        match_pos += line_end + 1;
+        match_pos += line.len() + 1;
       }
 
       return Err(best_error.unwrap_or_else(|| {

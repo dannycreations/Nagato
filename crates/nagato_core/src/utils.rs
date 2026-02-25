@@ -14,55 +14,55 @@ pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
 }
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
-  let s = if s.len() >= 2 && s[0] == b'"' && s[s.len() - 1] == b'"' {
-    &s[1..s.len() - 1]
-  } else {
-    return Cow::Borrowed(strip_diff_prefix(s));
-  };
+  if s.len() >= 2 && s[0] == b'"' && s[s.len() - 1] == b'"' {
+    let s = &s[1..s.len() - 1];
 
-  let first_esc = match s.find_byte(b'\\') {
-    Some(idx) => idx,
-    None => return Cow::Borrowed(strip_diff_prefix(s)),
-  };
+    if let Some(first_esc) = s.find_byte(b'\\') {
+      let mut res = Vec::with_capacity(s.len());
+      res.extend_from_slice(&s[..first_esc]);
 
-  let mut res = Vec::with_capacity(s.len());
-  res.extend_from_slice(&s[..first_esc]);
-
-  let mut i = first_esc;
-  while i < s.len() {
-    let b = s[i];
-    if b == b'\\' && i + 1 < s.len() {
-      i += 1;
-      match s[i] {
-        b'n' => res.push(b'\n'),
-        b'r' => res.push(b'\r'),
-        b't' => res.push(b'\t'),
-        b'\\' => res.push(b'\\'),
-        b'"' => res.push(b'"'),
-        n @ b'0'..=b'7' => {
-          let mut octal = (n - b'0') as u32;
-          if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
-            i += 1;
-            octal = (octal << 3) | ((s[i] - b'0') as u32);
-            if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
-              i += 1;
-              octal = (octal << 3) | ((s[i] - b'0') as u32);
+      let mut i = first_esc;
+      while i < s.len() {
+        let b = s[i];
+        if b == b'\\' && i + 1 < s.len() {
+          i += 1;
+          match s[i] {
+            b'n' => res.push(b'\n'),
+            b'r' => res.push(b'\r'),
+            b't' => res.push(b'\t'),
+            b'\\' => res.push(b'\\'),
+            b'"' => res.push(b'"'),
+            n @ b'0'..=b'7' => {
+              let mut octal = (n - b'0') as u32;
+              if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
+                i += 1;
+                octal = (octal << 3) | ((s[i] - b'0') as u32);
+                if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
+                  i += 1;
+                  octal = (octal << 3) | ((s[i] - b'0') as u32);
+                }
+              }
+              res.push(octal as u8);
             }
+            next => res.push(next),
           }
-          res.push(octal as u8);
+        } else {
+          res.push(b);
         }
-        next => res.push(next),
+        i += 1;
       }
-    } else {
-      res.push(b);
-    }
-    i += 1;
-  }
 
-  if res.starts_with(b"a/") || res.starts_with(b"b/") {
-    res.drain(..2);
+      let res_final = if res.starts_with(b"a/") || res.starts_with(b"b/") {
+        &res[2..]
+      } else {
+        &res[..]
+      };
+
+      return Cow::Owned(res_final.to_vec());
+    }
+    return Cow::Borrowed(strip_diff_prefix(s));
   }
-  Cow::Owned(res)
+  Cow::Borrowed(strip_diff_prefix(s))
 }
 
 #[allow(clippy::type_complexity)]
@@ -155,14 +155,12 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
     return None;
   }
 
-  match memchr::memchr(b'\n', source) {
-    Some(idx) => {
-      let line = &source[..idx];
-      let rest = &source[idx + 1..];
-      Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
-    }
-    None => Some((source.strip_suffix(b"\r").unwrap_or(source), &[])),
-  }
+  let (line, rest) = match memchr::memchr(b'\n', source) {
+    Some(idx) => (&source[..idx], &source[idx + 1..]),
+    None => (source, &[][..]),
+  };
+
+  Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
 }
 
 pub struct LineWriter<'a, W: Write + ?Sized> {

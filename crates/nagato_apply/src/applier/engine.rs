@@ -38,20 +38,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     let mut remaining = block;
     while !remaining.is_empty() {
-      let (line_end, has_lf) = match memchr::memchr(b'\n', remaining) {
-        Some(idx) => (idx, true),
-        None => (remaining.len(), false),
+      let (line, rest) = match memchr::memchr(b'\n', remaining) {
+        Some(idx) => (&remaining[..idx], &remaining[idx + 1..]),
+        None => (remaining, &[][..]),
       };
 
-      let line = &remaining[..line_end];
       let line = line.strip_suffix(b"\r").unwrap_or(line);
       self.write_line(line)?;
-
-      remaining = if has_lf {
-        &remaining[line_end + 1..]
-      } else {
-        &[][..]
-      };
+      remaining = rest;
     }
     Ok(())
   }
@@ -96,11 +90,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   pub fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
     if hunk.old_span == 0 {
-      return hunk
-        .lines
-        .iter()
-        .filter(|l| matches!(l.kind, LineKind::Addition))
-        .try_for_each(|l| self.write_line(l.text));
+      for line in hunk.lines.iter() {
+        if matches!(line.kind, LineKind::Addition) {
+          self.write_line(line.text)?;
+        }
+      }
+      return Ok(());
     }
 
     self.find_and_apply_hunk(hunk)
@@ -205,7 +200,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         if let Ok((match_pos, _)) =
           Matcher.find_match(&source[current_pos..], hunk)
         {
-          hunks_with_pos.push((current_pos + match_pos, *hunk));
+          let absolute_pos = current_pos + match_pos;
+          hunks_with_pos.push((absolute_pos, *hunk));
           found_idx = Some(i);
           break;
         }
@@ -214,9 +210,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       if let Some(i) = found_idx {
         let (pos, _) = hunks_with_pos.last().unwrap();
         let matched_text = &source[*pos..];
-        let next_line_pos = memchr::memchr(b'\n', matched_text)
-          .map(|idx| idx + 1)
-          .unwrap_or(matched_text.len());
+        let next_line_pos = match memchr::memchr(b'\n', matched_text) {
+          Some(idx) => idx + 1,
+          None => matched_text.len(),
+        };
         current_pos = *pos + next_line_pos;
         pending_hunks.remove(i);
       } else {
@@ -231,7 +228,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
     }
 
-    hunks_with_pos.sort_by_key(|(pos, _)| *pos);
+    hunks_with_pos.sort_unstable_by_key(|(pos, _)| *pos);
     hunks_with_pos
       .into_iter()
       .try_for_each(|(_, hunk)| self.process_hunk(hunk))

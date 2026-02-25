@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{copy, Read, Write};
 
 use nagato_core::{Error, ErrorKind};
 
@@ -38,43 +38,44 @@ pub fn apply_delta(
   let target_size = read_variable_length_int(&mut delta)?;
 
   let mut written: u64 = 0;
-  let mut buf = [0u8; 1];
+  let _buf = [0u8; 1];
 
-  while delta.read(&mut buf)? != 0 {
-    let cmd = buf[0];
+  let mut cmd_buf = [0u8; 1];
+  while delta.read_exact(&mut cmd_buf).is_ok() {
+    let cmd = cmd_buf[0];
 
     if (cmd & 0x80) != 0 {
-      let mut offset: usize = 0;
-      let mut size: usize = 0;
+      let mut offset = 0usize;
+      let mut size = 0usize;
 
       if (cmd & 0x01) != 0 {
-        delta.read_exact(&mut buf)?;
-        offset = buf[0] as usize;
+        delta.read_exact(&mut cmd_buf)?;
+        offset = cmd_buf[0] as usize;
       }
       if (cmd & 0x02) != 0 {
-        delta.read_exact(&mut buf)?;
-        offset |= (buf[0] as usize) << 8;
+        delta.read_exact(&mut cmd_buf)?;
+        offset |= (cmd_buf[0] as usize) << 8;
       }
       if (cmd & 0x04) != 0 {
-        delta.read_exact(&mut buf)?;
-        offset |= (buf[0] as usize) << 16;
+        delta.read_exact(&mut cmd_buf)?;
+        offset |= (cmd_buf[0] as usize) << 16;
       }
       if (cmd & 0x08) != 0 {
-        delta.read_exact(&mut buf)?;
-        offset |= (buf[0] as usize) << 24;
+        delta.read_exact(&mut cmd_buf)?;
+        offset |= (cmd_buf[0] as usize) << 24;
       }
 
       if (cmd & 0x10) != 0 {
-        delta.read_exact(&mut buf)?;
-        size = buf[0] as usize;
+        delta.read_exact(&mut cmd_buf)?;
+        size = cmd_buf[0] as usize;
       }
       if (cmd & 0x20) != 0 {
-        delta.read_exact(&mut buf)?;
-        size |= (buf[0] as usize) << 8;
+        delta.read_exact(&mut cmd_buf)?;
+        size |= (cmd_buf[0] as usize) << 8;
       }
       if (cmd & 0x40) != 0 {
-        delta.read_exact(&mut buf)?;
-        size |= (buf[0] as usize) << 16;
+        delta.read_exact(&mut cmd_buf)?;
+        size |= (cmd_buf[0] as usize) << 16;
       }
 
       if size == 0 {
@@ -91,11 +92,9 @@ pub fn apply_delta(
       writer.write_all(&source[offset..end])?;
       written += size as u64;
     } else if cmd != 0 {
-      let size = cmd as usize;
-      let mut literal_buf = vec![0u8; size];
-      delta.read_exact(&mut literal_buf)?;
-      writer.write_all(&literal_buf)?;
-      written += size as u64;
+      let size = cmd as u64;
+      copy(&mut delta.by_ref().take(size), writer)?;
+      written += size;
     } else {
       return Err(Error::new(ErrorKind::InvalidBinaryPatch));
     }
