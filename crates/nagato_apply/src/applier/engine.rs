@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{ErrorKind as IoErrorKind, Write};
 
 use hex::encode_to_slice;
 use nagato_core::{Error, ErrorKind, LineWriter};
@@ -142,8 +142,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
           ) {
             Ok(_) => Ok(()),
             Err(e)
-              if matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch) =>
+              if matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch)
+                || matches!(
+                  e.kind,
+                  ErrorKind::Io(ref io)
+                    if io.kind() == IoErrorKind::InvalidData
+                ) =>
             {
+              // InvalidData from base85 decoder (e.g. malformed delta)
+              // should also be treated as a candidate for skipping.
               continue;
             }
             Err(e) => Err(e),

@@ -1,4 +1,4 @@
-use std::io::{copy, Read, Write};
+use std::io::{copy, ErrorKind as IoErrorKind, Read, Write};
 
 use nagato_core::{Error, ErrorKind};
 
@@ -29,7 +29,14 @@ pub fn apply_delta(
 ) -> Result<(), Error> {
   let mut delta = std::io::BufReader::with_capacity(8192, delta_reader);
 
-  let source_size = read_variable_length_int(&mut delta)?;
+  let source_size = match read_variable_length_int(&mut delta) {
+    Ok(s) => s,
+    Err(e) if matches!(e.kind, ErrorKind::Io(ref io) if io.kind() == IoErrorKind::UnexpectedEof) =>
+    {
+      return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
+    }
+    Err(e) => return Err(e),
+  };
 
   if source_size != source.len() as u64 {
     return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));

@@ -2,4 +2,3 @@
 mod macros;
 
 mod native;
-mod vendor;

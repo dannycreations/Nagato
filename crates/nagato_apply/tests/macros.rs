@@ -31,9 +31,9 @@ macro_rules! parse_diff {
 macro_rules! test_apply_ok {
   (
     $test_name:ident,
-    $diff:expr,
-    $source:expr,
-    $expected:expr
+    diff: $diff:expr,
+    source: $source:expr,
+    expected: $expected:expr
   ) => {
     #[test]
     fn $test_name() {
@@ -49,8 +49,8 @@ macro_rules! test_apply_ok {
 macro_rules! test_apply_err {
   (
     $test_name:ident,
-    $diff:expr,
-    $source:expr
+    diff: $diff:expr,
+    source: $source:expr
   ) => {
     #[test]
     fn $test_name() {
@@ -109,8 +109,8 @@ macro_rules! test_patch_err {
 macro_rules! test_parser_err {
   (
     $test_name:ident,
-    $diff:expr,
-    $expected_kind:expr
+    diff: $diff:expr,
+    expected: $expected:expr
   ) => {
     #[test]
     fn $test_name() {
@@ -118,7 +118,7 @@ macro_rules! test_parser_err {
       let result = parser.next().unwrap();
       match result {
         Err(e) => {
-          assert_eq!(e.kind, $expected_kind);
+          assert_eq!(e.kind, $expected);
         }
         Ok(_) => panic!("Expected an error but got Ok"),
       }
@@ -130,8 +130,8 @@ macro_rules! test_parser_err {
 macro_rules! test_lexer_ok {
   (
     $test_name:ident,
-    $input:expr,
-    $($expected_token:expr),*
+    input: $input:expr,
+    expected: [$($expected_token:expr),*]
   ) => {
     #[test]
     fn $test_name() {
@@ -166,6 +166,154 @@ macro_rules! test_patch_err_with_line {
         }
         Ok(_) => panic!("Expected an error but got Ok"),
       }
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_patch_invert {
+  (
+    $test_name:ident,
+    patch: {
+      old_file: $old:expr,
+      new_file: $new:expr
+      $(, rename_from: $from:expr)?
+      $(, rename_to: $to:expr)?
+      $(,)?
+    },
+    expected: {
+      old_file: $e_old:expr
+      $(, rename_from: $e_from:expr)?
+      $(,)?
+    }
+  ) => {
+    #[test]
+    fn $test_name() {
+      use std::borrow::Cow;
+      use nagato_apply::Patch;
+      let patch = Patch {
+        old_file: Cow::Borrowed($old),
+        new_file: Cow::Borrowed($new),
+        $(rename_from: Some(Cow::Borrowed($from as &[u8])),)?
+        $(rename_to: Some(Cow::Borrowed($to as &[u8])),)?
+        ..Default::default()
+      };
+      let inverted = patch.invert();
+      assert_eq!(inverted.old_file.as_ref(), $e_old);
+      $(assert_eq!(inverted.rename_from, Some(Cow::Borrowed($e_from as &[u8])));)?
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_parser_ok {
+  (
+    $test_name:ident,
+    $diff:expr,
+    assertions: |$patch:ident| { $($assertions:tt)* }
+  ) => {
+    #[test]
+    fn $test_name() {
+      let mut parser = parse_diff!($diff);
+      let $patch = parser.next().unwrap().unwrap();
+      $($assertions)*
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_delta_err {
+  (
+    $test_name:ident,
+    delta: $delta:expr,
+    source: $source:expr,
+    expected: $expected:expr
+  ) => {
+    #[test]
+    fn $test_name() {
+      use std::io::Cursor;
+      let mut output = Vec::new();
+      let res =
+        nagato_apply::apply_delta(Cursor::new($delta), $source, &mut output);
+      assert_eq!(res.unwrap_err().kind, $expected);
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_reject_mixed {
+  (
+    $test_name:ident,
+    initial_fs: { $initial_path:expr => $initial_content:expr },
+    patch: $patch:expr
+  ) => {
+    #[test]
+    fn $test_name() {
+      let dir = create_test_fs! { $initial_path => $initial_content };
+      let fs = nagato_core::FileSystem::new(dir.path(), false);
+      let res = nagato_apply::patch_file(&fs, $patch, false);
+      assert_eq!(
+        res.unwrap_err().kind,
+        nagato_core::ErrorKind::UnsupportedBinaryPatch
+      );
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_lexer_binary_data_ok {
+  (
+    $test_name:ident,
+    input: $input:expr,
+    expected: [$($expected_data:expr),*]
+  ) => {
+    #[test]
+    fn $test_name() {
+      use nagato_apply::{Lexer, LexerMode, TokenKind};
+      let mut lexer = Lexer::new($input);
+      lexer.set_mode(LexerMode::Binary);
+      $(
+        assert!(matches!(
+          lexer.next().unwrap().unwrap().token,
+          TokenKind::BinaryData($expected_data)
+        ));
+      )*
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_applier_flush_ok {
+  (
+    $test_name:ident,
+    source: $source:expr,
+    patch: $patch:expr,
+    expected_contains: $expected:expr
+  ) => {
+    #[test]
+    fn $test_name() {
+      use nagato_apply::Applier;
+      let mut output = Vec::new();
+      let applier = Applier::new(&mut output, $source);
+      applier.process(&$patch).unwrap();
+      assert!(String::from_utf8_lossy(&output).contains($expected));
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! test_binary_applier_process_ok {
+  (
+    $test_name:ident,
+    source: $source:expr,
+    patch: $patch:expr
+  ) => {
+    #[test]
+    fn $test_name() {
+      use nagato_apply::Applier;
+      let mut output = Vec::new();
+      let mut applier = Applier::new(&mut output, $source);
+      let _ = applier.process_binary(&$patch);
     }
   };
 }

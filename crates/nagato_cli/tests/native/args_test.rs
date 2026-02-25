@@ -1,5 +1,5 @@
 test_exec_ok!(
-  exec_directory_argument,
+  cli_exec_directory_argument,
   initial_fs: { "project/file.txt" => "hello\n" },
   diff: r#"
     --- a/file.txt
@@ -12,7 +12,7 @@ test_exec_ok!(
 );
 
 test_exec_ok!(
-  exec_reverse_argument,
+  cli_exec_reverse_argument,
   initial_fs: { "file.txt" => "world\n" },
   diff: r#"
     --- a/file.txt
@@ -25,7 +25,7 @@ test_exec_ok!(
 );
 
 test_exec_ok!(
-  exec_check_argument,
+  cli_exec_check_argument,
   initial_fs: { "file.txt" => "hello\n" },
   diff: r#"
     --- a/file.txt
@@ -35,4 +35,23 @@ test_exec_ok!(
   "#,
   args: ["--check"],
   assert_file: ("file.txt", "hello\n")
+);
+
+test_cli_ok!(
+  cli_args_version_flag,
+  args: ["--version"],
+  stdout_contains: env!("CARGO_PKG_VERSION"),
+);
+
+test_cli_fail!(
+  cli_args_error_non_existent_patch,
+  args: ["non_existent.patch"],
+  stderr: "Can't open patch"
+);
+
+test_cli_fail!(
+  cli_args_error_invalid_stdin,
+  args: [],
+  stdin: "invalid\n",
+  stderr: "<stdin>"
 );

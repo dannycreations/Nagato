@@ -1,11 +1,10 @@
-use std::{fs, io::ErrorKind as IoErrorKind};
+use std::fs;
 
-use nagato_apply::Parser;
-use nagato_core::{ErrorKind, FileSystem};
-use tempfile::Builder;
+use nagato_apply::{BinaryFragment, BinaryKind, Patch};
+use nagato_core::ErrorKind;
 
 test_patch_ok!(
-  applies_binary_patch_literal,
+  binary_patch_literal,
   initial_fs: {},
   diff: r#"
     diff --git a/binary.dat b/binary.dat
@@ -27,7 +26,7 @@ test_patch_ok!(
 );
 
 test_patch_ok!(
-  applies_binary_patch_delta,
+  binary_patch_delta,
   initial_fs: { "binary.dat" => [104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0] },
   diff: r#"
     diff --git a/binary.dat b/binary.dat
@@ -47,44 +46,69 @@ test_patch_ok!(
   }
 );
 
-#[test]
-fn fails_on_base85_overflow() {
-  let diff = indoc::indoc!(
-    r#"
-      diff --git a/binary.dat b/binary.dat
-      new file mode 100644
-      index 0000000000000000000000000000000000000000..ffbe3091410c3be582675805a98a0118af8e6a6d
-      GIT binary patch
-      literal 4
-      ~~~~~
-      
-      literal 0
-      Hc-jL100001
-      "#
-  );
+test_delta_err!(
+  binary_delta_overflows,
+  delta: [0x80; 11],
+  source: b"",
+  expected: ErrorKind::InvalidBinaryPatch
+);
+test_delta_err!(
+  binary_delta_size_mismatch,
+  delta: vec![0x05, 0x05, 0x01, b'a'],
+  source: b"123",
+  expected: ErrorKind::BinaryPatchSourceMismatch
+);
+test_delta_err!(
+  binary_delta_copy_out_of_bounds,
+  delta: vec![0x03, 0x03, 0x81, 0x05],
+  source: b"123",
+  expected: ErrorKind::InvalidBinaryPatch
+);
 
-  let dir = Builder::new().prefix("test_overflow").tempdir().unwrap();
-  let fs = FileSystem::new(dir.path(), false);
+test_patch_err!(
+  test_binary_patch_hash_mismatch,
+  initial_fs: { "binary.dat" => [0u8, 0, 0] },
+  diff: r#"
+    diff --git a/binary.dat b/binary.dat
+    index abcdef0..1234567 100644
+    GIT binary patch
+    literal 1
+    Wc-qTI&B@7E0000000000
+  "#
+);
 
-  let patch = Parser::new(diff.as_bytes()).next().unwrap().unwrap();
+test_patch_ok!(
+  test_binary_patch_continues_on_delta_mismatch,
+  initial_fs: { "binary.dat" => [1u8, 2, 3] },
+  diff: r#"
+    diff --git a/binary.dat b/binary.dat
+    GIT binary patch
+    delta 10
+    fcmZ?W&B@7E0000000000
 
-  let result = nagato_apply::patch_file(&fs, patch, false);
+    literal 3
+    Wc-qT001
+  "#,
+  assertions: |_root| {}
+);
 
-  match result {
-    Err(e) => {
-      let is_invalid_binary = e.kind == ErrorKind::InvalidBinaryFilesLine;
-      let is_io_invalid_data = if let ErrorKind::Io(io_err) = &e.kind {
-        io_err.kind() == IoErrorKind::InvalidData
-      } else {
-        false
-      };
-
-      assert!(
-        is_invalid_binary || is_io_invalid_data,
-        "Expected InvalidBinaryFilesLine or IO InvalidData, got {:?}",
-        e
-      );
-    }
-    Ok(_) => panic!("Expected overflow error"),
+test_binary_applier_process_ok!(
+  binary_applier_process_binary_fragment_selection,
+  source: b"source",
+  patch: Patch {
+    binary_fragments: vec![
+      BinaryFragment {
+        kind: BinaryKind::Delta,
+        size: 5,
+        data: vec![b"A00000"],
+      },
+      BinaryFragment {
+        kind: BinaryKind::Literal,
+        size: 5,
+        data: vec![b"6|SHe00001"],
+      },
+    ]
+    .into_boxed_slice(),
+    ..Default::default()
   }
-}
+);

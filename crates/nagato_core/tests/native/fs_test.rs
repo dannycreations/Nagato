@@ -1,0 +1,111 @@
+#[cfg(unix)]
+test_atomic_writer_err!(
+  fs_atomic_writer_root_err,
+  path: "/"
+);
+#[cfg(windows)]
+test_atomic_writer_err!(
+  fs_atomic_writer_root_err,
+  path: "C:\\"
+);
+
+test_atomic_writer_ok!(
+  fs_atomic_writer_success,
+  content: b"content"
+);
+
+test_fs_get_unique_path_ok!(
+  fs_get_unique_path,
+  initial_fs: { "test.trim.patch" => "v1" },
+  base_name: "test.trim.patch",
+  expected_file_name: "test-1.trim.patch"
+);
+
+test_fs_ops_ok!(
+  fs_basic_operations,
+  check_mode: false,
+  assertions: |fs, dir| {
+    // Valid path (but not existing)
+    assert!(fs.read(b"file.txt").is_err());
+
+    // Write and read
+    let path = b"new_file.txt";
+    {
+      let mut writer = fs.write(path).unwrap();
+      writer.write_all(b"data").unwrap();
+      writer.commit().unwrap();
+    }
+    assert!(fs.exists(path));
+    assert_eq!(&fs.read(path).unwrap()[..], b"data");
+
+    // Copy clobbers
+    std::fs::write(dir.path().join("dest.txt"), b"old").unwrap();
+    fs.copy(path, b"dest.txt").unwrap();
+    assert_eq!(std::fs::read(dir.path().join("dest.txt")).unwrap(), b"data");
+
+    // Remove
+    fs.remove(path).unwrap();
+    assert!(!fs.exists(path));
+  }
+);
+
+test_fs_ops_ok!(
+  fs_check_mode_isolation,
+  check_mode: true,
+  assertions: |fs, dir| {
+    let path = b"staged_file.txt";
+    {
+      let mut writer = fs.write(path).unwrap();
+      writer.write_all(b"content").unwrap();
+      writer.commit().unwrap();
+    }
+
+    assert!(fs.exists(path));
+    assert!(!dir.path().join("staged_file.txt").exists());
+
+    // Rename in check mode
+    fs.rename(path, b"moved.txt").unwrap();
+    assert!(!fs.exists(path));
+    assert!(fs.exists(b"moved.txt"));
+    assert_eq!(&fs.read(b"moved.txt").unwrap()[..], b"content");
+
+    // Remove staged
+    fs.remove(b"moved.txt").unwrap();
+    assert!(!fs.exists(b"moved.txt"));
+    let res = fs.read(b"moved.txt");
+    assert!(res.is_err());
+    assert!(res.unwrap_err().is_not_found());
+  }
+);
+
+#[cfg(unix)]
+test_fs_invalid_path!(fs_path_root => b"/");
+
+test_fs_invalid_path!(
+  fs_path_parent => b"../foo",
+  fs_path_parent_nested => b"./foo/../bar",
+  fs_path_trailing_dot => b"file.",
+  fs_path_trailing_space => b"file ",
+  fs_path_dir_space => b"dir /file",
+  fs_path_dir_dot => b"dir./file",
+  fs_path_short_name_caps => b"PROGRA~1",
+  fs_path_short_name_lower => b"progra~1",
+  fs_path_short_name_digit => b"foo~5",
+);
+
+test_fs_reserved!(
+  fs_reserved_con => b"CON",
+  fs_reserved_prn => b"PRN",
+  fs_reserved_aux => b"AUX",
+  fs_reserved_nul => b"NUL",
+  fs_reserved_com1 => b"COM1",
+  fs_reserved_lpt9 => b"LPT9",
+  fs_reserved_clock_dollar => b"CLOCK$",
+  fs_reserved_con_lower => b"con",
+  fs_reserved_aux_txt => b"aux.txt",
+  fs_reserved_aux_file => b"AUX/file",
+  fs_reserved_nul_lower => b"nul",
+  fs_reserved_com5 => b"com5",
+  fs_reserved_lpt0 => b"lpt0",
+  fs_reserved_clock_dollar_lower => b"clock$",
+);

@@ -12,7 +12,7 @@ pub struct LexerItem<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LexerMode {
+pub enum LexerMode {
   Text,
   Binary,
 }
@@ -36,7 +36,7 @@ impl<'a> Lexer<'a> {
     }
   }
 
-  pub(crate) fn set_mode(&mut self, mode: LexerMode) {
+  pub fn set_mode(&mut self, mode: LexerMode) {
     self.mode = mode;
   }
 
