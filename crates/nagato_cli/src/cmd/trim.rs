@@ -35,13 +35,13 @@ pub fn process_trim(
       .unwrap()
       .to_os_string();
 
-    let out_path = if let Some(ref dir) = directory {
-      get_unique_path(dir, &base_name.to_string_lossy())
-    } else {
-      source_path.with_file_name(get_unique_path(
-        source_path.parent().unwrap_or(Path::new(".")),
-        &base_name.to_string_lossy(),
-      ))
+    let base_name_str = base_name.to_string_lossy();
+    let out_path = match directory {
+      Some(ref dir) => get_unique_path(dir, &base_name_str),
+      None => {
+        let parent = source_path.parent().unwrap_or_else(|| Path::new("."));
+        parent.join(get_unique_path(parent, &base_name_str))
+      }
     };
 
     let mut writer = AtomicWriter::new(&out_path)?;

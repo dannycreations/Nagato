@@ -29,17 +29,16 @@ impl Matcher {
       }
 
       let after_text = &current_source[expected.len()..];
-      current_source = if let Some(rest) = after_text.strip_prefix(b"\n") {
-        rest
-      } else if let Some(rest) = after_text.strip_prefix(b"\r\n") {
-        rest
-      } else if after_text.is_empty() {
-        after_text
-      } else {
-        return Err(Error::with_line(
-          ErrorKind::CouldNotApplyHunk,
-          hunk.patch_line_num + 1 + (start_at_hunk_line + i) as u32,
-        ));
+      current_source = match after_text {
+        [b'\n', rest @ ..] => rest,
+        [b'\r', b'\n', rest @ ..] => rest,
+        [] => after_text,
+        _ => {
+          return Err(Error::with_line(
+            ErrorKind::CouldNotApplyHunk,
+            hunk.patch_line_num + 1 + (start_at_hunk_line + i) as u32,
+          ));
+        }
       };
     }
     Ok(current_source)
@@ -79,16 +78,12 @@ impl Matcher {
     };
 
     let needle = first_line.text;
-    let finder = if !needle.is_empty() {
-      Some(Finder::new(needle))
-    } else {
-      None
-    };
+    let finder = (!needle.is_empty()).then(|| Finder::new(needle));
 
     self.search_in_buffer(
       buffer,
       hunk,
-      first_idx + 1,
+      first_idx,
       needle,
       finder.as_ref(),
       self.get_search_buffer(buffer, hunk),
@@ -109,17 +104,13 @@ impl Matcher {
       (Some((i, _)), None) => Ok((0, buffer, Some(i))),
       (Some((first_idx, _)), Some((second_idx, second_line))) => {
         let needle = second_line.text;
-        let finder = if !needle.is_empty() {
-          Some(Finder::new(needle))
-        } else {
-          None
-        };
+        let finder = (!needle.is_empty()).then(|| Finder::new(needle));
 
         self
           .search_in_buffer(
             buffer,
             hunk,
-            second_idx + 1,
+            second_idx,
             needle,
             finder.as_ref(),
             (buffer, 0),
@@ -134,7 +125,7 @@ impl Matcher {
     &self,
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
-    start_at_hunk_line: usize,
+    match_idx: usize,
     needle: &[u8],
     finder: Option<&Finder>,
     (search_buffer, buffer_offset): (&'s [u8], usize),
@@ -142,7 +133,7 @@ impl Matcher {
     let mut best_error = None;
     let mut max_offset = 0;
 
-    if let (true, None) = (needle.is_empty(), finder) {
+    if finder.is_none() {
       let mut match_pos = buffer_offset;
       while match_pos <= buffer.len() {
         let remaining = &buffer[match_pos..];
@@ -154,14 +145,18 @@ impl Matcher {
         let line_stripped = line.strip_suffix(b"\r").unwrap_or(line);
 
         if line_stripped.is_empty() {
-          match self.verify_match(rest, hunk, start_at_hunk_line) {
-            Ok(final_source) => return Ok((match_pos, final_source)),
-            Err(e) => {
-              let offset =
-                e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
-              if offset > max_offset || best_error.is_none() {
-                max_offset = offset;
-                best_error = Some(e);
+          if let Some(hunk_start) =
+            self.find_hunk_start(buffer, match_pos, hunk, match_idx)
+          {
+            match self.verify_match(&buffer[hunk_start..], hunk, 0) {
+              Ok(final_source) => return Ok((hunk_start, final_source)),
+              Err(e) => {
+                let offset =
+                  e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
+                if offset > max_offset || best_error.is_none() {
+                  max_offset = offset;
+                  best_error = Some(e);
+                }
               }
             }
           }
@@ -183,9 +178,9 @@ impl Matcher {
       }));
     }
 
-    let finder = finder.expect("finder must be present for non-empty needle");
+    let finder = finder.unwrap();
 
-    // The search buffer is scanned for potential matches using a precomputed finder for the first line of the hunk.
+    // The search buffer is scanned for potential matches using a precomputed finder for a non-empty line of the hunk.
     for match_pos_rel in finder.find_iter(search_buffer) {
       let match_pos = buffer_offset + match_pos_rel;
       // Ensure match starts at a line boundary.
@@ -193,32 +188,29 @@ impl Matcher {
         continue;
       }
 
-      // Fast path: if the rest of the buffer is shorter than the minimum expected length, skip.
+      // If the rest of the buffer is shorter than the minimum expected length, skip.
       if (buffer.len() - match_pos) < needle.len() {
         continue;
       }
 
       let end_pos = match_pos + needle.len();
-      let next_source = if end_pos < buffer.len() {
-        let b = buffer[end_pos];
-        if b == b'\n' {
-          &buffer[end_pos + 1..]
-        } else if b == b'\r' && buffer.get(end_pos + 1) == Some(&b'\n') {
-          &buffer[end_pos + 2..]
-        } else {
-          continue;
-        }
-      } else {
-        &[][..]
+      match buffer.get(end_pos..) {
+        Some([b'\n', ..]) | Some([b'\r', b'\n', ..]) | Some([]) | None => {}
+        _ => continue,
       };
 
-      match self.verify_match(next_source, hunk, start_at_hunk_line) {
-        Ok(final_source) => return Ok((match_pos, final_source)),
-        Err(e) => {
-          let offset = e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
-          if offset > max_offset || best_error.is_none() {
-            max_offset = offset;
-            best_error = Some(e);
+      if let Some(hunk_start) =
+        self.find_hunk_start(buffer, match_pos, hunk, match_idx)
+      {
+        match self.verify_match(&buffer[hunk_start..], hunk, 0) {
+          Ok(final_source) => return Ok((hunk_start, final_source)),
+          Err(e) => {
+            let offset =
+              e.line.unwrap_or(0).saturating_sub(hunk.patch_line_num);
+            if offset > max_offset || best_error.is_none() {
+              max_offset = offset;
+              best_error = Some(e);
+            }
           }
         }
       }
@@ -229,5 +221,36 @@ impl Matcher {
         hunk.patch_line_num + if hunk.has_header { 0 } else { 1 };
       Error::with_line(ErrorKind::CouldNotApplyHunk, error_line)
     }))
+  }
+
+  fn find_hunk_start(
+    &self,
+    buffer: &[u8],
+    match_pos: usize,
+    hunk: &Hunk,
+    match_idx: usize,
+  ) -> Option<usize> {
+    let mut current_pos = match_pos;
+    let it = hunk.lines_to_match();
+    let mut lines_before = 0;
+    for (idx, _) in it {
+      if idx == match_idx {
+        break;
+      }
+      lines_before += 1;
+    }
+
+    for _ in 0..lines_before {
+      if current_pos == 0 {
+        return None;
+      }
+      // Skip the newline before current_pos
+      current_pos -= 1;
+      match memchr::memrchr(b'\n', &buffer[..current_pos]) {
+        Some(idx) => current_pos = idx + 1,
+        None => current_pos = 0,
+      }
+    }
+    Some(current_pos)
   }
 }

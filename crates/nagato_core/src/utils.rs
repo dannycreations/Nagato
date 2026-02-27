@@ -14,57 +14,58 @@ pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
 }
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
-  if s.len() >= 2 && s[0] == b'"' && s[s.len() - 1] == b'"' {
-    let s = &s[1..s.len() - 1];
-
-    if let Some(first_esc) = s.find_byte(b'\\') {
-      let mut res = Vec::with_capacity(s.len());
-      res.extend_from_slice(&s[..first_esc]);
-
-      let mut i = first_esc;
-      while i < s.len() {
-        let b = s[i];
-        if b == b'\\' && i + 1 < s.len() {
-          i += 1;
-          match s[i] {
-            b'n' => res.push(b'\n'),
-            b'r' => res.push(b'\r'),
-            b't' => res.push(b'\t'),
-            b'\\' => res.push(b'\\'),
-            b'"' => res.push(b'"'),
-            n @ b'0'..=b'7' => {
-              let mut octal = (n - b'0') as u32;
-              if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
-                i += 1;
-                octal = (octal << 3) | ((s[i] - b'0') as u32);
-                if i + 1 < s.len() && (b'0'..=b'7').contains(&s[i + 1]) {
-                  i += 1;
-                  octal = (octal << 3) | ((s[i] - b'0') as u32);
-                }
-              }
-              res.push(octal as u8);
-            }
-            next => res.push(next),
-          }
-        } else {
-          res.push(b);
-        }
-        i += 1;
-      }
-
-      let res_final = if res.starts_with(b"a/") || res.starts_with(b"b/") {
-        res.remove(0);
-        res.remove(0);
-        res
-      } else {
-        res
-      };
-
-      return Cow::Owned(res_final);
-    }
+  if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
     return Cow::Borrowed(strip_diff_prefix(s));
   }
-  Cow::Borrowed(strip_diff_prefix(s))
+
+  let s = &s[1..s.len() - 1];
+  let first_esc = match s.find_byte(b'\\') {
+    Some(idx) => idx,
+    None => return Cow::Borrowed(strip_diff_prefix(s)),
+  };
+
+  let mut res = Vec::with_capacity(s.len());
+  res.extend_from_slice(&s[..first_esc]);
+
+  let mut i = first_esc;
+  while i < s.len() {
+    let b = s[i];
+    if b == b'\\' && i + 1 < s.len() {
+      i += 1;
+      let next = s[i];
+      match next {
+        b'n' => res.push(b'\n'),
+        b'r' => res.push(b'\r'),
+        b't' => res.push(b'\t'),
+        b'\\' => res.push(b'\\'),
+        b'"' => res.push(b'"'),
+        b'0'..=b'7' => {
+          let mut octal = (next - b'0') as u32;
+          for _ in 0..2 {
+            if let Some(&next_byte) = s.get(i + 1) {
+              if (b'0'..=b'7').contains(&next_byte) {
+                i += 1;
+                octal = (octal << 3) | ((next_byte - b'0') as u32);
+                continue;
+              }
+            }
+            break;
+          }
+          res.push(octal as u8);
+        }
+        _ => res.push(next),
+      }
+    } else {
+      res.push(b);
+    }
+    i += 1;
+  }
+
+  let stripped_len = strip_diff_prefix(&res).len();
+  if stripped_len != res.len() {
+    res.drain(..res.len() - stripped_len);
+  }
+  Cow::Owned(res)
 }
 
 #[allow(clippy::type_complexity)]
@@ -88,17 +89,21 @@ pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
   if s[0] == b'"' {
     let mut i = 1;
     while i < s.len() {
-      if s[i] == b'"' {
+      let b = s[i];
+      if b == b'"' {
         return Some((&s[..i + 1], s[i + 1..].trim_start()));
       }
-      if s[i] == b'\\' {
+      if b == b'\\' {
         i += 1;
       }
       i += 1;
     }
     None
   } else {
-    let (path, rest) = s.split_once_str(b" ").unwrap_or((s, &[]));
+    let (path, rest) = match s.find_byte(b' ') {
+      Some(idx) => (&s[..idx], &s[idx + 1..]),
+      None => (s, &[][..]),
+    };
     Some((path, rest.trim_start()))
   }
 }
@@ -163,7 +168,12 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
     None => (source, &[][..]),
   };
 
-  Some((line.strip_suffix(b"\r").unwrap_or(line), rest))
+  let line = match line {
+    [head @ .., b'\r'] => head,
+    _ => line,
+  };
+
+  Some((line, rest))
 }
 
 pub struct LineWriter<'a, W: Write + ?Sized> {
@@ -213,6 +223,11 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   #[inline]
   pub fn is_first_line(&self) -> bool {
     self.is_first_line
+  }
+
+  #[inline]
+  pub fn reset_to_first_line(&mut self) {
+    self.is_first_line = true;
   }
 
   #[inline]

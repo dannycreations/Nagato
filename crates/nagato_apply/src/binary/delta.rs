@@ -55,34 +55,38 @@ pub fn apply_delta(
       let mut offset = 0usize;
       let mut size = 0usize;
 
+      let mut pack_buf = [0u8; 7];
+      let n = (cmd & 0x7F).count_ones() as usize;
+
+      delta.read_exact(&mut pack_buf[..n])?;
+      let mut p = 0;
       if (cmd & 0x01) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        offset = cmd_buf[0] as usize;
+        offset = pack_buf[p] as usize;
+        p += 1;
       }
       if (cmd & 0x02) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        offset |= (cmd_buf[0] as usize) << 8;
+        offset |= (pack_buf[p] as usize) << 8;
+        p += 1;
       }
       if (cmd & 0x04) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        offset |= (cmd_buf[0] as usize) << 16;
+        offset |= (pack_buf[p] as usize) << 16;
+        p += 1;
       }
       if (cmd & 0x08) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        offset |= (cmd_buf[0] as usize) << 24;
+        offset |= (pack_buf[p] as usize) << 24;
+        p += 1;
       }
 
       if (cmd & 0x10) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        size = cmd_buf[0] as usize;
+        size = pack_buf[p] as usize;
+        p += 1;
       }
       if (cmd & 0x20) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        size |= (cmd_buf[0] as usize) << 8;
+        size |= (pack_buf[p] as usize) << 8;
+        p += 1;
       }
       if (cmd & 0x40) != 0 {
-        delta.read_exact(&mut cmd_buf)?;
-        size |= (cmd_buf[0] as usize) << 16;
+        size |= (pack_buf[p] as usize) << 16;
       }
 
       if size == 0 {

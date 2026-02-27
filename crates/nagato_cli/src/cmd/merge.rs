@@ -20,12 +20,13 @@ pub fn process_merge(
       let patch = patch_res?;
       let filename = patch.filename();
 
-      if let Some(existing_patch) = merged_patches.get_mut(filename) {
-        existing_patch.append(patch);
-      } else {
-        let filename_vec = filename.to_vec();
-        filenames_order.push(filename_vec.clone());
-        merged_patches.insert(filename_vec, patch);
+      match merged_patches.get_mut(filename) {
+        Some(existing_patch) => existing_patch.append(patch),
+        None => {
+          let filename_vec = filename.to_vec();
+          filenames_order.push(filename_vec.clone());
+          merged_patches.insert(filename_vec, patch);
+        }
       }
     }
   }

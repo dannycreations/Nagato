@@ -15,7 +15,6 @@ fn generate_large_data(
 
   let mut patch = String::new();
   patch.push_str("diff --git a/large.txt b/large.txt\n");
-  patch.push_str("index 0000000..1111111 100644\n");
   patch.push_str("--- a/large.txt\n");
   patch.push_str("+++ b/large.txt\n");
 
@@ -32,7 +31,6 @@ fn generate_large_data(
 fn bench_apply(c: &mut Criterion) {
   let small_diff = indoc! {r#"
     diff --git a/file.txt b/file.txt
-    index 1234567..abcdefg 100644
     --- a/file.txt
     +++ b/file.txt
     @@ -1,5 +1,5 @@

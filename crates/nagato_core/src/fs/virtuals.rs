@@ -1,6 +1,6 @@
 use std::{
   cell::RefCell,
-  collections::HashSet,
+  collections::{HashMap, HashSet},
   env,
   fs::{self, remove_file, File},
   io::{Error as IoError, ErrorKind as IoErrorKind},
@@ -20,6 +20,7 @@ pub struct FileSystem {
   check: bool,
   staging: Option<TempDir>,
   deleted: RefCell<HashSet<PathBuf>>,
+  resolved: RefCell<HashMap<Box<[u8]>, PathBuf>>,
 }
 
 impl Default for FileSystem {
@@ -55,6 +56,7 @@ impl FileSystem {
       check,
       staging,
       deleted: RefCell::new(HashSet::new()),
+      resolved: RefCell::new(HashMap::new()),
     }
   }
 
@@ -67,12 +69,8 @@ impl FileSystem {
     if self.deleted.borrow().contains(&rel) {
       return false;
     }
-    if let Some(staged) = self.get_staged_path(&rel) {
-      if staged.exists() {
-        return true;
-      }
-    }
-    self.root.join(rel).exists()
+    self.get_staged_path(&rel).filter(|p| p.exists()).is_some()
+      || self.root.join(rel).exists()
   }
 
   #[inline]
@@ -81,15 +79,11 @@ impl FileSystem {
     if self.deleted.borrow().contains(&rel) {
       return Err(ErrorKind::Io(IoError::from(IoErrorKind::NotFound)).into());
     }
-    let full_path = if let Some(staged) = self.get_staged_path(&rel) {
-      if staged.exists() {
-        staged
-      } else {
-        self.root.join(rel)
-      }
-    } else {
-      self.root.join(rel)
-    };
+    let full_path = self
+      .get_staged_path(&rel)
+      .filter(|p| p.exists())
+      .unwrap_or_else(|| self.root.join(rel));
+
     let file = File::open(full_path)?;
     // SAFETY: Mmap is used for efficient reading.
     unsafe { Mmap::map(&file) }.map_err(Into::into)
@@ -208,35 +202,32 @@ impl FileSystem {
   }
 
   fn resolve_relative(&self, path: &[u8]) -> Result<PathBuf, Error> {
-    let path =
+    if let Some(res) = self.resolved.borrow().get(path) {
+      return Ok(res.clone());
+    }
+
+    let path_obj =
       to_path_buf(path).map_err(|_| Error::new(ErrorKind::InvalidPath))?;
 
-    let mut rel = PathBuf::with_capacity(path.as_os_str().len());
-    // Path resolution is restricted to normal components and current directory references within the root to prevent unauthorized directory traversal.
-    for component in path.components() {
+    let mut rel = PathBuf::with_capacity(path_obj.as_os_str().len());
+    for component in path_obj.components() {
       match component {
         Component::Normal(c) => {
           let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
+          let bytes = s.as_bytes();
 
-          // Windows ignores trailing dots and spaces, which can lead to collisions or security bypasses.
-          let last_byte = s.as_bytes().last();
-          if last_byte == Some(&b'.') || last_byte == Some(&b' ') {
+          if matches!(bytes.last(), Some(b'.' | b' ')) {
             return Err(Error::new(ErrorKind::InvalidPath));
           }
 
-          // Windows 8.3 short names (e.g., PROGRA~1) can be used to bypass filters.
           if let Some(tilde_idx) = s.find('~') {
-            if s
-              .as_bytes()
-              .get(tilde_idx + 1)
-              .is_some_and(u8::is_ascii_digit)
-            {
+            if bytes.get(tilde_idx + 1).is_some_and(u8::is_ascii_digit) {
               return Err(Error::new(ErrorKind::InvalidPath));
             }
           }
 
-          let base = s.split('.').next().unwrap_or(s);
-          if is_reserved_name(base) {
+          let base_len = s.find('.').unwrap_or(s.len());
+          if is_reserved_name(&s[..base_len]) {
             return Err(Error::new(ErrorKind::InvalidPath));
           }
           rel.push(c);
@@ -245,6 +236,11 @@ impl FileSystem {
         _ => return Err(Error::new(ErrorKind::InvalidPath)),
       }
     }
+
+    self
+      .resolved
+      .borrow_mut()
+      .insert(Box::from(path), rel.clone());
     Ok(rel)
   }
 
@@ -254,9 +250,8 @@ impl FileSystem {
 }
 
 fn is_reserved_name(name: &str) -> bool {
-  // Windows reserved device names are identified by performing case-insensitive matches using a pre-calculated bitmask for the first 3 characters to minimize string comparisons.
   let bytes = name.as_bytes();
-  if bytes.len() < 3 || bytes.len() > 6 {
+  if !(3..=6).contains(&bytes.len()) {
     return false;
   }
 
@@ -266,12 +261,9 @@ fn is_reserved_name(name: &str) -> bool {
 
   match bytes.len() {
     3 => matches!(head, 0x434F4E | 0x50524E | 0x415558 | 0x4E554C), // CON, PRN, AUX, NUL
-    4 => {
-      (head == 0x434F4D || head == 0x4C5054) && bytes[3].is_ascii_digit() // COM0-9, LPT0-9
-    }
+    4 => (head == 0x434F4D || head == 0x4C5054) && bytes[3].is_ascii_digit(), // COM0-9, LPT0-9
     6 => {
-      // CLOCK$
-      head == 0x434C4F
+      head == 0x434C4F // CLOCK$
         && bytes[3].eq_ignore_ascii_case(&b'C')
         && bytes[4].eq_ignore_ascii_case(&b'K')
         && bytes[5] == b'$'
