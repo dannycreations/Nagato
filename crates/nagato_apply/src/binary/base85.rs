@@ -120,11 +120,12 @@ impl<'a> Read for Base85Reader<'a> {
           ));
         }
 
-        let val = (d0 as u32) * 52_200_625
-          + (d1 as u32) * 614_125
-          + (d2 as u32) * 7_225
-          + (d3 as u32) * 85
-          + (d4 as u32);
+        let val = (d0 as u32)
+          .wrapping_mul(52_200_625)
+          .wrapping_add((d1 as u32).wrapping_mul(614_125))
+          .wrapping_add((d2 as u32).wrapping_mul(7_225))
+          .wrapping_add((d3 as u32).wrapping_mul(85))
+          .wrapping_add(d4 as u32);
 
         self.buffer[self.buf_len..self.buf_len + 4]
           .copy_from_slice(&val.to_be_bytes());

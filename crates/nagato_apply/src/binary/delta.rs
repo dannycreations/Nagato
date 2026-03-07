@@ -5,15 +5,17 @@ use nagato_core::{Error, ErrorKind};
 fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
   let mut result: u64 = 0;
   let mut shift = 0;
-  let mut buf = [0u8; 1];
 
   loop {
+    let mut buf = [0u8; 1];
     reader.read_exact(&mut buf)?;
     let byte = buf[0];
     let byte_val = (byte & 0x7f) as u64;
-    if shift >= 64 || (byte_val << shift) >> shift != byte_val {
+
+    if shift >= 64 {
       return Err(Error::new(ErrorKind::InvalidBinaryPatch));
     }
+
     result |= byte_val << shift;
     shift += 7;
     if (byte & 0x80) == 0 {

@@ -8,13 +8,15 @@ use bstr::ByteSlice;
 
 #[inline(always)]
 pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
-  s.strip_prefix(b"a/")
-    .or_else(|| s.strip_prefix(b"b/"))
-    .unwrap_or(s)
+  if s.len() >= 2 && (s[0] == b'a' || s[0] == b'b') && s[1] == b'/' {
+    &s[2..]
+  } else {
+    s
+  }
 }
 
 pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
-  if s.len() < 2 || s[0] != b'"' || s[s.len() - 1] != b'"' {
+  if s.len() < 2 || s[0] != b'\"' || s[s.len() - 1] != b'\"' {
     return Cow::Borrowed(strip_diff_prefix(s));
   }
 
@@ -24,23 +26,30 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     None => return Cow::Borrowed(strip_diff_prefix(s)),
   };
 
-  let mut res = Vec::with_capacity(s.len());
-  res.extend_from_slice(&s[..first_esc]);
+  // Pre-stripping the prefix if it exists before the first escape.
+  let start_idx =
+    if first_esc >= 2 && (s[0] == b'a' || s[0] == b'b') && s[1] == b'/' {
+      2
+    } else {
+      0
+    };
+
+  let mut res = Vec::with_capacity(s.len() - start_idx);
+  res.extend_from_slice(&s[start_idx..first_esc]);
 
   let mut i = first_esc;
   while i < s.len() {
     let b = s[i];
     if b == b'\\' && i + 1 < s.len() {
       i += 1;
-      let next = s[i];
-      match next {
-        b'n' => res.push(b'\n'),
-        b'r' => res.push(b'\r'),
-        b't' => res.push(b'\t'),
-        b'\\' => res.push(b'\\'),
-        b'"' => res.push(b'"'),
-        b'0'..=b'7' => {
-          let mut octal = (next - b'0') as u32;
+      let escaped = match s[i] {
+        b'n' => b'\n',
+        b'r' => b'\r',
+        b't' => b'\t',
+        b'\\' => b'\\',
+        b'\"' => b'\"',
+        b @ b'0'..=b'7' => {
+          let mut octal = (b - b'0') as u32;
           for _ in 0..2 {
             if let Some(&next_byte) = s.get(i + 1) {
               if (b'0'..=b'7').contains(&next_byte) {
@@ -51,20 +60,24 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
             }
             break;
           }
-          res.push(octal as u8);
+          octal as u8
         }
-        _ => res.push(next),
-      }
+        next => next,
+      };
+      res.push(escaped);
     } else {
       res.push(b);
     }
     i += 1;
   }
 
-  let stripped_len = strip_diff_prefix(&res).len();
-  if stripped_len != res.len() {
-    res.drain(..res.len() - stripped_len);
+  if start_idx == 0 {
+    let stripped = strip_diff_prefix(&res);
+    if stripped.len() != res.len() {
+      return Cow::Owned(stripped.to_vec());
+    }
   }
+
   Cow::Owned(res)
 }
 
@@ -86,11 +99,11 @@ pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
   if s.is_empty() {
     return None;
   }
-  if s[0] == b'"' {
+  if s[0] == b'\"' {
     let mut i = 1;
     while i < s.len() {
       let b = s[i];
-      if b == b'"' {
+      if b == b'\"' {
         return Some((&s[..i + 1], s[i + 1..].trim_start()));
       }
       if b == b'\\' {
@@ -101,7 +114,7 @@ pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
     None
   } else {
     let (path, rest) = match s.find_byte(b' ') {
-      Some(idx) => (&s[..idx], &s[idx + 1..]),
+      Some(idx) => s.split_at(idx),
       None => (s, &[][..]),
     };
     Some((path, rest.trim_start()))
@@ -168,12 +181,11 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
     None => (source, &[][..]),
   };
 
-  let line = match line {
-    [head @ .., b'\r'] => head,
-    _ => line,
-  };
-
-  Some((line, rest))
+  if line.ends_with(b"\r") {
+    Some((&line[..line.len() - 1], rest))
+  } else {
+    Some((line, rest))
+  }
 }
 
 pub struct LineWriter<'a, W: Write + ?Sized> {
@@ -192,18 +204,21 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
 
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> IoResult<()> {
-    self.ensure_newline()?;
-    self.write_bytes(line)
-  }
-
-  #[inline]
-  pub fn ensure_newline(&mut self) -> IoResult<()> {
     if !self.is_first_line {
       self.output.write_all(b"\n")?;
     } else {
       self.is_first_line = false;
     }
-    Ok(())
+    self.output.write_all(line)
+  }
+
+  #[inline]
+  pub fn ensure_newline(&mut self) -> IoResult<()> {
+    if self.is_first_line {
+      self.is_first_line = false;
+      return Ok(());
+    }
+    self.output.write_all(b"\n")
   }
 
   #[inline]

@@ -7,6 +7,7 @@ use std::{
   path::{Component, Path, PathBuf},
 };
 
+use bstr::ByteSlice;
 use memmap2::Mmap;
 use tempfile::TempDir;
 
@@ -92,18 +93,16 @@ impl FileSystem {
   pub fn write(&self, path: &[u8]) -> Result<AtomicWriter, Error> {
     let rel = self.resolve_relative(path)?;
     self.deleted.borrow_mut().remove(&rel);
-    if let Some(staged) = self.get_staged_path(&rel) {
-      if let Some(parent) = staged.parent() {
-        fs::create_dir_all(parent)?;
-      }
-      AtomicWriter::new(&staged)
+    let full = if let Some(staged) = self.get_staged_path(&rel) {
+      staged
     } else {
-      let full = self.root.join(&rel);
-      if let Some(parent) = full.parent() {
-        fs::create_dir_all(parent)?;
-      }
-      AtomicWriter::new(&full)
+      self.root.join(&rel)
+    };
+
+    if let Some(parent) = full.parent() {
+      fs::create_dir_all(parent)?;
     }
+    AtomicWriter::new(&full)
   }
 
   pub fn copy(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
@@ -216,18 +215,25 @@ impl FileSystem {
           let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
           let bytes = s.as_bytes();
 
-          if matches!(bytes.last(), Some(b'.' | b' ')) {
+          if let Some(b'.' | b' ') = bytes.last() {
             return Err(Error::new(ErrorKind::InvalidPath));
           }
 
-          if let Some(tilde_idx) = s.find('~') {
-            if bytes.get(tilde_idx + 1).is_some_and(u8::is_ascii_digit) {
-              return Err(Error::new(ErrorKind::InvalidPath));
+          if bytes.contains(&b'~') {
+            let mut i = 0;
+            while i < bytes.len() {
+              if bytes[i] == b'~'
+                && i + 1 < bytes.len()
+                && bytes[i + 1].is_ascii_digit()
+              {
+                return Err(Error::new(ErrorKind::InvalidPath));
+              }
+              i += 1;
             }
           }
 
-          let base_len = s.find('.').unwrap_or(s.len());
-          if is_reserved_name(&s[..base_len]) {
+          let base_len = bytes.find_byte(b'.').unwrap_or(bytes.len());
+          if is_reserved_name(&bytes[..base_len]) {
             return Err(Error::new(ErrorKind::InvalidPath));
           }
           rel.push(c);
@@ -237,11 +243,9 @@ impl FileSystem {
       }
     }
 
-    self
-      .resolved
-      .borrow_mut()
-      .insert(Box::from(path), rel.clone());
-    Ok(rel)
+    let res = rel.clone();
+    self.resolved.borrow_mut().insert(Box::from(path), rel);
+    Ok(res)
   }
 
   fn get_staged_path(&self, rel: &Path) -> Option<PathBuf> {
@@ -249,25 +253,29 @@ impl FileSystem {
   }
 }
 
-fn is_reserved_name(name: &str) -> bool {
-  let bytes = name.as_bytes();
-  if !(3..=6).contains(&bytes.len()) {
-    return false;
-  }
-
-  let head = (bytes[0].to_ascii_uppercase() as u32) << 16
-    | (bytes[1].to_ascii_uppercase() as u32) << 8
-    | (bytes[2].to_ascii_uppercase() as u32);
-
+fn is_reserved_name(bytes: &[u8]) -> bool {
   match bytes.len() {
-    3 => matches!(head, 0x434F4E | 0x50524E | 0x415558 | 0x4E554C), // CON, PRN, AUX, NUL
-    4 => (head == 0x434F4D || head == 0x4C5054) && bytes[3].is_ascii_digit(), // COM0-9, LPT0-9
-    6 => {
-      head == 0x434C4F // CLOCK$
-        && bytes[3].eq_ignore_ascii_case(&b'C')
-        && bytes[4].eq_ignore_ascii_case(&b'K')
-        && bytes[5] == b'$'
+    3 => {
+      let b0 = bytes[0] | 0x20;
+      let b1 = bytes[1] | 0x20;
+      let b2 = bytes[2] | 0x20;
+      matches!(
+        (b0, b1, b2),
+        (b'c', b'o', b'n')
+          | (b'p', b'r', b'n')
+          | (b'a', b'u', b'x')
+          | (b'n', b'u', b'l')
+      )
     }
+    4 => {
+      let b0 = bytes[0] | 0x20;
+      let b1 = bytes[1] | 0x20;
+      let b2 = bytes[2] | 0x20;
+      let b3 = bytes[3];
+      matches!((b0, b1, b2), (b'c', b'o', b'm') | (b'l', b'p', b't'))
+        && b3.is_ascii_digit()
+    }
+    6 => bytes.eq_ignore_ascii_case(b"CLOCK$"),
     _ => false,
   }
 }

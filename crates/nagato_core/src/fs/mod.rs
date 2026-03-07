@@ -27,18 +27,19 @@ pub fn get_unique_path(dir: &Path, name: &str) -> PathBuf {
   // Identify the stem and the full extension chain by locating the first period in the filename.
   // This ensures that for compound extensions like '.trim.patch', the counter is inserted before the first period.
   let (stem, extension) = match name.find('.') {
-    Some(index) if index > 0 => (&name[..index], &name[index..]),
+    Some(index) if index > 0 => name.split_at(index),
     _ => (name, ""),
   };
 
   let mut counter = 1;
-  let mut name_buf = String::with_capacity(name.len() + 4);
+  // Pre-allocate buffer once to minimize heap churn during search loop.
+  let mut name_buf = String::with_capacity(name.len() + 10);
   loop {
     name_buf.clear();
     let _ = write!(name_buf, "{}-{}{}", stem, counter, extension);
 
-    path = dir.join(&name_buf);
-    if !path.exists() {
+    path.set_file_name(&name_buf);
+    if !path.try_exists().unwrap_or(true) {
       return path;
     }
     counter += 1;

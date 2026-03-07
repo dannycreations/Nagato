@@ -1,4 +1,4 @@
-use nagato_core::{get_line, Error};
+use nagato_core::Error;
 
 mod token;
 mod tokenizer;
@@ -58,9 +58,9 @@ impl<'a> Lexer<'a> {
 
   #[inline]
   fn next_line(&mut self) -> Option<&'a [u8]> {
-    let (line, next_input) = get_line(&self.input[self.pos..])?;
+    let (line, rest) = nagato_core::get_line(&self.input[self.pos..])?;
     self.line_num += 1;
-    self.pos = self.input.len() - next_input.len();
+    self.pos = self.input.len() - rest.len();
     Some(line)
   }
 }

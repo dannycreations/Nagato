@@ -6,27 +6,26 @@ use nagato_core::{AtomicWriter, Error};
 use crate::cmd::{source::PatchSource, utils::parse_patches};
 
 pub fn process_merge(
-  files: &[OsString],
+  files: Vec<OsString>,
   output: Option<PathBuf>,
 ) -> Result<(), Error> {
+  let sources: Vec<PatchSource> =
+    PatchSource::iter(files).collect::<Result<_, _>>()?;
+
   let mut merged_patches: HashMap<Vec<u8>, Patch> = HashMap::new();
   let mut filenames_order: Vec<Vec<u8>> = Vec::new();
-
-  let sources: Vec<PatchSource> =
-    PatchSource::iter(files.to_vec()).collect::<Result<_, _>>()?;
 
   for source in &sources {
     for patch_res in parse_patches(source)? {
       let patch = patch_res?;
       let filename = patch.filename();
 
-      match merged_patches.get_mut(filename) {
-        Some(existing_patch) => existing_patch.append(patch),
-        None => {
-          let filename_vec = filename.to_vec();
-          filenames_order.push(filename_vec.clone());
-          merged_patches.insert(filename_vec, patch);
-        }
+      if let Some(existing_patch) = merged_patches.get_mut(filename) {
+        existing_patch.append(patch);
+      } else {
+        let filename_vec = filename.to_vec();
+        filenames_order.push(filename_vec.clone());
+        merged_patches.insert(filename_vec, patch);
       }
     }
   }

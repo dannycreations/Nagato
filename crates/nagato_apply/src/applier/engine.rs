@@ -1,7 +1,6 @@
 use std::io::{ErrorKind as IoErrorKind, Write};
 
 use hex::encode_to_slice;
-use memchr::memchr;
 use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
@@ -14,6 +13,7 @@ pub struct Applier<'s, 'b, W: Write + ?Sized> {
 }
 
 impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
+  #[inline]
   pub fn new(output: &'b mut W, source: &'s [u8]) -> Self {
     Self {
       writer: LineWriter::new(output),
@@ -22,7 +22,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
   }
 
-  #[inline(always)]
+  #[inline]
   fn source_at(&self) -> &'s [u8] {
     &self.source[self.pos..]
   }
@@ -33,16 +33,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
-    if memchr(b'\r', block).is_some() {
-      for line in block.split_inclusive(|&b| b == b'\n') {
-        let line = line.strip_suffix(b"\n").unwrap_or(line);
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        self.writer.write_line(line).map_err(Error::from)?;
-      }
-    } else {
-      for line in block.split_inclusive(|&b| b == b'\n') {
-        let line = line.strip_suffix(b"\n").unwrap_or(line);
-        self.writer.write_line(line).map_err(Error::from)?;
+    let mut rest = block;
+    while let Some((line, next_rest)) = nagato_core::get_line(rest) {
+      self.writer.write_line(line).map_err(Error::from)?;
+      rest = next_rest;
+      if rest.is_empty() {
+        break;
       }
     }
     Ok(())
@@ -176,7 +172,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
     // Verify source hash if index header is present.
     if patch.old_hash.is_some() {
-      self.verify_binary_source(patch)?;
+      self.verify_binary_source(patch)?
     }
 
     // Patch content application is dispatched to specialized handlers based on whether the patch contains binary fragments or standard text hunks.
@@ -185,9 +181,12 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     // Patch hunks are processed either as a hunkless collection or individually if headers are present.
-    match patch.hunks.first() {
-      Some(h) if !h.has_header => self.process_hunkless_patches(patch)?,
-      _ => patch.hunks.iter().try_for_each(|h| self.process_hunk(h))?,
+    if let Some(h) = patch.hunks.first() {
+      if !h.has_header {
+        self.process_hunkless_patches(patch)?;
+      } else {
+        patch.hunks.iter().try_for_each(|h| self.process_hunk(h))?;
+      }
     }
 
     // Write any remaining source content to the output.
@@ -214,11 +213,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     while remaining_count > 0 && current_pos < source.len() {
       let mut found_idx = None;
-      for (i, hunk_opt) in pending_hunks.iter().enumerate() {
+      let current_source = &source[current_pos..];
+      for (i, hunk_opt) in pending_hunks.iter_mut().enumerate() {
         if let Some(hunk) = hunk_opt {
-          if let Ok((match_pos, _)) =
-            Matcher.find_match(&source[current_pos..], hunk)
-          {
+          if let Ok((match_pos, _)) = Matcher.find_match(current_source, hunk) {
             let absolute_pos = current_pos + match_pos;
             hunks_with_pos.push((absolute_pos, *hunk));
             found_idx = Some(i);
@@ -228,13 +226,15 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
 
       if let Some(i) = found_idx {
-        let (pos, _) = hunks_with_pos.last().unwrap();
-        let matched_text = &source[*pos..];
-        let next_line_pos = match memchr(b'\n', matched_text) {
-          Some(idx) => idx + 1,
-          None => matched_text.len(),
-        };
-        current_pos = *pos + next_line_pos;
+        let (pos, hunk) = hunks_with_pos.last().unwrap();
+        let mut match_len = 0;
+        for line in hunk.lines.iter() {
+          if !matches!(line.kind, LineKind::Addition) {
+            match_len += line.text.len() + 1;
+          }
+        }
+
+        current_pos = *pos + match_len;
         pending_hunks[i] = None;
         remaining_count -= 1;
       } else {

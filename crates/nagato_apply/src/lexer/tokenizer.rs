@@ -55,14 +55,22 @@ impl<'a> Lexer<'a> {
     let first = line[0];
     match first {
       b'+' => {
-        if line.len() > 4 && line.starts_with(b"+++ ") {
+        if line.len() > 4
+          && line[1] == b'+'
+          && line[2] == b'+'
+          && line[3] == b' '
+        {
           Ok(TokenKind::NewFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
       b'-' => {
-        if line.len() > 4 && line.starts_with(b"--- ") {
+        if line.len() > 4
+          && line[1] == b'-'
+          && line[2] == b'-'
+          && line[3] == b' '
+        {
           Ok(TokenKind::OldFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Deletion(&line[1..]))

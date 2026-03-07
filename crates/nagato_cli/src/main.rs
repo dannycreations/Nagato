@@ -12,7 +12,7 @@ fn main() {
     exit(0);
   }
 
-  if let Err(e) = run(&cli) {
+  if let Err(e) = run(cli) {
     eprintln!("Error: {e}");
     exit(1);
   }

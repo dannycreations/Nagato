@@ -22,17 +22,17 @@ mod utils;
 
 pub use args::*;
 
-pub fn run(cli: &Cli) -> Result<(), Error> {
-  if let Some(command) = &cli.command {
+pub fn run(cli: Cli) -> Result<(), Error> {
+  if let Some(command) = cli.command {
     match command {
       Commands::Trim { files, directory } => {
-        return process_trim(files, directory.as_ref().map(PathBuf::from));
+        return process_trim(files, directory.map(PathBuf::from));
       }
       Commands::Split { files, directory } => {
-        return process_split(files, directory.as_ref().map(PathBuf::from));
+        return process_split(files, directory.map(PathBuf::from));
       }
       Commands::Merge { files, output } => {
-        return process_merge(files, output.as_ref().map(PathBuf::from));
+        return process_merge(files, output.map(PathBuf::from));
       }
     }
   }
@@ -52,7 +52,7 @@ pub fn run(cli: &Cli) -> Result<(), Error> {
   let fs = FileSystem::new(root, cli.check);
 
   // Process patches from stdin or specified files.
-  for source_res in PatchSource::iter(cli.files.clone()) {
+  for source_res in PatchSource::iter(cli.files) {
     let source = source_res?;
     Parser::apply_to_fs(&fs, source.content(), cli.reverse)
       .map_err(|e| e.with_origin(source.name().to_string()))?;

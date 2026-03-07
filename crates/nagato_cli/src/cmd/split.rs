@@ -8,14 +8,14 @@ use nagato_core::{ensure_dir, get_unique_path, AtomicWriter, Error};
 use crate::cmd::{source::PatchSource, utils::parse_patches};
 
 pub fn process_split(
-  files: &[OsString],
+  files: Vec<OsString>,
   directory: Option<PathBuf>,
 ) -> Result<(), Error> {
   if let Some(dir) = directory.as_deref() {
     ensure_dir(dir)?;
   }
 
-  for source_res in PatchSource::iter(files.to_vec()) {
+  for source_res in PatchSource::iter(files) {
     let source = source_res?;
     let patches_iter = parse_patches(&source)?;
 
