@@ -55,32 +55,28 @@ impl<'a> Lexer<'a> {
     let first = line[0];
     match first {
       b'+' => {
-        if line.len() > 4
-          && line[1] == b'+'
-          && line[2] == b'+'
-          && line[3] == b' '
-        {
+        if line.starts_with(b"+++ ") {
           Ok(TokenKind::NewFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Addition(&line[1..]))
         }
       }
       b'-' => {
-        if line.len() > 4
-          && line[1] == b'-'
-          && line[2] == b'-'
-          && line[3] == b' '
-        {
+        if line.starts_with(b"--- ") {
           Ok(TokenKind::OldFile(unquote_path(&line[4..])))
         } else {
           Ok(TokenKind::Deletion(&line[1..]))
         }
       }
       b' ' => Ok(TokenKind::Context(&line[1..])),
-      b'@' if line.len() >= 3 && line[1] == b'@' && line[2] == b' ' => {
-        self.parse_hunk_header(line)
+      b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
+      b'd'
+        if line.starts_with(b"diff ")
+          || line.starts_with(b"dissimilarity ")
+          || line.starts_with(b"deleted ") =>
+      {
+        self.parse_git_header(line)
       }
-      b'd' => self.parse_git_header(line),
       b'f' if line.starts_with(b"file ") => {
         let file = unquote_path(line[5..].trim());
         Ok(TokenKind::FileHeader(BinaryPaths {

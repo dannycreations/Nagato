@@ -5,9 +5,9 @@ use nagato_core::{Error, ErrorKind};
 fn read_variable_length_int(reader: &mut impl Read) -> Result<u64, Error> {
   let mut result: u64 = 0;
   let mut shift = 0;
+  let mut buf = [0u8; 1];
 
   loop {
-    let mut buf = [0u8; 1];
     reader.read_exact(&mut buf)?;
     let byte = buf[0];
     let byte_val = (byte & 0x7f) as u64;
@@ -47,7 +47,6 @@ pub fn apply_delta(
   let target_size = read_variable_length_int(&mut delta)?;
 
   let mut written: u64 = 0;
-  let _buf = [0u8; 1];
 
   let mut cmd_buf = [0u8; 1];
   while delta.read_exact(&mut cmd_buf).is_ok() {

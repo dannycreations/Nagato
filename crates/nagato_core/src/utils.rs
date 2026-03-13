@@ -8,7 +8,7 @@ use bstr::ByteSlice;
 
 #[inline(always)]
 pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
-  if s.len() >= 2 && (s[0] == b'a' || s[0] == b'b') && s[1] == b'/' {
+  if s.starts_with(b"a/") || s.starts_with(b"b/") {
     &s[2..]
   } else {
     s
@@ -21,23 +21,32 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   }
 
   let s = &s[1..s.len() - 1];
-  let first_esc = match s.find_byte(b'\\') {
+  let first_esc = match memchr::memchr(b'\\', s) {
     Some(idx) => idx,
     None => return Cow::Borrowed(strip_diff_prefix(s)),
   };
 
-  // Pre-stripping the prefix if it exists before the first escape.
-  let start_idx =
-    if first_esc >= 2 && (s[0] == b'a' || s[0] == b'b') && s[1] == b'/' {
-      2
-    } else {
-      0
-    };
+  // Identify if a prefix exists and should be stripped.
+  let (start_idx, skip_prefix) = if s.starts_with(b"a/") || s.starts_with(b"b/")
+  {
+    (2, true)
+  } else {
+    (0, false)
+  };
+
+  // If the first escape is within the prefix, we must adjust the starting point.
+  let start_i = if skip_prefix && first_esc < 2 {
+    start_idx
+  } else {
+    first_esc
+  };
 
   let mut res = Vec::with_capacity(s.len() - start_idx);
-  res.extend_from_slice(&s[start_idx..first_esc]);
+  if start_i > start_idx {
+    res.extend_from_slice(&s[start_idx..start_i]);
+  }
 
-  let mut i = first_esc;
+  let mut i = start_i;
   while i < s.len() {
     let b = s[i];
     if b == b'\\' && i + 1 < s.len() {
@@ -50,15 +59,18 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
         b'\"' => b'\"',
         b @ b'0'..=b'7' => {
           let mut octal = (b - b'0') as u32;
-          for _ in 0..2 {
-            if let Some(&next_byte) = s.get(i + 1) {
-              if (b'0'..=b'7').contains(&next_byte) {
-                i += 1;
-                octal = (octal << 3) | ((next_byte - b'0') as u32);
-                continue;
+          // Use a simple loop for exactly 2 more potential octal digits.
+          if let Some(&n1) = s.get(i + 1) {
+            if n1.is_ascii_digit() && n1 <= b'7' {
+              i += 1;
+              octal = (octal << 3) | ((n1 - b'0') as u32);
+              if let Some(&n2) = s.get(i + 1) {
+                if n2.is_ascii_digit() && n2 <= b'7' {
+                  i += 1;
+                  octal = (octal << 3) | ((n2 - b'0') as u32);
+                }
               }
             }
-            break;
           }
           octal as u8
         }
@@ -71,11 +83,11 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     i += 1;
   }
 
-  if start_idx == 0 {
-    let stripped = strip_diff_prefix(&res);
-    if stripped.len() != res.len() {
-      return Cow::Owned(stripped.to_vec());
-    }
+  if !skip_prefix
+    && res.len() >= 2
+    && (res.starts_with(b"a/") || res.starts_with(b"b/"))
+  {
+    res.drain(..2);
   }
 
   Cow::Owned(res)
@@ -102,18 +114,20 @@ pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
   if s[0] == b'\"' {
     let mut i = 1;
     while i < s.len() {
-      let b = s[i];
-      if b == b'\"' {
-        return Some((&s[..i + 1], s[i + 1..].trim_start()));
+      match memchr::memchr2(b'\"', b'\\', &s[i..]) {
+        Some(idx) => {
+          i += idx;
+          if s[i] == b'\"' {
+            return Some((&s[..i + 1], s[i + 1..].trim_start()));
+          }
+          i += 2;
+        }
+        None => break,
       }
-      if b == b'\\' {
-        i += 1;
-      }
-      i += 1;
     }
     None
   } else {
-    let (path, rest) = match s.find_byte(b' ') {
+    let (path, rest) = match memchr::memchr(b' ', s) {
       Some(idx) => s.split_at(idx),
       None => (s, &[][..]),
     };
@@ -177,15 +191,27 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
   }
 
   let (line, rest) = match memchr::memchr(b'\n', source) {
-    Some(idx) => (&source[..idx], &source[idx + 1..]),
-    None => (source, &[][..]),
+    Some(idx) => {
+      let mut line = &source[..idx];
+      if let Some((last, _)) = line.split_last() {
+        if *last == b'\r' {
+          line = &line[..line.len() - 1];
+        }
+      }
+      (line, &source[idx + 1..])
+    }
+    None => {
+      let mut line = source;
+      if let Some((last, _)) = line.split_last() {
+        if *last == b'\r' {
+          line = &line[..line.len() - 1];
+        }
+      }
+      (line, &[][..])
+    }
   };
 
-  if line.ends_with(b"\r") {
-    Some((&line[..line.len() - 1], rest))
-  } else {
-    Some((line, rest))
-  }
+  Some((line, rest))
 }
 
 pub struct LineWriter<'a, W: Write + ?Sized> {

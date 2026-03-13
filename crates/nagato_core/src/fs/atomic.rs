@@ -10,7 +10,7 @@ use tempfile::NamedTempFile;
 
 use crate::{Error, ErrorKind};
 
-const WRITE_BUFFER_SIZE: usize = 1024 * 1024;
+const WRITE_BUFFER_SIZE: usize = 64 * 1024;
 
 pub struct AtomicWriter {
   writer: BufWriter<NamedTempFile>,

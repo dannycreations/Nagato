@@ -1,4 +1,3 @@
-use bstr::ByteSlice;
 use memchr::memmem::Finder;
 use nagato_core::{Error, ErrorKind};
 
@@ -53,15 +52,16 @@ impl Matcher {
     hunk
       .label
       .and_then(|label| {
-        buffer
-          .find(label)
-          .filter(|&pos| pos == 0 || buffer[pos - 1] == b'\n')
-          .map(|pos| {
+        let finder = Finder::new(label);
+        for pos in finder.find_iter(buffer) {
+          if pos == 0 || buffer[pos - 1] == b'\n' {
             let line_end = memchr::memchr(b'\n', &buffer[pos..])
               .map(|i| pos + i + 1)
               .unwrap_or(buffer.len());
-            (&buffer[line_end..], line_end)
-          })
+            return Some((&buffer[line_end..], line_end));
+          }
+        }
+        None
       })
       .unwrap_or((buffer, 0))
   }
@@ -71,6 +71,7 @@ impl Matcher {
     &self,
     buffer: &'s [u8],
     hunk: &Hunk<'p>,
+    precomputed_finder: Option<&Finder>,
   ) -> Result<(usize, &'s [u8]), Error> {
     let mut it = hunk.lines_to_match();
     let (first_idx, first_line) = match it.next() {
@@ -79,14 +80,22 @@ impl Matcher {
     };
 
     let needle = first_line.text;
-    let finder = (!needle.is_empty()).then(|| Finder::new(needle));
+    let finder_storage;
+    let finder = if let Some(f) = precomputed_finder {
+      Some(f)
+    } else if !needle.is_empty() {
+      finder_storage = Some(Finder::new(needle));
+      finder_storage.as_ref()
+    } else {
+      None
+    };
 
     self.search_in_buffer(
       buffer,
       hunk,
       first_idx,
       needle,
-      finder.as_ref(),
+      finder,
       self.get_search_buffer(buffer, hunk),
     )
   }
@@ -236,11 +245,25 @@ impl Matcher {
     let mut current_pos = match_pos;
     let mut count = 0;
 
-    // Use a single memrchr scan if possible or iterate backwards to find the nth newline.
+    // If we only need one line before, it's a simple memrchr.
+    if lines_before == 1 {
+      return match memchr::memrchr(b'\n', &buffer[..current_pos - 1]) {
+        Some(idx) => Some(idx + 1),
+        None => Some(0),
+      };
+    }
+
+    // Find the nth newline backwards.
+    let mut search_end = current_pos - 1;
     while count < lines_before {
-      match memchr::memrchr(b'\n', &buffer[..current_pos - 1]) {
+      match memchr::memrchr(b'\n', &buffer[..search_end]) {
         Some(idx) => {
           current_pos = idx + 1;
+          if idx == 0 {
+            count += 1;
+            break;
+          }
+          search_end = idx;
           count += 1;
         }
         None => {
@@ -251,6 +274,11 @@ impl Matcher {
         }
       }
     }
-    Some(current_pos)
+
+    if count == lines_before {
+      Some(current_pos)
+    } else {
+      None
+    }
   }
 }

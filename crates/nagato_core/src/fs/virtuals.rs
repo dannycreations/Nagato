@@ -169,6 +169,12 @@ impl FileSystem {
     // Normal rename
     let from_full = self.root.join(&from_rel);
     let to_full = self.root.join(&to_rel);
+
+    // If from and to are the same path (after resolution), this is a no-op.
+    if from_full == to_full {
+      return Ok(());
+    }
+
     if let Some(parent) = to_full.parent() {
       fs::create_dir_all(parent)?;
     }

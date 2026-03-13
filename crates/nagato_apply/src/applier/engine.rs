@@ -1,6 +1,7 @@
 use std::io::{ErrorKind as IoErrorKind, Write};
 
 use hex::encode_to_slice;
+use memchr::memmem::Finder;
 use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
@@ -37,9 +38,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     while let Some((line, next_rest)) = nagato_core::get_line(rest) {
       self.writer.write_line(line).map_err(Error::from)?;
       rest = next_rest;
-      if rest.is_empty() {
-        break;
-      }
     }
     Ok(())
   }
@@ -54,7 +52,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     // Hunk matching logic uses explicit pattern matching to handle recovery attempts for hunkless patches when an exact match fails.
     let (match_pos, final_source, skipped_line_index) =
-      match matcher.find_match(source, hunk) {
+      match matcher.find_match(source, hunk, None) {
         Ok((pos, src)) => (pos, src, None),
         Err(e) if !hunk.has_header => {
           matcher.find_match_recovery(source, hunk).map_err(|_| e)?
@@ -203,8 +201,22 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     &mut self,
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
-    let mut pending_hunks: Vec<Option<&Hunk<'_>>> =
-      patch.hunks.iter().map(Some).collect();
+    // Hunkless patches are often used in "diff-lite" formats where headers are missing.
+    // Pre-compute Finders for all hunks to speed up search.
+    let mut pending_hunks: Vec<Option<(&Hunk<'_>, Option<Finder>)>> = patch
+      .hunks
+      .iter()
+      .map(|h| {
+        let finder = h
+          .lines_to_match()
+          .next()
+          .map(|(_, l)| l.text)
+          .filter(|t| !t.is_empty())
+          .map(Finder::new);
+        Some((h, finder))
+      })
+      .collect();
+
     let mut hunks_with_pos = Vec::with_capacity(pending_hunks.len());
     let source = self.source_at();
 
@@ -215,8 +227,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       let mut found_idx = None;
       let current_source = &source[current_pos..];
       for (i, hunk_opt) in pending_hunks.iter_mut().enumerate() {
-        if let Some(hunk) = hunk_opt {
-          if let Ok((match_pos, _)) = Matcher.find_match(current_source, hunk) {
+        if let Some((hunk, finder)) = hunk_opt {
+          if let Ok((match_pos, _)) =
+            Matcher.find_match(current_source, hunk, finder.as_ref())
+          {
             let absolute_pos = current_pos + match_pos;
             hunks_with_pos.push((absolute_pos, *hunk));
             found_idx = Some(i);
@@ -243,8 +257,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     if remaining_count > 0 {
-      for hunk in pending_hunks.into_iter().flatten() {
-        let (pos, _) = Matcher.find_match(source, hunk)?;
+      for hunk_data in pending_hunks.into_iter().flatten() {
+        let (hunk, finder) = hunk_data;
+        let (pos, _) = Matcher.find_match(source, hunk, finder.as_ref())?;
         hunks_with_pos.push((pos, hunk));
       }
     }
@@ -257,10 +272,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   fn flush_remaining_source(&mut self) -> Result<(), Error> {
     let source = self.source_at();
-    if !source.is_empty() {
-      self.write_block(source)?;
-      self.pos = self.source.len();
-    }
+    self.write_block(source)?;
+    self.pos = self.source.len();
     Ok(())
   }
 }
