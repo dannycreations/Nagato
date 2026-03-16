@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ffi::OsString, io::Write, path::PathBuf};
+use std::{
+  collections::{hash_map::Entry, HashMap},
+  ffi::OsString,
+  io::Write,
+  path::PathBuf,
+};
 
 use nagato_apply::Patch;
 use nagato_core::{AtomicWriter, Error};
@@ -20,12 +25,14 @@ pub fn process_merge(
       let patch = patch_res?;
       let filename = patch.filename();
 
-      if let Some(existing_patch) = merged_patches.get_mut(filename) {
-        existing_patch.append(patch);
-      } else {
-        let filename_vec = filename.to_vec();
-        filenames_order.push(filename_vec.clone());
-        merged_patches.insert(filename_vec, patch);
+      match merged_patches.entry(filename.to_vec()) {
+        Entry::Occupied(mut entry) => {
+          entry.get_mut().append(patch);
+        }
+        Entry::Vacant(entry) => {
+          filenames_order.push(entry.key().clone());
+          entry.insert(patch);
+        }
       }
     }
   }

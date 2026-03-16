@@ -28,10 +28,9 @@ pub fn process_split(
         .unwrap_or_else(|| target.clone());
       let base_name = format!("{}.trim.patch", file_name);
 
-      let out_path = if let Some(dir) = directory.as_ref() {
-        get_unique_path(dir, &base_name)
-      } else {
-        get_unique_path(Path::new("."), &base_name)
+      let out_path = match directory.as_ref() {
+        Some(dir) => get_unique_path(dir, &base_name),
+        None => get_unique_path(Path::new("."), &base_name),
       };
 
       let mut writer = AtomicWriter::new(&out_path)?;

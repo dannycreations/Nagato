@@ -48,14 +48,6 @@ impl<'a> Parser<'a> {
       ));
     }
 
-    if !patch.has_content_changes()
-      && patch.old_file.is_empty()
-      && patch.new_file.is_empty()
-    {
-      // If we parsed nothing, it's not an error yet, the iterator handles completion.
-      return Ok(patch);
-    }
-
     Ok(patch)
   }
 
@@ -93,19 +85,20 @@ impl<'a> Iterator for Parser<'a> {
     if let Err(e) = self.skip_empty_context_lines() {
       return Some(Err(e));
     }
+
     self.tokens.peek()?;
 
-    let patch_result = self.parse_patch();
-    match patch_result {
-      Ok(patch)
-        if !patch.has_content_changes()
-          && patch.old_file.is_empty()
-          && patch.new_file.is_empty() =>
-      {
-        None
-      }
-      res => Some(res),
+    let res = self.parse_patch();
+
+    let Ok(ref patch) = res else {
+      return Some(res);
+    };
+
+    if !patch.has_content_changes() && patch.is_empty() {
+      return None;
     }
+
+    Some(res)
   }
 }
 

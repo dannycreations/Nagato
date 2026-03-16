@@ -36,11 +36,12 @@ pub fn process_trim(
       .to_os_string();
 
     let base_name_str = base_name.to_string_lossy();
-    let out_path = match directory {
-      Some(ref dir) => get_unique_path(dir, &base_name_str),
+    let out_path = match directory.as_ref() {
+      Some(dir) => get_unique_path(dir, &base_name_str),
       None => {
         let parent = source_path.parent().unwrap_or_else(|| Path::new("."));
-        parent.join(get_unique_path(parent, &base_name_str))
+        let unique = get_unique_path(parent, &base_name_str);
+        parent.join(unique)
       }
     };
 

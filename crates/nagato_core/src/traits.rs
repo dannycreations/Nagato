@@ -30,9 +30,14 @@ where
 {
   #[inline]
   fn ignore_not_found(self) -> Result<T, Error> {
-    match self {
-      Err(e) if e.is_not_found() => Ok(T::default()),
-      res => res,
+    let Err(e) = &self else {
+      return self;
+    };
+
+    if !e.is_not_found() {
+      return self;
     }
+
+    Ok(T::default())
   }
 }

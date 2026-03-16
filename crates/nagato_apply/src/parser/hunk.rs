@@ -77,6 +77,7 @@ pub fn collect_hunk_lines<'a>(
           kind: LineKind::Addition,
           text,
         });
+        parser.tokens.next();
       }
       TokenKind::Deletion(text) => {
         old_span += 1;
@@ -85,6 +86,7 @@ pub fn collect_hunk_lines<'a>(
           kind: LineKind::Deletion,
           text,
         });
+        parser.tokens.next();
       }
       TokenKind::Context(text) => {
         old_span += 1;
@@ -95,6 +97,7 @@ pub fn collect_hunk_lines<'a>(
           kind: LineKind::Context,
           text,
         });
+        parser.tokens.next();
       }
       TokenKind::Gap => {
         old_span += 1;
@@ -105,21 +108,23 @@ pub fn collect_hunk_lines<'a>(
           kind: LineKind::Gap,
           text: &[],
         });
+        parser.tokens.next();
       }
       TokenKind::NoNewline => {
-        if let Some(last) = lines.last() {
-          if new_span > 0 && last.kind != LineKind::Deletion {
-            patch.new_file_no_newline = true;
-          }
-          if old_span > 0 && last.kind != LineKind::Addition {
-            patch.old_file_no_newline = true;
-          }
+        parser.tokens.next();
+        let Some(last) = lines.last() else {
+          continue;
+        };
+
+        if new_span > 0 && last.kind != LineKind::Deletion {
+          patch.new_file_no_newline = true;
+        }
+        if old_span > 0 && last.kind != LineKind::Addition {
+          patch.old_file_no_newline = true;
         }
       }
       _ => break,
     };
-
-    parser.tokens.next();
   }
   Ok((old_span, new_span))
 }
@@ -152,7 +157,7 @@ pub fn parse_hunk<'a>(
   let (new_line, new_span) =
     parse_range(new_range).map_err(|k| Error::with_line(k, item.line_num))?;
 
-  let mut lines = Vec::with_capacity(old_span.max(new_span) as usize);
+  let mut lines = Vec::new();
   let (actual_old_span, actual_new_span) =
     collect_hunk_lines(parser, &mut lines, patch, |_| false)?;
 
@@ -177,17 +182,24 @@ pub fn parse_hunk<'a>(
 }
 
 fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
-  let (line_part, span_part) = match memchr::memchr(b',', range_bytes) {
-    Some(idx) => (&range_bytes[..idx], &range_bytes[idx + 1..]),
-    None => (range_bytes, &b"1"[..]),
+  let idx = match memchr::memchr(b',', range_bytes) {
+    Some(i) => i,
+    None => {
+      let (line, _) =
+        parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRange)?;
+      let (span, _) =
+        parse_int::<u32>(b"1", 10).ok_or(ErrorKind::InvalidHunkRange)?;
+      return Ok((line, span));
+    }
   };
 
-  let line = parse_int::<u32>(line_part, 10)
-    .map(|(v, _)| v)
-    .ok_or(ErrorKind::InvalidHunkRange)?;
-  let span = parse_int::<u32>(span_part, 10)
-    .map(|(v, _)| v)
-    .ok_or(ErrorKind::InvalidHunkRange)?;
+  let line_part = &range_bytes[..idx];
+  let span_part = &range_bytes[idx + 1..];
+
+  let (line, _) =
+    parse_int::<u32>(line_part, 10).ok_or(ErrorKind::InvalidHunkRange)?;
+  let (span, _) =
+    parse_int::<u32>(span_part, 10).ok_or(ErrorKind::InvalidHunkRange)?;
 
   Ok((line, span))
 }

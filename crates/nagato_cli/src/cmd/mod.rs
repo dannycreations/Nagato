@@ -23,32 +23,29 @@ mod utils;
 pub use args::*;
 
 pub fn run(cli: Cli) -> Result<(), Error> {
-  if let Some(command) = cli.command {
-    match command {
-      Commands::Trim { files, directory } => {
-        return process_trim(files, directory.map(PathBuf::from));
-      }
-      Commands::Split { files, directory } => {
-        return process_split(files, directory.map(PathBuf::from));
-      }
-      Commands::Merge { files, output } => {
-        return process_merge(files, output.map(PathBuf::from));
-      }
-    }
+  if let Some(Commands::Trim { files, directory }) = cli.command {
+    return process_trim(files, directory.map(PathBuf::from));
+  }
+  if let Some(Commands::Split { files, directory }) = cli.command {
+    return process_split(files, directory.map(PathBuf::from));
+  }
+  if let Some(Commands::Merge { files, output }) = cli.command {
+    return process_merge(files, output.map(PathBuf::from));
   }
 
   // If no files are provided and stdin is a terminal, print help.
   if cli.files.is_empty() && stdin().is_terminal() {
-    Cli::command().print_help().unwrap();
+    Cli::command().print_help().expect("failed to print help");
     return Ok(());
   }
 
   // Determine the root directory for file operations.
-  let root = if let Some(dir) = &cli.directory {
-    PathBuf::from(dir)
-  } else {
-    env::current_dir()?
-  };
+  let root = cli
+    .directory
+    .as_ref()
+    .map(PathBuf::from)
+    .map(Ok)
+    .unwrap_or_else(env::current_dir)?;
   let fs = FileSystem::new(root, cli.check);
 
   // Process patches from stdin or specified files.

@@ -53,63 +53,82 @@ impl<'a> Lexer<'a> {
     }
 
     let first = line[0];
-    match first {
-      b'+' => {
-        if line.starts_with(b"+++ ") {
-          Ok(TokenKind::NewFile(unquote_path(&line[4..])))
-        } else {
-          Ok(TokenKind::Addition(&line[1..]))
-        }
-      }
-      b'-' => {
-        if line.starts_with(b"--- ") {
-          Ok(TokenKind::OldFile(unquote_path(&line[4..])))
-        } else {
-          Ok(TokenKind::Deletion(&line[1..]))
-        }
-      }
-      b' ' => Ok(TokenKind::Context(&line[1..])),
-      b'@' if line.starts_with(b"@@ ") => self.parse_hunk_header(line),
-      b'd'
-        if line.starts_with(b"diff ")
-          || line.starts_with(b"dissimilarity ")
-          || line.starts_with(b"deleted ") =>
-      {
-        self.parse_git_header(line)
-      }
-      b'f' if line.starts_with(b"file ") => {
-        let file = unquote_path(line[5..].trim());
-        Ok(TokenKind::FileHeader(BinaryPaths {
-          old_file: file.clone(),
-          new_file: file,
-        }))
-      }
-      b'G' if line == b"GIT binary patch" => {
-        self.set_mode(LexerMode::Binary);
-        Ok(TokenKind::GitBinaryPatchHeader)
-      }
-      b'i' if line.starts_with(b"index ") => self.parse_index_line(line),
-      b'l' if line.starts_with(b"label ") => {
-        Ok(TokenKind::Label(line[6..].trim_start()))
-      }
-      b'n' if line.starts_with(b"new ") => {
-        self.parse_mode_rest(&line[4..], TokenKind::NewFileMode)
-      }
-      b'o' if line.starts_with(b"old ") => {
-        self.parse_mode_rest(&line[4..], TokenKind::OldFileMode)
-      }
-      b'r' | b'c' => self.parse_rename_copy_line(line),
-      b's' if line.starts_with(b"similarity index ") => {
-        self.parse_percentage_token(&line[17..], TokenKind::Similarity)
-      }
-      b'B' if line.starts_with(b"Binary files ") => {
-        self.parse_binary_files_line(line)
-      }
-      b'\\' if line == b"\\ No newline at end of file" => {
-        Ok(TokenKind::NoNewline)
-      }
-      _ => Err(ErrorKind::UnexpectedLine),
+    if first == b'+' && line.starts_with(b"+++ ") {
+      return Ok(TokenKind::NewFile(unquote_path(&line[4..])));
     }
+    if first == b'+' {
+      return Ok(TokenKind::Addition(&line[1..]));
+    }
+
+    if first == b'-' && line.starts_with(b"--- ") {
+      return Ok(TokenKind::OldFile(unquote_path(&line[4..])));
+    }
+    if first == b'-' {
+      return Ok(TokenKind::Deletion(&line[1..]));
+    }
+
+    if first == b' ' {
+      return Ok(TokenKind::Context(&line[1..]));
+    }
+
+    if first == b'@' && line.starts_with(b"@@ ") {
+      return self.parse_hunk_header(line);
+    }
+
+    if first == b'd'
+      && (line.starts_with(b"diff ")
+        || line.starts_with(b"dissimilarity ")
+        || line.starts_with(b"deleted "))
+    {
+      return self.parse_git_header(line);
+    }
+
+    if first == b'f' && line.starts_with(b"file ") {
+      let file = unquote_path(line[5..].trim());
+      return Ok(TokenKind::FileHeader(BinaryPaths {
+        old_file: file.clone(),
+        new_file: file,
+      }));
+    }
+
+    if first == b'G' && line == b"GIT binary patch" {
+      self.set_mode(LexerMode::Binary);
+      return Ok(TokenKind::GitBinaryPatchHeader);
+    }
+
+    if first == b'i' && line.starts_with(b"index ") {
+      return self.parse_index_line(line);
+    }
+
+    if first == b'l' && line.starts_with(b"label ") {
+      return Ok(TokenKind::Label(line[6..].trim_start()));
+    }
+
+    if first == b'n' && line.starts_with(b"new ") {
+      return self.parse_mode_rest(&line[4..], TokenKind::NewFileMode);
+    }
+
+    if first == b'o' && line.starts_with(b"old ") {
+      return self.parse_mode_rest(&line[4..], TokenKind::OldFileMode);
+    }
+
+    if first == b'r' || first == b'c' {
+      return self.parse_rename_copy_line(line);
+    }
+
+    if first == b's' && line.starts_with(b"similarity index ") {
+      return self.parse_percentage_token(&line[17..], TokenKind::Similarity);
+    }
+
+    if first == b'B' && line.starts_with(b"Binary files ") {
+      return self.parse_binary_files_line(line);
+    }
+
+    if first == b'\\' && line == b"\\ No newline at end of file" {
+      return Ok(TokenKind::NoNewline);
+    }
+
+    Err(ErrorKind::UnexpectedLine)
   }
 
   #[inline]
@@ -119,10 +138,26 @@ impl<'a> Lexer<'a> {
   ) -> Result<TokenKind<'a>, ErrorKind> {
     // Hunk headers are parsed by splitting the line into range and optional label components using byte-level patterns.
     let header = &line[3..];
-    let (content, label_part) = match memmem::find(header, b" @@") {
-      Some(idx) => (&header[..idx], &header[idx + 3..]),
-      None => (header, &[][..]),
+    let Some(idx) = memmem::find(header, b" @@") else {
+      let mut parts = header.fields();
+      let old_range = parts
+        .next()
+        .and_then(|s| s.strip_prefix(b"-"))
+        .ok_or(ErrorKind::MissingRange)?;
+      let new_range = parts
+        .next()
+        .and_then(|s| s.strip_prefix(b"+"))
+        .ok_or(ErrorKind::MissingRange)?;
+
+      return Ok(TokenKind::HunkHeader {
+        old_range,
+        new_range,
+        label: None,
+      });
     };
+
+    let content = &header[..idx];
+    let label_part = &header[idx + 3..];
     let mut parts = content.fields();
 
     let old_range = parts
@@ -135,7 +170,7 @@ impl<'a> Lexer<'a> {
       .ok_or(ErrorKind::MissingRange)?;
 
     let label = label_part.trim_start();
-    let label = if label.is_empty() { None } else { Some(label) };
+    let label = (!label.is_empty()).then_some(label);
 
     Ok(TokenKind::HunkHeader {
       old_range,
@@ -150,18 +185,24 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line.starts_with(b"diff --git ") {
-      if let Some((old_file, new_file)) = split_diff_paths(&line[11..]) {
-        Ok(TokenKind::FileHeader(BinaryPaths { old_file, new_file }))
-      } else {
-        Err(ErrorKind::InvalidFileHeader)
-      }
-    } else if line.starts_with(b"dissimilarity index ") {
-      self.parse_percentage_token(&line[20..], TokenKind::Dissimilarity)
-    } else if line.starts_with(b"deleted ") {
-      self.parse_mode_rest(&line[8..], TokenKind::DeletedFileMode)
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+      let paths =
+        split_diff_paths(&line[11..]).ok_or(ErrorKind::InvalidFileHeader)?;
+      let old_file = paths.0;
+      let new_file = paths.1;
+      return Ok(TokenKind::FileHeader(BinaryPaths { old_file, new_file }));
     }
+
+    if line.starts_with(b"dissimilarity index ") {
+      let rest = &line[20..];
+      return self.parse_percentage_token(rest, TokenKind::Dissimilarity);
+    }
+
+    if line.starts_with(b"deleted ") {
+      let rest = &line[8..];
+      return self.parse_mode_rest(rest, TokenKind::DeletedFileMode);
+    }
+
+    Err(ErrorKind::UnexpectedLine)
   }
 
   #[inline]
@@ -188,25 +229,20 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    if line.starts_with(b"rename ") {
-      if line.starts_with(b"rename from ") {
-        Ok(TokenKind::RenameFrom(unquote_path(&line[12..])))
-      } else if line.starts_with(b"rename to ") {
-        Ok(TokenKind::RenameTo(unquote_path(&line[10..])))
-      } else {
-        Err(ErrorKind::UnexpectedLine)
-      }
-    } else if line.starts_with(b"copy ") {
-      if line.starts_with(b"copy from ") {
-        Ok(TokenKind::CopyFrom(unquote_path(&line[10..])))
-      } else if line.starts_with(b"copy to ") {
-        Ok(TokenKind::CopyTo(unquote_path(&line[8..])))
-      } else {
-        Err(ErrorKind::UnexpectedLine)
-      }
-    } else {
-      Err(ErrorKind::UnexpectedLine)
+    if line.starts_with(b"rename from ") {
+      return Ok(TokenKind::RenameFrom(unquote_path(&line[12..])));
     }
+    if line.starts_with(b"rename to ") {
+      return Ok(TokenKind::RenameTo(unquote_path(&line[10..])));
+    }
+    if line.starts_with(b"copy from ") {
+      return Ok(TokenKind::CopyFrom(unquote_path(&line[10..])));
+    }
+    if line.starts_with(b"copy to ") {
+      return Ok(TokenKind::CopyTo(unquote_path(&line[8..])));
+    }
+
+    Err(ErrorKind::UnexpectedLine)
   }
 
   #[inline]
@@ -230,11 +266,15 @@ impl<'a> Lexer<'a> {
     rest: &'a [u8],
     f: impl FnOnce(&'a [u8]) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    rest
-      .strip_prefix(b"file mode ")
-      .or_else(|| rest.strip_prefix(b"mode "))
-      .map(f)
-      .ok_or(ErrorKind::InvalidFileMode)
+    if let Some(mode) = rest.strip_prefix(b"file mode ") {
+      return Ok(f(mode));
+    }
+
+    if let Some(mode) = rest.strip_prefix(b"mode ") {
+      return Ok(f(mode));
+    }
+
+    Err(ErrorKind::InvalidFileMode)
   }
 
   #[inline]

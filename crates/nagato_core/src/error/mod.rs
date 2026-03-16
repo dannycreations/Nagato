@@ -22,23 +22,26 @@ impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.kind)?;
 
-    // Error context is formatted using a structural match to provide a concise summary of the failure location and the affected file.
-    match (self.line, self.origin.as_deref(), self.file.as_deref()) {
-      (Some(line), origin, file) => {
-        let origin = origin.unwrap_or("<stdin>");
-        write!(f, "\n  at {origin}:{line}")?;
-        if let Some(file) = file {
-          write!(f, " (applying to {file})")?;
-        }
+    if let Some(line) = self.line {
+      let origin = self.origin.as_deref().unwrap_or("<stdin>");
+      write!(f, "\n  at {origin}:{line}")?;
+
+      if let Some(file) = self.file.as_deref() {
+        write!(f, " (applying to {file})")?;
       }
-      (None, Some(origin), Some(file)) => {
-        write!(f, "\n  in {file} (from {origin})")?
-      }
-      (None, Some(origin), None) => write!(f, "\n  in {origin}")?,
-      (None, None, Some(file)) => write!(f, "\n  in {file}")?,
-      _ => {}
+
+      return Ok(());
     }
-    Ok(())
+
+    let origin = self.origin.as_deref();
+    let file = self.file.as_deref();
+
+    match (origin, file) {
+      (Some(origin), Some(file)) => write!(f, "\n  in {file} (from {origin})"),
+      (Some(origin), None) => write!(f, "\n  in {origin}"),
+      (None, Some(file)) => write!(f, "\n  in {file}"),
+      (None, None) => Ok(()),
+    }
   }
 }
 

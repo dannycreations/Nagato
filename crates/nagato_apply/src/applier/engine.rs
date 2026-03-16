@@ -51,14 +51,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let matcher = Matcher;
 
     // Hunk matching logic uses explicit pattern matching to handle recovery attempts for hunkless patches when an exact match fails.
-    let (match_pos, final_source, skipped_line_index) =
-      match matcher.find_match(source, hunk, None) {
-        Ok((pos, src)) => (pos, src, None),
-        Err(e) if !hunk.has_header => {
-          matcher.find_match_recovery(source, hunk).map_err(|_| e)?
-        }
-        Err(e) => return Err(e),
-      };
+    let match_res = matcher.find_match(source, hunk, None);
+
+    let (match_pos, final_source, skipped_line_index) = match match_res {
+      Ok((pos, src)) => (pos, src, None),
+      Err(e) if hunk.has_header => return Err(e),
+      Err(e) => matcher.find_match_recovery(source, hunk).map_err(|_| e)?,
+    };
 
     if match_pos > 0 {
       self.write_block(&source[..match_pos])?;
@@ -94,74 +93,75 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
-    if let Some(old_hash_bytes) = patch
-      .old_hash
-      .filter(|h| h.len() >= 7 && h.iter().any(|&b| b != b'0'))
-    {
-      let source = self.source_at();
-      let mut hasher = Sha1::new();
-      let mut len_buf = [0u8; 20];
-      let len_str = {
-        let mut len_writer = &mut len_buf[..];
-        let _ = write!(len_writer, "{}", source.len());
-        let written = 20 - len_writer.len();
-        &len_buf[..written]
-      };
-
-      hasher.update(b"blob ");
-      hasher.update(len_str);
-      hasher.update(b"\0");
-      hasher.update(source);
-
-      let mut hex_hash = [0u8; 40];
-      // SAFETY: 20 bytes Sha1 hash always results in 40 bytes hex.
-      // This is a fixed-size buffer operation with zero risk of overflow or indexing errors.
-      encode_to_slice(hasher.finalize(), &mut hex_hash)
-        .expect("fixed-size hex encoding failed");
-
-      if !hex_hash.starts_with(old_hash_bytes) {
-        return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
-      }
+    let old_hash = patch.old_hash;
+    if old_hash.is_none() {
+      return Ok(());
     }
+
+    let old_hash_bytes = old_hash.unwrap();
+    if old_hash_bytes.len() < 7 {
+      return Ok(());
+    }
+
+    if old_hash_bytes.iter().all(|&b| b == b'0') {
+      return Ok(());
+    }
+
+    let source = self.source_at();
+    let mut hasher = Sha1::new();
+    let mut len_buf = [0u8; 20];
+    let len_str = {
+      let mut len_writer = &mut len_buf[..];
+      let _ = write!(len_writer, "{}", source.len());
+      let written = 20 - len_writer.len();
+      &len_buf[..written]
+    };
+
+    hasher.update(b"blob ");
+    hasher.update(len_str);
+    hasher.update(b"\0");
+    hasher.update(source);
+
+    let mut hex_hash = [0u8; 40];
+    // SAFETY: 20 bytes Sha1 hash always results in 40 bytes hex.
+    // This is a fixed-size buffer operation with zero risk of overflow or indexing errors.
+    encode_to_slice(hasher.finalize(), &mut hex_hash)
+      .expect("fixed-size hex encoding failed");
+
+    if !hex_hash.starts_with(old_hash_bytes) {
+      return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
+    }
+
     Ok(())
   }
 
   pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
     // Binary patches are applied by processing fragments until a successful literal decoding or delta application occurs.
     for fragment in patch.binary_fragments.iter() {
-      let res = match fragment.kind {
-        BinaryKind::Literal => {
-          binary::decode_base85(&fragment.data, self.writer.output())
-        }
-        BinaryKind::Delta => {
-          let mut decoded = binary::new_base85_decoder(&fragment.data);
-          match binary::apply_delta(
-            &mut decoded,
-            self.source_at(),
-            self.writer.output(),
-          ) {
-            Ok(_) => Ok(()),
-            Err(e)
-              if matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch)
-                || matches!(
-                  e.kind,
-                  ErrorKind::Io(ref io)
-                    if io.kind() == IoErrorKind::InvalidData
-                ) =>
-            {
-              // InvalidData from base85 decoder (e.g. malformed delta)
-              // should also be treated as a candidate for skipping.
-              continue;
-            }
-            Err(e) => Err(e),
-          }
-        }
+      if matches!(fragment.kind, BinaryKind::Literal) {
+        let output = self.writer.output();
+        return binary::decode_base85(&fragment.data, output);
+      }
+
+      let mut decoded = binary::new_base85_decoder(&fragment.data);
+      let source = self.source_at();
+      let output = self.writer.output();
+      let res = binary::apply_delta(&mut decoded, source, output);
+
+      let Err(e) = res else {
+        return Ok(());
       };
 
-      return match res {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e),
-      };
+      if matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch) {
+        continue;
+      }
+
+      if matches!(e.kind, ErrorKind::Io(ref io) if io.kind() == IoErrorKind::InvalidData)
+      {
+        continue;
+      }
+
+      return Err(e);
     }
 
     Err(Error::new(ErrorKind::CouldNotApplyHunk))
@@ -179,21 +179,29 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     // Patch hunks are processed either as a hunkless collection or individually if headers are present.
-    if let Some(h) = patch.hunks.first() {
-      if !h.has_header {
-        self.process_hunkless_patches(patch)?;
-      } else {
-        patch.hunks.iter().try_for_each(|h| self.process_hunk(h))?;
+    let Some(first_hunk) = patch.hunks.first() else {
+      self.flush_remaining_source()?;
+      if patch.new_file_no_newline || patch.binary {
+        return Ok(());
       }
+      return self.writer.ensure_newline().map_err(Error::from);
+    };
+
+    if first_hunk.has_header {
+      patch.hunks.iter().try_for_each(|h| self.process_hunk(h))?;
+    } else {
+      self.process_hunkless_patches(patch)?;
     }
 
     // Write any remaining source content to the output.
     self.flush_remaining_source()?;
 
     // Ensure final newline unless suppressed by patch metadata.
-    if !patch.new_file_no_newline && !patch.binary {
-      self.writer.ensure_newline().map_err(Error::from)?;
+    if patch.new_file_no_newline || patch.binary {
+      return Ok(());
     }
+
+    self.writer.ensure_newline().map_err(Error::from)?;
     Ok(())
   }
 
@@ -227,41 +235,44 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       let mut found_idx = None;
       let current_source = &source[current_pos..];
       for (i, hunk_opt) in pending_hunks.iter_mut().enumerate() {
-        if let Some((hunk, finder)) = hunk_opt {
-          if let Ok((match_pos, _)) =
-            Matcher.find_match(current_source, hunk, finder.as_ref())
-          {
-            let absolute_pos = current_pos + match_pos;
-            hunks_with_pos.push((absolute_pos, *hunk));
-            found_idx = Some(i);
-            break;
-          }
-        }
-      }
+        let Some((hunk, finder)) = hunk_opt else {
+          continue;
+        };
 
-      if let Some(i) = found_idx {
-        let (pos, hunk) = hunks_with_pos.last().unwrap();
-        let mut match_len = 0;
-        for line in hunk.lines.iter() {
-          if !matches!(line.kind, LineKind::Addition) {
-            match_len += line.text.len() + 1;
-          }
-        }
+        let Ok((match_pos, _)) =
+          Matcher.find_match(current_source, hunk, finder.as_ref())
+        else {
+          continue;
+        };
 
-        current_pos = *pos + match_len;
-        pending_hunks[i] = None;
-        remaining_count -= 1;
-      } else {
+        hunks_with_pos.push((current_pos + match_pos, *hunk));
+        found_idx = Some(i);
         break;
       }
+
+      let Some(i) = found_idx else {
+        break;
+      };
+
+      let (pos, hunk) = hunks_with_pos
+        .last()
+        .expect("hunks_with_pos is empty after found_idx");
+      let mut match_len = 0;
+      for line in hunk.lines.iter() {
+        if !matches!(line.kind, LineKind::Addition) {
+          match_len += line.text.len() + 1;
+        }
+      }
+
+      current_pos = *pos + match_len;
+      pending_hunks[i] = None;
+      remaining_count -= 1;
     }
 
-    if remaining_count > 0 {
-      for hunk_data in pending_hunks.into_iter().flatten() {
-        let (hunk, finder) = hunk_data;
-        let (pos, _) = Matcher.find_match(source, hunk, finder.as_ref())?;
-        hunks_with_pos.push((pos, hunk));
-      }
+    for hunk_data in pending_hunks.into_iter().flatten() {
+      let (hunk, finder) = hunk_data;
+      let (pos, _) = Matcher.find_match(source, hunk, finder.as_ref())?;
+      hunks_with_pos.push((pos, hunk));
     }
 
     hunks_with_pos.sort_unstable_by_key(|(pos, _)| *pos);

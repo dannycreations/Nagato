@@ -46,11 +46,8 @@ impl FileSystem {
         .unwrap_or_else(|_| root)
     };
 
-    let staging = if check {
-      Some(TempDir::new().expect("failed to create staging directory"))
-    } else {
-      None
-    };
+    let staging = check
+      .then(|| TempDir::new().expect("failed to create staging directory"));
 
     Self {
       root,
@@ -64,14 +61,22 @@ impl FileSystem {
   #[inline]
   pub fn exists(&self, path: &[u8]) -> bool {
     let rel = match self.resolve_relative(path) {
-      Ok(p) => p,
+      Ok(r) => r,
       Err(_) => return false,
     };
+
     if self.deleted.borrow().contains(&rel) {
       return false;
     }
-    self.get_staged_path(&rel).filter(|p| p.exists()).is_some()
-      || self.root.join(rel).exists()
+
+    let staged_path = self.get_staged_path(&rel);
+    if let Some(staged) = staged_path {
+      if staged.exists() {
+        return true;
+      }
+    }
+
+    self.root.join(rel).exists()
   }
 
   #[inline]
@@ -93,10 +98,9 @@ impl FileSystem {
   pub fn write(&self, path: &[u8]) -> Result<AtomicWriter, Error> {
     let rel = self.resolve_relative(path)?;
     self.deleted.borrow_mut().remove(&rel);
-    let full = if let Some(staged) = self.get_staged_path(&rel) {
-      staged
-    } else {
-      self.root.join(&rel)
+    let full = match self.get_staged_path(&rel) {
+      Some(staged) => staged,
+      None => self.root.join(&rel),
     };
 
     if let Some(parent) = full.parent() {
@@ -109,29 +113,23 @@ impl FileSystem {
     let from_rel = self.resolve_relative(from)?;
     let to_rel = self.resolve_relative(to)?;
 
-    let from_path = if let Some(staged) = self.get_staged_path(&from_rel) {
-      if staged.exists() {
-        staged
-      } else {
-        self.root.join(&from_rel)
-      }
-    } else {
-      self.root.join(&from_rel)
+    let from_path = match self.get_staged_path(&from_rel) {
+      Some(staged) if staged.exists() => staged,
+      _ => self.root.join(&from_rel),
     };
 
     self.deleted.borrow_mut().remove(&to_rel);
-    if let Some(to_staged) = self.get_staged_path(&to_rel) {
-      if let Some(parent) = to_staged.parent() {
-        fs::create_dir_all(parent)?;
-      }
-      fs::copy(from_path, to_staged)?;
-    } else {
-      let to_full = self.root.join(&to_rel);
-      if let Some(parent) = to_full.parent() {
-        fs::create_dir_all(parent)?;
-      }
-      fs::copy(from_path, to_full)?;
+
+    let to_path = match self.get_staged_path(&to_rel) {
+      Some(staged) => staged,
+      None => self.root.join(&to_rel),
+    };
+
+    if let Some(parent) = to_path.parent() {
+      fs::create_dir_all(parent)?;
     }
+
+    fs::copy(from_path, to_path)?;
     Ok(())
   }
 
@@ -141,18 +139,20 @@ impl FileSystem {
     }
     let rel = self.resolve_relative(path)?;
     self.deleted.borrow_mut().insert(rel.clone());
-    if let Some(staged) = self.get_staged_path(&rel) {
-      if staged.exists() {
-        let _ = remove_file(staged);
-      }
+    if let Some(staged) = self.get_staged_path(&rel).filter(|p| p.exists()) {
+      let _ = remove_file(staged);
     }
-    if !self.check {
-      let full = self.root.join(rel);
-      if full.exists() {
-        remove_file(full)?;
-      }
+
+    if self.check {
+      return Ok(());
     }
-    Ok(())
+
+    let full = self.root.join(rel);
+    if !full.exists() {
+      return Ok(());
+    }
+
+    remove_file(full).map_err(Into::into)
   }
 
   pub fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
@@ -186,19 +186,18 @@ impl FileSystem {
     #[cfg(unix)]
     {
       let rel = self.resolve_relative(path)?;
-      let full_path = if let Some(staged) = self.get_staged_path(&rel) {
-        if staged.exists() {
-          staged
-        } else {
-          self.root.join(rel)
-        }
-      } else {
-        self.root.join(rel)
+      let full_path = match self.get_staged_path(&rel) {
+        Some(staged) if staged.exists() => staged,
+        _ => self.root.join(&rel),
       };
 
-      if !self.check
-        || full_path.starts_with(self.staging.as_ref().unwrap().path())
-      {
+      let is_staged = self
+        .staging
+        .as_ref()
+        .map(|s| full_path.starts_with(s.path()))
+        .unwrap_or(false);
+
+      if !self.check || is_staged {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(full_path, fs::Permissions::from_mode(mode))?;
       }
@@ -216,37 +215,29 @@ impl FileSystem {
 
     let mut rel = PathBuf::with_capacity(path_obj.as_os_str().len());
     for component in path_obj.components() {
-      match component {
-        Component::Normal(c) => {
-          let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
-          let bytes = s.as_bytes();
-
-          if let Some(b'.' | b' ') = bytes.last() {
-            return Err(Error::new(ErrorKind::InvalidPath));
-          }
-
-          if bytes.contains(&b'~') {
-            let mut i = 0;
-            while i < bytes.len() {
-              if bytes[i] == b'~'
-                && i + 1 < bytes.len()
-                && bytes[i + 1].is_ascii_digit()
-              {
-                return Err(Error::new(ErrorKind::InvalidPath));
-              }
-              i += 1;
-            }
-          }
-
-          let base_len = bytes.find_byte(b'.').unwrap_or(bytes.len());
-          if is_reserved_name(&bytes[..base_len]) {
-            return Err(Error::new(ErrorKind::InvalidPath));
-          }
-          rel.push(c);
+      let Component::Normal(c) = component else {
+        if matches!(component, Component::CurDir) {
+          continue;
         }
-        Component::CurDir => {}
-        _ => return Err(Error::new(ErrorKind::InvalidPath)),
+        return Err(Error::new(ErrorKind::InvalidPath));
+      };
+
+      let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
+      let bytes = s.as_bytes();
+
+      if matches!(bytes.last(), Some(b'.' | b' ')) {
+        return Err(Error::new(ErrorKind::InvalidPath));
       }
+
+      if let Some(tilde_pos) = bytes.find_byte(b'~') {
+        self::check_tilde_restriction(bytes, tilde_pos)?;
+      }
+
+      let base_len = bytes.find_byte(b'.').unwrap_or(bytes.len());
+      if is_reserved_name(&bytes[..base_len]) {
+        return Err(Error::new(ErrorKind::InvalidPath));
+      }
+      rel.push(c);
     }
 
     let res = rel.clone();
@@ -284,4 +275,22 @@ fn is_reserved_name(bytes: &[u8]) -> bool {
     6 => bytes.eq_ignore_ascii_case(b"CLOCK$"),
     _ => false,
   }
+}
+
+fn check_tilde_restriction(
+  bytes: &[u8],
+  mut tilde_pos: usize,
+) -> Result<(), Error> {
+  while tilde_pos + 1 < bytes.len() {
+    if bytes[tilde_pos + 1].is_ascii_digit() {
+      return Err(Error::new(ErrorKind::InvalidPath));
+    }
+
+    let Some(next_tilde) = bytes[tilde_pos + 1..].find_byte(b'~') else {
+      break;
+    };
+
+    tilde_pos += 1 + next_tilde;
+  }
+  Ok(())
 }

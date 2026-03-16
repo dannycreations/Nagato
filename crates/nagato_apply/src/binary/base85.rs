@@ -88,9 +88,8 @@ impl<'a> Read for Base85Reader<'a> {
         return Ok(len);
       }
 
-      let line = match self.lines.next() {
-        Some(l) => l,
-        None => return Ok(0),
+      let Some(line) = self.lines.next() else {
+        return Ok(0);
       };
 
       if line.is_empty() {
@@ -124,7 +123,7 @@ impl<'a> Read for Base85Reader<'a> {
           + (d1 as u32) * 614_125
           + (d2 as u32) * 7_225
           + (d3 as u32) * 85
-          + d4 as u32;
+          + (d4 as u32);
 
         self.buffer[self.buf_len..self.buf_len + 4]
           .copy_from_slice(&val.to_be_bytes());
@@ -145,15 +144,17 @@ pub fn decode_base85(
   use flate2::read::ZlibDecoder;
   let mut decoder = ZlibDecoder::new(Base85Reader::new(lines));
   io_copy(&mut decoder, writer).map_err(|e| {
-    if e
-      .get_ref()
-      .map(|r| r.is::<InvalidBinaryLineError>())
-      .unwrap_or(false)
-    {
-      Error::from(ErrorKind::InvalidBinaryFilesLine)
-    } else {
-      Error::from(e)
+    let mut is_invalid_line = false;
+    if let Some(r) = e.get_ref() {
+      if r.is::<InvalidBinaryLineError>() {
+        is_invalid_line = true;
+      }
     }
+
+    if is_invalid_line {
+      return Error::from(ErrorKind::InvalidBinaryFilesLine);
+    }
+    Error::from(e)
   })?;
   Ok(())
 }

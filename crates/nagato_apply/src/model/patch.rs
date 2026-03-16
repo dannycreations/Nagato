@@ -30,6 +30,11 @@ pub struct Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
+  #[inline]
+  pub fn is_empty(&self) -> bool {
+    self.old_file.is_empty() && self.new_file.is_empty()
+  }
+
   pub fn source_file(&self) -> &[u8] {
     self.copy_from.as_deref().unwrap_or(&self.old_file)
   }
@@ -39,10 +44,9 @@ impl<'a> Patch<'a> {
   }
 
   pub fn filename(&self) -> &[u8] {
-    if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
-      &self.new_file
-    } else {
-      &self.old_file
+    match !self.new_file.is_empty() && !self.new_file.is_dev_null() {
+      true => &self.new_file,
+      false => &self.old_file,
     }
   }
 

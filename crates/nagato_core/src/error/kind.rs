@@ -67,9 +67,11 @@ impl PartialEq for ErrorKind {
       (Self::CantOpenPatch(a, ae), Self::CantOpenPatch(b, be)) => {
         a == b && ae.kind() == be.kind()
       }
-      // Use discriminant to compare variants without data.
-      // This reduces maintenance as new data-less variants won't need manual eq updates.
-      (a, b) => discriminant(a) == discriminant(b),
+      _ => {
+        // Use discriminant to compare variants without data.
+        // This reduces maintenance as new data-less variants won't need manual eq updates.
+        discriminant(self) == discriminant(other)
+      }
     }
   }
 }

@@ -20,21 +20,18 @@ pub fn ensure_dir(dir: &Path) -> Result<(), Error> {
 /// Generates a unique file path within a directory by appending a numeric counter if the target name already exists.
 pub fn get_unique_path(dir: &Path, name: &str) -> PathBuf {
   let mut path = dir.join(name);
-  if !path.exists() {
+  if !path.try_exists().unwrap_or(true) {
     return path;
   }
 
-  // Identify the stem and the full extension chain by locating the first period in the filename.
-  // This ensures that for compound extensions like '.trim.patch', the counter is inserted before the first period.
-  let (stem, extension) = match name.find('.') {
-    Some(index) if index > 0 => name.split_at(index),
-    _ => (name, ""),
-  };
+  let (stem, extension) = name
+    .find('.')
+    .filter(|&i| i > 0)
+    .map(|i| name.split_at(i))
+    .unwrap_or((name, ""));
 
-  let mut counter = 1;
-  // Pre-allocate buffer once to minimize heap churn during search loop.
   let mut name_buf = String::with_capacity(name.len() + 10);
-  loop {
+  for counter in 1..u32::MAX {
     name_buf.clear();
     let _ = write!(name_buf, "{}-{}{}", stem, counter, extension);
 
@@ -42,6 +39,6 @@ pub fn get_unique_path(dir: &Path, name: &str) -> PathBuf {
     if !path.try_exists().unwrap_or(true) {
       return path;
     }
-    counter += 1;
   }
+  path
 }
