@@ -291,8 +291,8 @@ test_line_writer_ok!(
       let mut w = LineWriter::new(&mut buf3);
       w.write_bytes(b"first").unwrap();
       w.ensure_newline().unwrap(); // Now not first line, should add \n
-      w.ensure_newline().unwrap(); // Should add another \n
+      w.ensure_newline().unwrap(); // Should not add another \n if already there
     }
-    assert_eq!(buf3, b"first\n\n");
+    assert_eq!(buf3, b"first\n");
   }
 );

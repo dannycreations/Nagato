@@ -2,7 +2,7 @@ use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
 use crate::Patch;
 
-pub fn read_source_mapped(
+fn read_source_mapped(
   fs: &FileSystem,
   path: &[u8],
 ) -> Result<Option<memmap2::Mmap>, Error> {
@@ -20,10 +20,7 @@ fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
   }
 }
 
-pub fn patch_file_worker(
-  fs: &FileSystem,
-  patch: &Patch<'_>,
-) -> Result<(), Error> {
+pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
   if patch.binary && !patch.hunks.is_empty() {
     return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
@@ -40,6 +37,69 @@ pub fn patch_file_worker(
   };
 
   result.map_err(|e: Error| {
+    e.with_file(String::from_utf8_lossy(patch.filename()))
+  })?;
+
+  if !patch.new_file.is_dev_null() {
+    if let Some(mode) = patch.new_mode {
+      fs.set_permissions(&patch.new_file, mode)?;
+    }
+  }
+
+  Ok(())
+}
+
+pub fn patch_file_streamed<'a>(
+  fs: &FileSystem,
+  mut patch: Patch<'a>,
+  parser: &mut crate::Parser<'a>,
+) -> Result<(), Error> {
+  let is_deletion = patch.new_file.is_dev_null();
+  let source_path = patch.source_file();
+
+  let res = if is_deletion {
+    let source = read_source_mapped(fs, source_path)?;
+    let mut sink = std::io::sink();
+    crate::apply_streamed(
+      &mut sink,
+      patch.clone(),
+      source.as_deref().unwrap_or(&[]),
+      parser,
+    )?;
+    if !source_path.is_dev_null() {
+      fs.remove(source_path)?;
+    }
+    Ok(())
+  } else if !patch.binary_fragments.is_empty() {
+    // Binary patches are inherently buffered for now as we read all fragments
+    // But we can still use the streamed worker by collecting hunks (though binary shouldn't have hunks)
+    let mut hunks = Vec::new();
+    while let Some(h) = parser.next_hunk(&mut patch)? {
+      hunks.push(h);
+    }
+    patch.hunks = hunks;
+    patch_file(fs, &patch)
+  } else {
+    // Normal content change or structural
+    let source = read_source_mapped(fs, source_path)?;
+    let mut writer = fs.write(&patch.new_file)?;
+    let res = crate::apply_streamed(
+      &mut writer,
+      patch.clone(),
+      source.as_deref().unwrap_or(&[]),
+      parser,
+    );
+    drop(source);
+    if let Ok(()) = res {
+      writer.commit()?;
+      if patch.rename_to.is_some() && patch.new_file != source_path {
+        fs.remove(source_path).ignore_not_found()?;
+      }
+    }
+    res
+  };
+
+  res.map_err(|e: Error| {
     e.with_file(String::from_utf8_lossy(patch.filename()))
   })?;
 
@@ -108,7 +168,7 @@ fn apply_structural_change(
     return fs.copy(source_path, &patch.new_file);
   }
 
-  if patch.old_file.is_dev_null() {
+  if patch.old_file.is_dev_null() && !patch.new_file.is_dev_null() {
     ensure_not_exists(fs, &patch.new_file)?;
     fs.write(&patch.new_file)?.commit()?;
   }

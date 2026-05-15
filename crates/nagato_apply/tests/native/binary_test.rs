@@ -107,8 +107,7 @@ test_binary_applier_process_ok!(
         size: 5,
         data: vec![b"6|SHe00001"],
       },
-    ]
-    .into_boxed_slice(),
+    ],
     ..Default::default()
   }
 );

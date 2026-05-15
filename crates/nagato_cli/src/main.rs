@@ -1,6 +1,6 @@
 use std::process::exit;
 
-use nagato_cli::{run, Cli, Parser};
+use nagato_cli::{execute, Cli, Parser};
 
 fn main() {
   let cli = Cli::parse();
@@ -12,7 +12,7 @@ fn main() {
     exit(0);
   }
 
-  if let Err(e) = run(cli) {
+  if let Err(e) = execute(cli) {
     eprintln!("Error: {e}");
     exit(1);
   }

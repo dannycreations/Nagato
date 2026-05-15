@@ -5,7 +5,9 @@ use memchr::memmem::Finder;
 use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
-use crate::{binary, BinaryKind, Hunk, LineKind, Matcher, Patch};
+use crate::{
+  applier::matcher::Matcher, binary, BinaryKind, Hunk, LineKind, Patch,
+};
 
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
   writer: LineWriter<'b, W>,
@@ -33,13 +35,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     self.writer.write_line(line).map_err(Into::into)
   }
 
+  #[inline]
   fn write_block(&mut self, block: &[u8]) -> Result<(), Error> {
-    let mut rest = block;
-    while let Some((line, next_rest)) = nagato_core::get_line(rest) {
-      self.writer.write_line(line).map_err(Error::from)?;
-      rest = next_rest;
-    }
-    Ok(())
+    self.writer.write_block(block).map_err(Error::from)
   }
 
   #[inline]
@@ -167,24 +165,30 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Err(Error::new(ErrorKind::CouldNotApplyHunk))
   }
 
-  pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
-    // Verify source hash if index header is present.
+  pub fn begin(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
     if patch.old_hash.is_some() {
-      self.verify_binary_source(patch)?
+      self.verify_binary_source(patch)?;
     }
+    Ok(())
+  }
 
-    // Patch content application is dispatched to specialized handlers based on whether the patch contains binary fragments or standard text hunks.
+  pub fn end(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
+    self.flush_remaining_source()?;
+    if patch.new_file_no_newline || patch.binary {
+      return Ok(());
+    }
+    self.writer.ensure_newline().map_err(Error::from)
+  }
+
+  pub fn process(mut self, patch: &Patch<'_>) -> Result<(), Error> {
+    self.begin(patch)?;
+
     if !patch.binary_fragments.is_empty() {
       return self.process_binary(patch);
     }
 
-    // Patch hunks are processed either as a hunkless collection or individually if headers are present.
     let Some(first_hunk) = patch.hunks.first() else {
-      self.flush_remaining_source()?;
-      if patch.new_file_no_newline || patch.binary {
-        return Ok(());
-      }
-      return self.writer.ensure_newline().map_err(Error::from);
+      return self.end(patch);
     };
 
     if first_hunk.has_header {
@@ -193,19 +197,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       self.process_hunkless_patches(patch)?;
     }
 
-    // Write any remaining source content to the output.
-    self.flush_remaining_source()?;
-
-    // Ensure final newline unless suppressed by patch metadata.
-    if patch.new_file_no_newline || patch.binary {
-      return Ok(());
-    }
-
-    self.writer.ensure_newline().map_err(Error::from)?;
-    Ok(())
+    self.end(patch)
   }
 
-  fn process_hunkless_patches(
+  pub(crate) fn process_hunkless_patches(
     &mut self,
     patch: &Patch<'_>,
   ) -> Result<(), Error> {

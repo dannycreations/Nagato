@@ -1,7 +1,7 @@
-mod binary;
-mod hunk;
-mod line;
-mod patch;
+pub mod binary;
+pub mod hunk;
+pub mod line;
+pub mod patch;
 
 pub use binary::*;
 pub use hunk::*;

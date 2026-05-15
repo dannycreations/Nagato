@@ -4,7 +4,10 @@ use nagato_core::{
   next_path_pair, parse_int, split_diff_paths, unquote_path, ErrorKind,
 };
 
-use crate::{lexer::LexerMode, BinaryPaths, Lexer, TokenKind};
+use crate::{
+  lexer::{token::BinaryPaths, LexerMode},
+  Lexer, TokenKind,
+};
 
 impl<'a> Lexer<'a> {
   #[inline]

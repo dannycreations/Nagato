@@ -200,12 +200,10 @@ test_applier_flush_ok!(
       lines: vec![Line {
         kind: LineKind::Context,
         text: b"line1",
-      }]
-      .into_boxed_slice(),
+      }],
       has_header: true,
       ..Default::default()
-    }]
-    .into_boxed_slice(),
+    }],
     ..Default::default()
   },
   expected_contains: "line2"
@@ -220,9 +218,8 @@ test_reject_mixed!(
       kind: BinaryKind::Literal,
       size: 1,
       data: vec![b"Wc-qT"],
-    }]
-    .into_boxed_slice(),
-    hunks: vec![Hunk::default()].into_boxed_slice(),
+    }],
+    hunks: vec![Hunk::default()],
     ..Default::default()
   }
 );

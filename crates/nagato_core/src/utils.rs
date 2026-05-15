@@ -172,7 +172,8 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
 
 pub struct LineWriter<'a, W: Write + ?Sized> {
   output: &'a mut W,
-  is_first_line: bool,
+  last_was_newline: bool,
+  is_empty: bool,
 }
 
 impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
@@ -180,52 +181,76 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   pub fn new(output: &'a mut W) -> Self {
     Self {
       output,
-      is_first_line: true,
+      last_was_newline: false,
+      is_empty: true,
     }
   }
 
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> IoResult<()> {
-    if self.is_first_line {
-      self.is_first_line = false;
-      return self.output.write_all(line);
+    if !self.is_empty && !self.last_was_newline {
+      self.output.write_all(b"\n")?;
     }
-
-    self.output.write_all(b"\n")?;
-    self.output.write_all(line)
+    self.is_empty = false;
+    self.output.write_all(line)?;
+    self.last_was_newline = false;
+    Ok(())
   }
 
   #[inline]
   pub fn ensure_newline(&mut self) -> IoResult<()> {
-    if self.is_first_line {
-      self.is_first_line = false;
+    if self.is_empty || self.last_was_newline {
       return Ok(());
     }
-    self.output.write_all(b"\n")
+    self.output.write_all(b"\n")?;
+    self.last_was_newline = true;
+    Ok(())
   }
 
   #[inline]
   pub fn write_bytes(&mut self, bytes: &[u8]) -> IoResult<()> {
-    if !bytes.is_empty() {
-      self.is_first_line = false;
+    if bytes.is_empty() {
+      return Ok(());
     }
-    self.output.write_all(bytes)
+    self.is_empty = false;
+    self.output.write_all(bytes)?;
+    self.last_was_newline = bytes.last() == Some(&b'\n');
+    Ok(())
+  }
+
+  #[inline]
+  pub fn write_block(&mut self, block: &[u8]) -> IoResult<()> {
+    if block.is_empty() {
+      return Ok(());
+    }
+
+    if !self.is_empty && !self.last_was_newline {
+      self.output.write_all(b"\n")?;
+    }
+
+    self.is_empty = false;
+    self.output.write_all(block)?;
+    self.last_was_newline = block.last() == Some(&b'\n');
+    Ok(())
   }
 
   #[inline]
   pub fn write_newline(&mut self) -> IoResult<()> {
-    self.is_first_line = false;
-    self.output.write_all(b"\n")
+    self.is_empty = false;
+    self.output.write_all(b"\n")?;
+    self.last_was_newline = true;
+    Ok(())
   }
 
   #[inline]
   pub fn is_first_line(&self) -> bool {
-    self.is_first_line
+    self.is_empty
   }
 
   #[inline]
   pub fn reset_to_first_line(&mut self) {
-    self.is_first_line = true;
+    self.is_empty = true;
+    self.last_was_newline = false;
   }
 
   #[inline]

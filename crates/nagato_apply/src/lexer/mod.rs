@@ -1,9 +1,9 @@
 use nagato_core::Error;
 
-mod token;
+pub(crate) mod token;
 mod tokenizer;
 
-pub use token::*;
+pub use token::{BinaryPaths, TokenKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexerItem<'a> {

@@ -176,7 +176,9 @@ impl FileSystem {
     }
 
     if let Some(parent) = to_full.parent() {
-      fs::create_dir_all(parent)?;
+      if !parent.exists() {
+        fs::create_dir_all(parent)?;
+      }
     }
     fs::rename(from_full, to_full).map_err(Into::into)
   }

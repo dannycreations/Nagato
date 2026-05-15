@@ -1,12 +1,12 @@
 use std::iter::Peekable;
 
+pub mod binary;
+pub(crate) mod header;
+pub(crate) mod hunk;
+
 use nagato_core::{Error, ErrorKind};
 
 use crate::{Lexer, Patch, TokenKind};
-
-mod binary;
-mod header;
-mod hunk;
 
 pub struct Parser<'a> {
   pub tokens: Peekable<Lexer<'a>>,
@@ -21,21 +21,46 @@ impl<'a> Parser<'a> {
     }
   }
 
+  pub fn next_hunk(
+    &mut self,
+    patch: &mut Patch<'a>,
+  ) -> Result<Option<crate::Hunk<'a>>, Error> {
+    hunk::next_hunk(self, patch)
+  }
+
+  pub(crate) fn parse_patch_header(
+    &mut self,
+  ) -> Result<Option<Patch<'a>>, Error> {
+    self.label = None;
+    self.skip_empty_context_lines()?;
+
+    if self.tokens.peek().is_none() {
+      return Ok(None);
+    }
+
+    let mut patch = Patch::default();
+    let mut binary_fragments = Vec::new();
+    header::parse_header(self, &mut patch, &mut binary_fragments)?;
+    patch.binary_fragments = binary_fragments;
+
+    Ok(Some(patch))
+  }
+
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
     // Ensure label state doesn't leak between patches.
     self.label = None;
     // Patch initialization involves parsing the header and associated hunks into a default patch structure.
     let mut patch = Patch::default();
-    let mut binary_fragments = Vec::new();
-    let mut hunks = Vec::new();
+    let mut binary_fragments = Vec::with_capacity(2);
+    let mut hunks = Vec::with_capacity(4);
 
     let start_line = self.peek_token()?.map(|i| i.line_num).unwrap_or(0);
 
     header::parse_header(self, &mut patch, &mut binary_fragments)?;
     hunk::parse_hunks(self, &mut patch, &mut hunks)?;
 
-    patch.binary_fragments = binary_fragments.into_boxed_slice();
-    patch.hunks = hunks.into_boxed_slice();
+    patch.binary_fragments = binary_fragments;
+    patch.hunks = hunks;
 
     // Patch validity is checked by ensuring that any content changes are associated with at least one valid file path.
     if !patch.hunks.is_empty()
@@ -99,18 +124,5 @@ impl<'a> Iterator for Parser<'a> {
     }
 
     Some(res)
-  }
-}
-
-impl<'a> Parser<'a> {
-  pub fn apply_to_fs(
-    fs: &nagato_core::FileSystem,
-    input: &'a [u8],
-    reverse: bool,
-  ) -> Result<(), Error> {
-    for patch in Self::new(input) {
-      crate::patch_file(fs, patch?, reverse)?;
-    }
-    Ok(())
   }
 }

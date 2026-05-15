@@ -14,7 +14,7 @@ pub struct Patch<'a> {
   pub new_hash: Option<&'a [u8]>,
   pub old_file: Cow<'a, [u8]>,
   pub new_file: Cow<'a, [u8]>,
-  pub hunks: Box<[Hunk<'a>]>,
+  pub hunks: Vec<Hunk<'a>>,
   pub copy_from: Option<Cow<'a, [u8]>>,
   pub copy_to: Option<Cow<'a, [u8]>>,
   pub rename_from: Option<Cow<'a, [u8]>>,
@@ -26,7 +26,7 @@ pub struct Patch<'a> {
   pub binary: bool,
   pub old_file_no_newline: bool,
   pub new_file_no_newline: bool,
-  pub binary_fragments: Box<[BinaryFragment<'a>]>,
+  pub binary_fragments: Vec<BinaryFragment<'a>>,
 }
 
 impl<'a> Patch<'a> {
@@ -63,13 +63,8 @@ impl<'a> Patch<'a> {
   }
 
   pub fn append(&mut self, other: Self) {
-    let mut hunks = mem::take(&mut self.hunks).into_vec();
-    hunks.extend(other.hunks);
-    self.hunks = hunks.into_boxed_slice();
-
-    let mut frags = mem::take(&mut self.binary_fragments).into_vec();
-    frags.extend(other.binary_fragments);
-    self.binary_fragments = frags.into_boxed_slice();
+    self.hunks.extend(other.hunks);
+    self.binary_fragments.extend(other.binary_fragments);
   }
 
   pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {

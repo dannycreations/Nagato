@@ -8,7 +8,7 @@ pub struct Hunk<'a> {
   pub old_span: u32,
   pub new_line: u32,
   pub new_span: u32,
-  pub lines: Box<[Line<'a>]>,
+  pub lines: Vec<Line<'a>>,
   pub patch_line_num: u32,
   pub has_header: bool,
   pub label: Option<&'a [u8]>,

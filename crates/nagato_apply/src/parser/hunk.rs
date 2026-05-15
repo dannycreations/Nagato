@@ -2,13 +2,12 @@ use nagato_core::{parse_int, Error, ErrorKind};
 
 use crate::{Hunk, Line, LineKind, Parser, Patch, TokenKind};
 
-pub fn parse_hunks<'a>(
+pub fn next_hunk<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
-  hunks: &mut Vec<Hunk<'a>>,
-) -> Result<(), Error> {
+) -> Result<Option<Hunk<'a>>, Error> {
   while let Some(item) = parser.peek_token()? {
-    match &item.token {
+    let res = match &item.token {
       TokenKind::Label(l) => {
         parser.label = Some(*l);
         parser.tokens.next();
@@ -17,10 +16,8 @@ pub fn parse_hunks<'a>(
       }
       TokenKind::HunkHeader { .. } => {
         let mut hunk = parse_hunk(parser, patch)?;
-        // Labels from `label ` lines apply to the next hunk.
-        // If the hunk has its own label in the `@@` header, it takes precedence.
         hunk.label = hunk.label.or_else(|| parser.label.take());
-        hunks.push(hunk);
+        Some(hunk)
       }
       TokenKind::Addition(_)
       | TokenKind::Deletion(_)
@@ -35,21 +32,37 @@ pub fn parse_hunks<'a>(
           })?;
 
         if !lines.is_empty() {
-          hunks.push(Hunk {
+          Some(Hunk {
             old_line: 0,
             new_line: 0,
             old_span,
             new_span,
-            lines: lines.into_boxed_slice(),
+            lines,
             patch_line_num: initial_line.saturating_sub(1),
             has_header: false,
             label: parser.label.take(),
-          });
+          })
+        } else {
+          None
         }
       }
-      _ => break,
-    }
+      _ => return Ok(None),
+    };
     parser.skip_empty_context_lines()?;
+    if res.is_some() {
+      return Ok(res);
+    }
+  }
+  Ok(None)
+}
+
+pub fn parse_hunks<'a>(
+  parser: &mut Parser<'a>,
+  patch: &mut Patch<'a>,
+  hunks: &mut Vec<Hunk<'a>>,
+) -> Result<(), Error> {
+  while let Some(hunk) = next_hunk(parser, patch)? {
+    hunks.push(hunk);
   }
   Ok(())
 }
@@ -174,7 +187,7 @@ pub fn parse_hunk<'a>(
     old_span,
     new_line,
     new_span,
-    lines: lines.into(),
+    lines,
     patch_line_num: item.line_num,
     has_header: true,
     label,
