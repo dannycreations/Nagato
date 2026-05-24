@@ -194,6 +194,7 @@ macro_rules! test_fs_ops_ok {
   ) => {
     #[test]
     fn $test_name() {
+      #[allow(unused_imports)]
       use std::io::Write;
       let $dir = $crate::create_test_fs! {};
       let $fs = nagato_core::FileSystem::new($dir.path(), $check);

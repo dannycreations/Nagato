@@ -19,9 +19,9 @@ impl PatchSource {
   ) -> Box<dyn Iterator<Item = Result<Self, Error>>> {
     if files.is_empty() {
       let mut content = Vec::new();
-      // Standard input is read to completion when no files are specified, ensuring that piped patch data is fully captured before processing begins.
       let res = stdin()
         .lock()
+        .take(1024 * 1024 * 1024)
         .read_to_end(&mut content)
         .map(|_| Self::Stdin(content))
         .map_err(Error::from);

@@ -109,3 +109,47 @@ test_fs_reserved!(
   fs_reserved_lpt0 => b"lpt0",
   fs_reserved_clock_dollar_lower => b"clock$",
 );
+
+#[cfg(unix)]
+test_fs_ops_ok!(
+  fs_permissions_sanitization,
+  check_mode: false,
+  assertions: |fs, dir| {
+    use std::os::unix::fs::PermissionsExt;
+    let path = b"restricted.sh";
+    {
+      let mut writer = fs.write(path).unwrap();
+      writer.write_all(b"echo hello").unwrap();
+      writer.commit().unwrap();
+    }
+
+    // Try to set SUID/SGID bits (06755)
+    fs.set_permissions(path, 0o6755).unwrap();
+
+    let metadata = std::fs::metadata(dir.path().join("restricted.sh")).unwrap();
+    let mode = metadata.permissions().mode();
+
+    // Verify SUID (04000) and SGID (02000) are stripped
+    assert_eq!(mode & 0o6000, 0);
+    assert_eq!(mode & 0o777, 0o755);
+  }
+);
+
+test_fs_ops_ok!(
+  fs_path_cache_limit,
+  check_mode: false,
+  assertions: |fs, _dir| {
+    // Fill cache to limit
+    for i in 0..10_000 {
+      let path = format!("file_{}.txt", i);
+      fs.exists(path.as_bytes());
+    }
+
+    // Add one more
+    let overflow = b"overflow.txt";
+    fs.exists(overflow);
+
+    // Verify it doesn't crash and works correctly (just not cached)
+    assert!(!fs.exists(overflow));
+  }
+);

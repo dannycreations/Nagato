@@ -201,7 +201,11 @@ impl FileSystem {
 
       if !self.check || is_staged {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(full_path, fs::Permissions::from_mode(mode))?;
+        let sanitized_mode = mode & !0o6000;
+        fs::set_permissions(
+          full_path,
+          fs::Permissions::from_mode(sanitized_mode),
+        )?;
       }
     }
     Ok(())
@@ -243,7 +247,10 @@ impl FileSystem {
     }
 
     let res = rel.clone();
-    self.resolved.borrow_mut().insert(Box::from(path), rel);
+    let mut cache = self.resolved.borrow_mut();
+    if cache.len() < 10_000 {
+      cache.insert(Box::from(path), rel);
+    }
     Ok(res)
   }
 
