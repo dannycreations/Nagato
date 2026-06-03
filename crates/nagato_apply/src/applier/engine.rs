@@ -41,31 +41,21 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   #[inline]
-  pub fn find_and_apply_hunk<'p>(
+  pub fn apply_hunk<'p>(
     &mut self,
     hunk: &Hunk<'p>,
+    match_pos: usize,
+    remaining_source: &'s [u8],
   ) -> Result<(), Error> {
     let source = self.source_at();
-    let matcher = Matcher;
-
-    // Hunk matching logic uses explicit pattern matching to handle recovery attempts for hunkless patches when an exact match fails.
-    let match_res = matcher.find_match(source, hunk, None);
-
-    let (match_pos, final_source, skipped_line_index) = match match_res {
-      Ok((pos, src)) => (pos, src, None),
-      Err(e) if hunk.has_header => return Err(e),
-      Err(e) => matcher.find_match_recovery(source, hunk).map_err(|_| e)?,
-    };
 
     if match_pos > 0 {
       self.write_block(&source[..match_pos])?;
     }
-    self.pos += source.len() - final_source.len();
 
-    for (i, line) in hunk.lines.iter().enumerate() {
-      if Some(i) == skipped_line_index {
-        continue;
-      }
+    self.pos += source.len() - remaining_source.len();
+
+    for line in hunk.lines.iter() {
       match line.kind {
         LineKind::Addition | LineKind::Context | LineKind::Gap => {
           self.write_line(line.text)?;
@@ -87,7 +77,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       return Ok(());
     }
 
-    self.find_and_apply_hunk(hunk)
+    let source = self.source_at();
+    let (match_pos, remaining) = Matcher.find_match(source, hunk, None)?;
+    self.apply_hunk(hunk, match_pos, remaining)
   }
 
   pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
@@ -134,6 +126,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   }
 
   pub fn process_binary(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
+    // Binary patches apply to the entire file state; consume remaining source to prevent trailing junk.
+    self.pos = self.source.len();
+
     // Binary patches are applied by processing fragments until a successful literal decoding or delta application occurs.
     for fragment in patch.binary_fragments.iter() {
       if matches!(fragment.kind, BinaryKind::Literal) {
@@ -142,7 +137,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
 
       let mut decoded = binary::new_base85_decoder(&fragment.data);
-      let source = self.source_at();
+      let source = self.source;
       let output = self.writer.output();
       let res = binary::apply_delta(&mut decoded, source, output);
 
@@ -167,7 +162,16 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
   pub fn begin(&mut self, patch: &Patch<'_>) -> Result<(), Error> {
     if patch.old_hash.is_some() {
-      self.verify_binary_source(patch)?;
+      // Skip Sha1 calculation for Literal binary patches as they overwrite the file.
+      let is_literal = patch
+        .binary_fragments
+        .first()
+        .map(|f| matches!(f.kind, BinaryKind::Literal))
+        .unwrap_or(false);
+
+      if !is_literal {
+        self.verify_binary_source(patch)?;
+      }
     }
     Ok(())
   }
@@ -211,69 +215,63 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       .iter()
       .map(|h| {
         let finder = h
-          .lines_to_match()
-          .next()
+          .first_non_empty_match_line()
           .map(|(_, l)| l.text)
-          .filter(|t| !t.is_empty())
           .map(Finder::new);
         Some((h, finder))
       })
       .collect();
 
-    let mut hunks_with_pos = Vec::with_capacity(pending_hunks.len());
+    let mut hunks_to_apply = Vec::with_capacity(pending_hunks.len());
     let source = self.source_at();
+    let initial_pos = self.pos;
 
-    let mut current_pos = 0;
+    let mut current_offset = 0;
     let mut remaining_count = pending_hunks.len();
 
-    while remaining_count > 0 && current_pos < source.len() {
+    while remaining_count > 0 && current_offset < source.len() {
       let mut found_idx = None;
-      let current_source = &source[current_pos..];
+      let current_source = &source[current_offset..];
       for (i, hunk_opt) in pending_hunks.iter_mut().enumerate() {
         let Some((hunk, finder)) = hunk_opt else {
           continue;
         };
 
-        let Ok((match_pos, _)) =
+        if let Ok((match_pos, remaining)) =
           Matcher.find_match(current_source, hunk, finder.as_ref())
-        else {
-          continue;
-        };
-
-        hunks_with_pos.push((current_pos + match_pos, *hunk));
-        found_idx = Some(i);
-        break;
+        {
+          let absolute_pos = initial_pos + current_offset + match_pos;
+          hunks_to_apply.push((absolute_pos, remaining, *hunk));
+          // Move offset past the applied hunk to avoid overlapping matches.
+          current_offset =
+            (source.len() - remaining.len()).max(current_offset + 1);
+          found_idx = Some(i);
+          break;
+        }
       }
 
       let Some(i) = found_idx else {
         break;
       };
 
-      let (pos, hunk) = hunks_with_pos
-        .last()
-        .expect("hunks_with_pos is empty after found_idx");
-      let mut match_len = 0;
-      for line in hunk.lines.iter() {
-        if !matches!(line.kind, LineKind::Addition) {
-          match_len += line.text.len() + 1;
-        }
-      }
-
-      current_pos = *pos + match_len;
       pending_hunks[i] = None;
       remaining_count -= 1;
     }
 
     for hunk_data in pending_hunks.into_iter().flatten() {
       let (hunk, finder) = hunk_data;
-      let (pos, _) = Matcher.find_match(source, hunk, finder.as_ref())?;
-      hunks_with_pos.push((pos, hunk));
+      let (match_pos, remaining) =
+        Matcher.find_match(source, hunk, finder.as_ref())?;
+      hunks_to_apply.push((initial_pos + match_pos, remaining, hunk));
     }
 
-    hunks_with_pos.sort_unstable_by_key(|(pos, _)| *pos);
-    hunks_with_pos
-      .into_iter()
-      .try_for_each(|(_, hunk)| self.process_hunk(hunk))
+    hunks_to_apply.sort_unstable_by_key(|(pos, _, _)| *pos);
+
+    for (pos, remaining, hunk) in hunks_to_apply {
+      let match_pos_rel = pos - self.pos;
+      self.apply_hunk(hunk, match_pos_rel, remaining)?;
+    }
+    Ok(())
   }
 
   fn flush_remaining_source(&mut self) -> Result<(), Error> {

@@ -139,8 +139,13 @@ impl FileSystem {
     }
     let rel = self.resolve_relative(path)?;
     self.deleted.borrow_mut().insert(rel.clone());
-    if let Some(staged) = self.get_staged_path(&rel).filter(|p| p.exists()) {
-      let _ = remove_file(staged);
+
+    if let Some(staged) = self.get_staged_path(&rel) {
+      match remove_file(staged) {
+        Ok(_) => {}
+        Err(e) if e.kind() == IoErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+      }
     }
 
     if self.check {
@@ -148,11 +153,11 @@ impl FileSystem {
     }
 
     let full = self.root.join(rel);
-    if !full.exists() {
-      return Ok(());
+    match remove_file(full) {
+      Ok(_) => Ok(()),
+      Err(e) if e.kind() == IoErrorKind::NotFound => Ok(()),
+      Err(e) => Err(e.into()),
     }
-
-    remove_file(full).map_err(Into::into)
   }
 
   pub fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
@@ -176,9 +181,7 @@ impl FileSystem {
     }
 
     if let Some(parent) = to_full.parent() {
-      if !parent.exists() {
-        fs::create_dir_all(parent)?;
-      }
+      fs::create_dir_all(parent)?;
     }
     fs::rename(from_full, to_full).map_err(Into::into)
   }
@@ -221,11 +224,10 @@ impl FileSystem {
 
     let mut rel = PathBuf::with_capacity(path_obj.as_os_str().len());
     for component in path_obj.components() {
-      let Component::Normal(c) = component else {
-        if matches!(component, Component::CurDir) {
-          continue;
-        }
-        return Err(Error::new(ErrorKind::InvalidPath));
+      let c = match component {
+        Component::Normal(c) => c,
+        Component::CurDir => continue,
+        _ => return Err(Error::new(ErrorKind::InvalidPath)),
       };
 
       let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;

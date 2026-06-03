@@ -51,8 +51,8 @@ impl<'a> Parser<'a> {
     self.label = None;
     // Patch initialization involves parsing the header and associated hunks into a default patch structure.
     let mut patch = Patch::default();
-    let mut binary_fragments = Vec::with_capacity(2);
-    let mut hunks = Vec::with_capacity(4);
+    let mut binary_fragments = Vec::new();
+    let mut hunks = Vec::new();
 
     let start_line = self.peek_token()?.map(|i| i.line_num).unwrap_or(0);
 

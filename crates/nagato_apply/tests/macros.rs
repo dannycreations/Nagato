@@ -133,13 +133,50 @@ macro_rules! test_lexer_ok {
     input: $input:expr,
     expected: [$($expected_token:expr),*]
   ) => {
+    #[allow(unused_imports)]
     #[test]
     fn $test_name() {
+      use nagato_core::{split_diff_paths, unquote_path};
+      use nagato_apply::{BinaryPaths, TokenKind};
+
       let input = indoc::indoc!($input);
       let tokens: Vec<_> = nagato_apply::Lexer::new(input.as_bytes())
         .map(|r| r.unwrap().token)
         .collect();
-      assert_eq!(tokens, vec![$($expected_token),*]);
+
+      let expected = vec![$($expected_token),*];
+
+      assert_eq!(tokens.len(), expected.len());
+      for (got, exp) in tokens.into_iter().zip(expected.into_iter()) {
+        match (got, exp) {
+          (TokenKind::FileHeader(g), TokenKind::FileHeader(e)) => {
+            if let Some((old, new)) = split_diff_paths(g.old_file) {
+              assert_eq!(old, unquote_path(e.old_file));
+              assert_eq!(new, unquote_path(e.new_file));
+            } else {
+              assert_eq!(unquote_path(g.old_file), unquote_path(e.old_file));
+              assert_eq!(unquote_path(g.new_file), unquote_path(e.new_file));
+            }
+          }
+          (TokenKind::Binary(g), TokenKind::Binary(e)) => {
+             let rest = g.old_file;
+             if let Some((old, new)) = nagato_core::next_path_pair(rest, b"and ") {
+                assert_eq!(old, unquote_path(e.old_file));
+                assert_eq!(new, unquote_path(e.new_file));
+             } else {
+                assert_eq!(unquote_path(g.old_file), unquote_path(e.old_file));
+                assert_eq!(unquote_path(g.new_file), unquote_path(e.new_file));
+             }
+          }
+          (TokenKind::OldFile(g), TokenKind::OldFile(e)) => {
+            assert_eq!(unquote_path(g), unquote_path(e));
+          }
+          (TokenKind::NewFile(g), TokenKind::NewFile(e)) => {
+            assert_eq!(unquote_path(g), unquote_path(e));
+          }
+          (g, e) => assert_eq!(g, e),
+        }
+      }
     }
   };
 }
@@ -189,18 +226,18 @@ macro_rules! test_patch_invert {
   ) => {
     #[test]
     fn $test_name() {
-      use std::borrow::Cow;
       use nagato_apply::Patch;
+      use nagato_core::{strip_diff_prefix, unquote_path};
       let patch = Patch {
-        old_file: Cow::Borrowed($old),
-        new_file: Cow::Borrowed($new),
-        $(rename_from: Some(Cow::Borrowed($from as &[u8])),)?
-        $(rename_to: Some(Cow::Borrowed($to as &[u8])),)?
+        old_file: unquote_path($old),
+        new_file: unquote_path($new),
+        $(rename_from: Some(unquote_path($from as &[u8])),)?
+        $(rename_to: Some(unquote_path($to as &[u8])),)?
         ..Default::default()
       };
       let inverted = patch.invert();
-      assert_eq!(inverted.old_file.as_ref(), $e_old);
-      $(assert_eq!(inverted.rename_from, Some(Cow::Borrowed($e_from as &[u8])));)?
+      assert_eq!(inverted.old_file.as_ref(), strip_diff_prefix($e_old));
+      $(assert_eq!(inverted.rename_from, Some(unquote_path($e_from as &[u8])));)?
     }
   };
 }

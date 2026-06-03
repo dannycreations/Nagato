@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind<'a> {
@@ -12,9 +10,9 @@ pub enum TokenKind<'a> {
     mode: Option<&'a [u8]>,
   },
   // The old file path (`---`).
-  OldFile(Cow<'a, [u8]>),
+  OldFile(&'a [u8]),
   // The new file path (`+++`).
-  NewFile(Cow<'a, [u8]>),
+  NewFile(&'a [u8]),
   // The header of a hunk, containing the line numbers and spans.
   HunkHeader {
     old_range: &'a [u8],
@@ -32,13 +30,13 @@ pub enum TokenKind<'a> {
   // Indicates that there is no newline at the end of the file.
   NoNewline,
   // The source file in a copy operation.
-  CopyFrom(Cow<'a, [u8]>),
+  CopyFrom(&'a [u8]),
   // The destination file in a copy operation.
-  CopyTo(Cow<'a, [u8]>),
+  CopyTo(&'a [u8]),
   // The old file name in a rename operation.
-  RenameFrom(Cow<'a, [u8]>),
+  RenameFrom(&'a [u8]),
   // The new file name in a rename operation.
-  RenameTo(Cow<'a, [u8]>),
+  RenameTo(&'a [u8]),
   // The new file mode.
   NewFileMode(&'a [u8]),
   // The old file mode.
@@ -66,6 +64,6 @@ pub enum TokenKind<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BinaryPaths<'a> {
-  pub old_file: Cow<'a, [u8]>,
-  pub new_file: Cow<'a, [u8]>,
+  pub old_file: &'a [u8],
+  pub new_file: &'a [u8],
 }

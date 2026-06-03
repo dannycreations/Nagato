@@ -170,7 +170,7 @@ pub fn parse_hunk<'a>(
   let (new_line, new_span) =
     parse_range(new_range).map_err(|k| Error::with_line(k, item.line_num))?;
 
-  let mut lines = Vec::new();
+  let mut lines = Vec::with_capacity(new_span.max(old_span) as usize);
   let (actual_old_span, actual_new_span) =
     collect_hunk_lines(parser, &mut lines, patch, |_| false)?;
 
@@ -200,9 +200,7 @@ fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
     None => {
       let (line, _) =
         parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRange)?;
-      let (span, _) =
-        parse_int::<u32>(b"1", 10).ok_or(ErrorKind::InvalidHunkRange)?;
-      return Ok((line, span));
+      return Ok((line, 1));
     }
   };
 

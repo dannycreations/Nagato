@@ -24,29 +24,29 @@ pub fn apply<'a>(
 
 pub fn apply_streamed<'a>(
   output: &mut (impl Write + ?Sized),
-  mut patch: Patch<'a>,
+  patch: &mut Patch<'a>,
   source: &[u8],
   parser: &mut crate::Parser<'a>,
 ) -> Result<(), Error> {
   let mut applier = Applier::new(output, source);
-  applier.begin(&patch)?;
+  applier.begin(patch)?;
 
   if !patch.binary_fragments.is_empty() {
-    return applier.process_binary(&patch);
+    return applier.process_binary(patch);
   }
 
   let mut first = true;
-  while let Some(hunk) = parser.next_hunk(&mut patch)? {
+  while let Some(hunk) = parser.next_hunk(patch)? {
     if first {
       if !hunk.has_header {
         // Fallback to buffered for hunkless
         patch.hunks.push(hunk);
-        while let Some(h) = parser.next_hunk(&mut patch)? {
+        while let Some(h) = parser.next_hunk(patch)? {
           patch.hunks.push(h);
         }
         return applier
-          .process_hunkless_patches(&patch)
-          .and_then(|_| applier.end(&patch));
+          .process_hunkless_patches(patch)
+          .and_then(|_| applier.end(patch));
       }
       first = false;
     }
@@ -55,10 +55,10 @@ pub fn apply_streamed<'a>(
 
   if first {
     // No hunks found
-    return applier.end(&patch);
+    return applier.end(patch);
   }
 
-  applier.end(&patch)
+  applier.end(patch)
 }
 
 pub fn patch_file(
@@ -75,7 +75,7 @@ pub fn patch_file(
 
 pub fn patch_file_streamed<'a>(
   fs: &FileSystem,
-  patch: Patch<'a>,
+  patch: &mut Patch<'a>,
   parser: &mut crate::Parser<'a>,
 ) -> Result<(), Error> {
   fs::patch_file_streamed(fs, patch, parser)
@@ -94,8 +94,8 @@ pub fn apply_to_fs(
     return Ok(());
   }
 
-  while let Some(patch) = parser.parse_patch_header()? {
-    patch_file_streamed(fs, patch, &mut parser)?;
+  while let Some(mut patch) = parser.parse_patch_header()? {
+    patch_file_streamed(fs, &mut patch, &mut parser)?;
   }
   Ok(())
 }

@@ -1,4 +1,4 @@
-use nagato_core::{parse_int, Error};
+use nagato_core::{parse_int, split_diff_paths, unquote_path, Error};
 
 use crate::{
   parser::binary::parse_binary_patch, BinaryFragment, Parser, Patch, TokenKind,
@@ -13,8 +13,13 @@ pub fn parse_header<'a>(
   while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::FileHeader(paths) => {
-        patch.old_file = paths.old_file.clone();
-        patch.new_file = paths.new_file.clone();
+        if let Some((old, new)) = split_diff_paths(paths.old_file) {
+          patch.old_file = old;
+          patch.new_file = new;
+        } else {
+          patch.old_file = unquote_path(paths.old_file);
+          patch.new_file = unquote_path(paths.new_file);
+        }
       }
       TokenKind::Index {
         old_hash,
@@ -28,22 +33,22 @@ pub fn parse_header<'a>(
         });
       }
       TokenKind::OldFile(file) => {
-        patch.old_file = file.clone();
+        patch.old_file = unquote_path(file);
       }
       TokenKind::NewFile(file) => {
-        patch.new_file = file.clone();
+        patch.new_file = unquote_path(file);
       }
       TokenKind::CopyFrom(from) => {
-        patch.copy_from = Some(from.clone());
+        patch.copy_from = Some(unquote_path(from));
       }
       TokenKind::CopyTo(to) => {
-        patch.copy_to = Some(to.clone());
+        patch.copy_to = Some(unquote_path(to));
       }
       TokenKind::RenameFrom(from) => {
-        patch.rename_from = Some(from.clone());
+        patch.rename_from = Some(unquote_path(from));
       }
       TokenKind::RenameTo(to) => {
-        patch.rename_to = Some(to.clone());
+        patch.rename_to = Some(unquote_path(to));
       }
       TokenKind::NewFileMode(mode) => {
         patch.new_mode = parse_int::<u32>(mode, 8).map(|(v, _)| v);
@@ -58,8 +63,19 @@ pub fn parse_header<'a>(
         patch.dissimilarity = Some(*p);
       }
       TokenKind::Binary(paths) => {
-        patch.old_file = paths.old_file.clone();
-        patch.new_file = paths.new_file.clone();
+        if let Some((old_file, new_file)) =
+          nagato_core::next_path_pair(paths.old_file, b"and ")
+        {
+          patch.old_file = old_file;
+          patch.new_file = new_file;
+        } else {
+          // Fallback for cases where it's not a standard pair (e.g. diff --git)
+          let paths = nagato_core::split_diff_paths(paths.old_file).unwrap_or(
+            (unquote_path(paths.old_file), unquote_path(paths.new_file)),
+          );
+          patch.old_file = paths.0;
+          patch.new_file = paths.1;
+        }
         patch.binary = true;
         parser.tokens.next();
       }

@@ -1,5 +1,3 @@
-use nagato_apply::{BinaryPaths, TokenKind};
-
 test_lexer_ok!(
   lexer_modes,
   input: "new mode 100644\nnew file mode 100644\nold mode 100644\nold file mode 100644\ndeleted mode 100644\ndeleted file mode 100644",
@@ -17,10 +15,10 @@ test_lexer_ok!(
   lexer_rename_and_copy,
   input: "rename from old.txt\nrename to new.txt\ncopy from old.txt\ncopy to new.txt",
   expected: [
-    TokenKind::RenameFrom(b"old.txt".into()),
-    TokenKind::RenameTo(b"new.txt".into()),
-    TokenKind::CopyFrom(b"old.txt".into()),
-    TokenKind::CopyTo(b"new.txt".into())
+    TokenKind::RenameFrom(b"old.txt"),
+    TokenKind::RenameTo(b"new.txt"),
+    TokenKind::CopyFrom(b"old.txt"),
+    TokenKind::CopyTo(b"new.txt")
   ]
 );
 
@@ -29,12 +27,12 @@ test_lexer_ok!(
   input: "Binary files a/old.bin and b/new.bin differ\nBinary files \"a/salt and pepper.png\" and \"b/salt and pepper.png\" differ",
   expected: [
     TokenKind::Binary(BinaryPaths {
-      old_file: b"old.bin".into(),
-      new_file: b"new.bin".into(),
+      old_file: b"old.bin",
+      new_file: b"new.bin",
     }),
     TokenKind::Binary(BinaryPaths {
-      old_file: b"salt and pepper.png".into(),
-      new_file: b"salt and pepper.png".into(),
+      old_file: b"salt and pepper.png",
+      new_file: b"salt and pepper.png",
     })
   ]
 );
@@ -53,16 +51,16 @@ test_lexer_ok!(
   "#,
   expected: [
     TokenKind::FileHeader(BinaryPaths {
-      old_file: b"file.txt".into(),
-      new_file: b"file.txt".into(),
+      old_file: b"file.txt",
+      new_file: b"file.txt",
     }),
     TokenKind::Index {
       old_hash: b"1234567",
       new_hash: b"abcdefg",
       mode: Some(b"100644"),
     },
-    TokenKind::OldFile(b"file.txt".into()),
-    TokenKind::NewFile(b"file.txt".into()),
+    TokenKind::OldFile(b"file.txt"),
+    TokenKind::NewFile(b"file.txt"),
     TokenKind::HunkHeader {
       old_range: b"1,2",
       new_range: b"1,2",
@@ -111,8 +109,8 @@ test_lexer_ok!(
     TokenKind::BinaryData(b"data"),
     TokenKind::Gap,
     TokenKind::FileHeader(nagato_apply::BinaryPaths {
-      old_file: b"file".into(),
-      new_file: b"file".into()
+      old_file: b"file",
+      new_file: b"file"
     })
   ]
 );

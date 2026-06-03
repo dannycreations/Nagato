@@ -51,7 +51,7 @@ pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
 
 pub fn patch_file_streamed<'a>(
   fs: &FileSystem,
-  mut patch: Patch<'a>,
+  patch: &mut Patch<'a>,
   parser: &mut crate::Parser<'a>,
 ) -> Result<(), Error> {
   let is_deletion = patch.new_file.is_dev_null();
@@ -62,38 +62,33 @@ pub fn patch_file_streamed<'a>(
     let mut sink = std::io::sink();
     crate::apply_streamed(
       &mut sink,
-      patch.clone(),
+      patch,
       source.as_deref().unwrap_or(&[]),
       parser,
     )?;
-    if !source_path.is_dev_null() {
-      fs.remove(source_path)?;
+
+    if !patch.source_file().is_dev_null() {
+      fs.remove(patch.source_file())?;
     }
     Ok(())
   } else if !patch.binary_fragments.is_empty() {
-    // Binary patches are inherently buffered for now as we read all fragments
-    // But we can still use the streamed worker by collecting hunks (though binary shouldn't have hunks)
-    let mut hunks = Vec::new();
-    while let Some(h) = parser.next_hunk(&mut patch)? {
-      hunks.push(h);
-    }
-    patch.hunks = hunks;
-    patch_file(fs, &patch)
+    patch_file(fs, patch)
   } else {
     // Normal content change or structural
     let source = read_source_mapped(fs, source_path)?;
     let mut writer = fs.write(&patch.new_file)?;
     let res = crate::apply_streamed(
       &mut writer,
-      patch.clone(),
+      patch,
       source.as_deref().unwrap_or(&[]),
       parser,
     );
     drop(source);
     if let Ok(()) = res {
       writer.commit()?;
-      if patch.rename_to.is_some() && patch.new_file != source_path {
-        fs.remove(source_path).ignore_not_found()?;
+      let source = patch.source_file();
+      if patch.rename_to.is_some() && patch.new_file != source {
+        fs.remove(source).ignore_not_found()?;
       }
     }
     res

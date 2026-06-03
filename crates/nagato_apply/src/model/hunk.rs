@@ -32,4 +32,9 @@ impl<'a> Hunk<'a> {
       .enumerate()
       .filter(|(_, l)| !matches!(l.kind, LineKind::Addition))
   }
+
+  #[inline]
+  pub fn first_non_empty_match_line(&self) -> Option<(usize, &Line<'a>)> {
+    self.lines_to_match().find(|(_, l)| !l.text.is_empty())
+  }
 }
