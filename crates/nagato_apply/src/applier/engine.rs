@@ -227,37 +227,26 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     let initial_pos = self.pos;
 
     let mut current_offset = 0;
-    let mut remaining_count = pending_hunks.len();
 
-    while remaining_count > 0 && current_offset < source.len() {
-      let mut found_idx = None;
-      let current_source = &source[current_offset..];
-      for (i, hunk_opt) in pending_hunks.iter_mut().enumerate() {
-        let Some((hunk, finder)) = hunk_opt else {
-          continue;
-        };
-
-        if let Ok((match_pos, remaining)) =
-          Matcher.find_match(current_source, hunk, finder.as_ref())
-        {
-          let absolute_pos = initial_pos + current_offset + match_pos;
-          hunks_to_apply.push((absolute_pos, remaining, *hunk));
-          // Move offset past the applied hunk to avoid overlapping matches.
-          current_offset =
-            (source.len() - remaining.len()).max(current_offset + 1);
-          found_idx = Some(i);
-          break;
-        }
-      }
-
-      let Some(i) = found_idx else {
-        break;
+    // Check each pending hunk in order, advancing the search offset upon match.
+    for hunk_opt in pending_hunks.iter_mut() {
+      let Some((hunk, finder)) = hunk_opt else {
+        continue;
       };
 
-      pending_hunks[i] = None;
-      remaining_count -= 1;
+      let current_source = &source[current_offset..];
+      if let Ok((match_pos, remaining)) =
+        Matcher.find_match(current_source, hunk, finder.as_ref())
+      {
+        let absolute_pos = initial_pos + current_offset + match_pos;
+        hunks_to_apply.push((absolute_pos, remaining, *hunk));
+        current_offset =
+          (source.len() - remaining.len()).max(current_offset + 1);
+        *hunk_opt = None;
+      }
     }
 
+    // Match any remaining hunks on the entire source
     for hunk_data in pending_hunks.into_iter().flatten() {
       let (hunk, finder) = hunk_data;
       let (match_pos, remaining) =

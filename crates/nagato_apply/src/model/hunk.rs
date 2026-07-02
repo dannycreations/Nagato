@@ -37,4 +37,12 @@ impl<'a> Hunk<'a> {
   pub fn first_non_empty_match_line(&self) -> Option<(usize, &Line<'a>)> {
     self.lines_to_match().find(|(_, l)| !l.text.is_empty())
   }
+
+  #[inline]
+  pub fn best_match_line(&self) -> Option<(usize, &Line<'a>)> {
+    self
+      .lines_to_match()
+      .filter(|(_, l)| !l.text.is_empty())
+      .max_by_key(|(_, l)| l.text.len())
+  }
 }

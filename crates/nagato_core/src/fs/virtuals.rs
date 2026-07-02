@@ -250,9 +250,10 @@ impl FileSystem {
 
     let res = rel.clone();
     let mut cache = self.resolved.borrow_mut();
-    if cache.len() < 10_000 {
-      cache.insert(Box::from(path), rel);
+    if cache.len() >= 10_000 {
+      cache.clear();
     }
+    cache.insert(Box::from(path), rel);
     Ok(res)
   }
 

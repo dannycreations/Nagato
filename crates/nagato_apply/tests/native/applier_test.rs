@@ -223,3 +223,33 @@ test_reject_mixed!(
     ..Default::default()
   }
 );
+
+test_apply_ok!(
+  applier_best_match_anchor,
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    @@ -1,3 +1,3 @@
+     }
+    -short
+    +new_short
+     a very long and unique context line to serve as anchor
+   "#,
+  source: "}\nother\n}\nshort\na very long and unique context line to serve as anchor\n",
+  expected: "}\nother\n}\nnew_short\na very long and unique context line to serve as anchor\n"
+);
+
+test_apply_ok!(
+  applier_hunkless_sequential_duplicates,
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    -item
+    +item_modified1
+
+    -item
+    +item_modified2
+  "#,
+  source: "item\nitem\n",
+  expected: "item_modified1\nitem_modified2\n"
+);

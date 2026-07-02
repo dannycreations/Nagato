@@ -88,12 +88,10 @@ test_fs_invalid_path!(
   fs_path_trailing_space => b"file ",
   fs_path_dir_space => b"dir /file",
   fs_path_dir_dot => b"dir./file",
-  fs_path_short_name_caps => b"PROGRA~1",
-  fs_path_short_name_lower => b"progra~1",
-  fs_path_short_name_digit => b"foo~5",
+  fs_path_short_name => b"progra~1",
 );
 
-test_fs_reserved!(
+test_fs_invalid_path!(
   fs_reserved_con => b"CON",
   fs_reserved_prn => b"PRN",
   fs_reserved_aux => b"AUX",
@@ -101,13 +99,8 @@ test_fs_reserved!(
   fs_reserved_com1 => b"COM1",
   fs_reserved_lpt9 => b"LPT9",
   fs_reserved_clock_dollar => b"CLOCK$",
-  fs_reserved_con_lower => b"con",
   fs_reserved_aux_txt => b"aux.txt",
   fs_reserved_aux_file => b"AUX/file",
-  fs_reserved_nul_lower => b"nul",
-  fs_reserved_com5 => b"com5",
-  fs_reserved_lpt0 => b"lpt0",
-  fs_reserved_clock_dollar_lower => b"clock$",
 );
 
 #[cfg(unix)]

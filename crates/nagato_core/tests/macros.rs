@@ -148,23 +148,6 @@ macro_rules! test_fs_invalid_path {
 }
 
 #[macro_export]
-macro_rules! test_fs_reserved {
-  ($($name:ident => $input:expr),* $(,)?) => {
-    $(
-      #[test]
-      fn $name() {
-        let dir = create_test_fs! {};
-        let fs = nagato_core::FileSystem::new(dir.path(), false);
-        assert!(matches!(
-          fs.read($input).unwrap_err().kind,
-          nagato_core::ErrorKind::InvalidPath
-        ));
-      }
-    )*
-  };
-}
-
-#[macro_export]
 macro_rules! test_fs_get_unique_path_ok {
   (
     $test_name:ident,

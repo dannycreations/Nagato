@@ -105,7 +105,7 @@ impl<'a> Read for Base85Reader<'a> {
       })?;
 
       let data = &line[1..];
-      for chunk in data.chunks_exact(5) {
+      for chunk in data.as_chunks::<5>().0 {
         let d0 = DECODE_MAP[chunk[0] as usize];
         let d1 = DECODE_MAP[chunk[1] as usize];
         let d2 = DECODE_MAP[chunk[2] as usize];

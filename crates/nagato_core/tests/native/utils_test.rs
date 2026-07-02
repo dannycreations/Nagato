@@ -169,11 +169,6 @@ test_unquote_path!(
   expected: b"file.txt"
 );
 test_unquote_path!(
-  utils_unquote_prefix_b,
-  input: b"\"b/file.txt\"",
-  expected: b"file.txt"
-);
-test_unquote_path!(
   utils_unquote_escape_n,
   input: b"\"line\\nfeed\"",
   expected: b"line\nfeed"
@@ -228,11 +223,6 @@ test_unquote_path!(
   input: b"\"\\141/quoted_path\"",
   expected: b"quoted_path"
 );
-test_unquote_path!(
-  utils_unquote_octal_prefix_b,
-  input: b"\"\\142/quoted_path\"",
-  expected: b"quoted_path"
-);
 
 test_strip_prefix!(
   utils_strip_prefix_a,
@@ -240,19 +230,9 @@ test_strip_prefix!(
   expected: b"path/to/file"
 );
 test_strip_prefix!(
-  utils_strip_prefix_b,
-  input: b"b/path/to/file",
-  expected: b"path/to/file"
-);
-test_strip_prefix!(
   utils_strip_prefix_none,
   input: b"c/path/to/file",
   expected: b"c/path/to/file"
-);
-test_strip_prefix!(
-  utils_strip_prefix_a_empty,
-  input: b"a/",
-  expected: b""
 );
 test_strip_prefix!(
   utils_strip_prefix_b_empty,

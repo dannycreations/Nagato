@@ -137,6 +137,22 @@ impl Matcher {
 
     let search_hint = self.get_search_buffer(buffer, hunk);
 
+    if let Some((idx, line)) = hunk.best_match_line() {
+      if precomputed_finder.is_none() {
+        let finder = Finder::new(line.text);
+        if let Ok(res) = self.search_in_buffer(
+          buffer,
+          hunk,
+          idx,
+          line.text,
+          Some(&finder),
+          search_hint,
+        ) {
+          return Ok(res);
+        }
+      }
+    }
+
     let (anchor_hunk_line_idx, needle, finder) =
       if let Some(f) = precomputed_finder {
         let (idx, line) = hunk
@@ -144,8 +160,6 @@ impl Matcher {
           .expect("precomputed finder requires non-empty line");
         (idx, line.text, Some(f))
       } else if let Some((idx, line)) = hunk.first_non_empty_match_line() {
-        // Create a temporary finder if no precomputed one is provided but a non-empty line exists.
-        // This is less efficient than precomputing but better than a byte-by-byte scan for the first line.
         (idx, line.text, None)
       } else {
         // Hunk with only empty match lines (gaps/empty context).

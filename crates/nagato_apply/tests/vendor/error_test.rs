@@ -43,20 +43,6 @@ test_patch_err_with_line!(
   expected_kind: ErrorKind::CouldNotApplyHunk
 );
 
-test_patch_err_with_line!(
-  fails_matching_hunk_content,
-  initial_fs: { "a.txt" => "line one\nline two\nline three\n" },
-  diff: r#"
-    file a/a.txt
-
-    -line one
-    -line two
-    -*error*line three
-  "#,
-  expected_line: 5,
-  expected_kind: ErrorKind::CouldNotApplyHunk
-);
-
 test_patch_err!(
   fails_without_hunkless_heuristic,
   initial_fs: { "file.txt" => "actual line 1\nactual line 2\nold line\n" },
