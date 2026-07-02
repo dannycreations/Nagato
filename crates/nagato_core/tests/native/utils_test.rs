@@ -223,6 +223,43 @@ test_unquote_path!(
   input: b"\"\\141/quoted_path\"",
   expected: b"quoted_path"
 );
+test_unquote_path!(
+  utils_unquote_octal_followed_by_non_octal_digit,
+  input: b"\"\\18\"",
+  expected: b"\x018"
+);
+test_unquote_path!(
+  utils_unquote_octal_three_digits_max,
+  input: b"\"\\377\"",
+  expected: b"\xff"
+);
+test_unquote_path!(
+  utils_unquote_escape_other,
+  input: b"\"\\x\\a\"",
+  expected: b"xa"
+);
+test_unquote_path!(
+  utils_unquote_multiple_escapes,
+  input: b"\"\\n\\t\\\\\\\"\"",
+  expected: b"\n\t\\\""
+);
+
+#[test]
+fn test_next_path_unmatched_quote() {
+  assert!(next_path(b"\"unmatched").is_none());
+}
+
+#[test]
+fn test_next_path_empty_input() {
+  assert!(next_path(b"").is_none());
+}
+
+#[test]
+fn test_next_path_pair_no_separator() {
+  use nagato_core::next_path_pair;
+  let res = next_path_pair(b"path1 path2", b"and ");
+  assert!(res.is_none());
+}
 
 test_strip_prefix!(
   utils_strip_prefix_a,

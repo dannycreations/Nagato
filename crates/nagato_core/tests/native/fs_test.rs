@@ -1,6 +1,8 @@
-use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::{borrow::Cow, io::Write};
+
+use nagato_core::{Error, ErrorKind, IgnoreNotFound, IsDevNull};
 
 #[cfg(unix)]
 test_atomic_writer_err!(
@@ -147,5 +149,92 @@ test_fs_ops_ok!(
 
     // Verify it doesn't crash and works correctly (just not cached)
     assert!(!fs.exists(overflow));
+  }
+);
+
+#[test]
+fn test_is_dev_null() {
+  assert!(b"dev/null".is_dev_null());
+  assert!(b"/dev/null".is_dev_null());
+  assert!(!b"not/dev/null".is_dev_null());
+  assert!(Cow::Borrowed(b"dev/null" as &[u8]).is_dev_null());
+  assert!(!Cow::Borrowed(b"other" as &[u8]).is_dev_null());
+}
+
+#[test]
+fn test_ignore_not_found() {
+  let err_not_found = Error::new(ErrorKind::Io(std::io::Error::new(
+    std::io::ErrorKind::NotFound,
+    "file not found",
+  )));
+  let res_not_found: Result<Vec<u8>, Error> = Err(err_not_found);
+  assert_eq!(res_not_found.ignore_not_found().unwrap(), Vec::<u8>::new());
+
+  let err_other = Error::new(ErrorKind::AlreadyExists);
+  let res_other: Result<Vec<u8>, Error> = Err(err_other);
+  assert!(res_other.ignore_not_found().is_err());
+
+  let res_ok: Result<Vec<u8>, Error> = Ok(vec![1, 2, 3]);
+  assert_eq!(res_ok.ignore_not_found().unwrap(), vec![1, 2, 3]);
+}
+
+test_fs_ops_ok!(
+  fs_rename_identical_paths,
+  check_mode: false,
+  assertions: |fs, dir| {
+    let path = b"identical.txt";
+    {
+      let mut writer = fs.write(path).unwrap();
+      writer.write_all(b"data").unwrap();
+      writer.commit().unwrap();
+    }
+    // Rename identical paths should be a no-op and succeed
+    assert!(fs.rename(path, path).is_ok());
+    assert!(fs.exists(path));
+  }
+);
+
+test_fs_ops_ok!(
+  fs_remove_non_existent_file,
+  check_mode: false,
+  assertions: |fs, _dir| {
+    let path = b"non_existent.txt";
+    // Removing a non-existent file should succeed (no-op)
+    assert!(fs.remove(path).is_ok());
+  }
+);
+
+test_fs_ops_ok!(
+  fs_check_mode_remove_non_existent_file,
+  check_mode: true,
+  assertions: |fs, _dir| {
+    let path = b"non_existent.txt";
+    // Removing a non-existent file in check mode should succeed
+    assert!(fs.remove(path).is_ok());
+  }
+);
+
+test_fs_ops_ok!(
+  fs_tilde_restriction_valid,
+  check_mode: false,
+  assertions: |fs, _dir| {
+    let path = b"file~with~tilde.txt";
+    // Path with tildes not followed by digits should be valid
+    assert!(!fs.exists(path));
+  }
+);
+
+test_fs_invalid_path!(
+  fs_tilde_followed_by_digit => b"file~1",
+  fs_tilde_followed_by_digit_nested => b"foo~2bar/file",
+  fs_multiple_tilde_with_digit => b"foo~bar~3",
+);
+
+test_fs_ops_ok!(
+  fs_copy_rename_non_existent_errors,
+  check_mode: false,
+  assertions: |fs, _dir| {
+    assert!(fs.copy(b"non_existent.txt", b"dest.txt").is_err());
+    assert!(fs.rename(b"non_existent.txt", b"dest.txt").is_err());
   }
 );

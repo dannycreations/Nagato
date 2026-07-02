@@ -1,4 +1,5 @@
-use nagato_apply::{BinaryPaths, TokenKind};
+use nagato_apply::{BinaryPaths, Lexer, TokenKind};
+use nagato_core::ErrorKind;
 
 test_lexer_ok!(
   lexer_modes,
@@ -122,3 +123,69 @@ test_lexer_binary_data_ok!(
   input: b"literal_not_a_header\ndelta_not_a_header",
   expected: [b"literal_not_a_header", b"delta_not_a_header"]
 );
+
+#[test]
+fn test_lexer_errors() {
+  // Test unexpected line starting with random character
+  let mut lexer = Lexer::new(b"xyz\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::UnexpectedLine
+  );
+
+  // Test index with invalid format (missing ..)
+  let mut lexer = Lexer::new(b"index abcdef0\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::InvalidIndexHeader
+  );
+
+  // Test similarity index with invalid format (missing %)
+  let mut lexer = Lexer::new(b"similarity index 100\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::InvalidPercentage
+  );
+
+  // Test similarity index with non-integer percentage
+  let mut lexer = Lexer::new(b"similarity index abc%\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::InvalidPercentage
+  );
+
+  // Test dissimilarity index with invalid format (missing %)
+  let mut lexer = Lexer::new(b"dissimilarity index abc%\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::InvalidPercentage
+  );
+
+  // Test mode with invalid format (missing "mode" or "file mode")
+  let mut lexer = Lexer::new(b"new other\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::InvalidFileMode
+  );
+
+  // Test @@ header without space
+  let mut lexer = Lexer::new(b"@@-1,1 +1,1@@\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::UnexpectedLine
+  );
+
+  // Test diff header unexpected
+  let mut lexer = Lexer::new(b"diff --other a b\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::UnexpectedLine
+  );
+
+  // Test git binary patch mismatch
+  let mut lexer = Lexer::new(b"GIT binary patch header\n");
+  assert_eq!(
+    lexer.next().unwrap().unwrap_err().kind,
+    ErrorKind::UnexpectedLine
+  );
+}

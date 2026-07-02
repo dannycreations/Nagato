@@ -253,3 +253,14 @@ test_apply_ok!(
   source: "item\nitem\n",
   expected: "item_modified1\nitem_modified2\n"
 );
+
+test_apply_err!(
+  applier_hunkless_fails_on_mismatch,
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    -expected line
+    +new line
+  "#,
+  source: "different line"
+);
