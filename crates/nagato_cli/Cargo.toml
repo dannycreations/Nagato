@@ -23,6 +23,7 @@ nagato_core.workspace = true
 assert_cmd.workspace = true
 criterion.workspace = true
 indoc.workspace = true
+nagato_core.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
 

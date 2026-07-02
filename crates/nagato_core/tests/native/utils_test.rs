@@ -1,6 +1,6 @@
 use nagato_core::{
   get_line, next_path, parse_int, split_diff_paths, strip_diff_prefix,
-  unquote_path,
+  unquote_path, LineWriter,
 };
 
 test_get_line!(

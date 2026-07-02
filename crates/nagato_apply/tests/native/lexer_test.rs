@@ -1,3 +1,5 @@
+use nagato_apply::{BinaryPaths, TokenKind};
+
 test_lexer_ok!(
   lexer_modes,
   input: "new mode 100644\nnew file mode 100644\nold mode 100644\nold file mode 100644\ndeleted mode 100644\ndeleted file mode 100644",

@@ -1,25 +1,4 @@
 #[macro_export]
-macro_rules! create_test_fs {
-  { $($path:expr => $content:expr),* } => {
-    {
-      let dir = tempfile::Builder::new()
-        .prefix("test")
-        .tempdir()
-        .unwrap();
-      $(
-        let file_path = dir.path().join($path);
-        if let Some(parent) = file_path.parent() {
-          std::fs::create_dir_all(parent).unwrap();
-        }
-        let content: &[u8] = $content.as_ref();
-        std::fs::write(file_path, content).unwrap();
-      )*
-      dir
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! test_atomic_writer_ok {
   (
     $test_name:ident,
@@ -27,12 +6,11 @@ macro_rules! test_atomic_writer_ok {
   ) => {
     #[test]
     fn $test_name() {
-      use std::io::Write;
-      let dir = $crate::create_test_fs! {};
+      let dir = nagato_core::create_test_fs! {};
       let file_path = dir.path().join("test.txt");
 
       let mut writer = nagato_core::AtomicWriter::new(&file_path).unwrap();
-      writer.write_all($content).unwrap();
+      ::std::io::Write::write_all(&mut writer, $content).unwrap();
       writer.commit().unwrap();
 
       assert_eq!(std::fs::read(file_path).unwrap(), $content);
@@ -136,7 +114,7 @@ macro_rules! test_fs_invalid_path {
     $(
       #[test]
       fn $name() {
-        let dir = create_test_fs! {};
+        let dir = nagato_core::create_test_fs! {};
         let fs = nagato_core::FileSystem::new(dir.path(), false);
         assert!(matches!(
           fs.read($input).unwrap_err().kind,
@@ -157,9 +135,8 @@ macro_rules! test_fs_get_unique_path_ok {
   ) => {
     #[test]
     fn $test_name() {
-      use nagato_core::get_unique_path;
-      let dir = $crate::create_test_fs! { $($path => $content),* };
-      let res = get_unique_path(dir.path(), $base);
+      let dir = nagato_core::create_test_fs! { $($path => $content),* };
+      let res = nagato_core::get_unique_path(dir.path(), $base);
       assert_eq!(
         res.file_name().unwrap().to_str().unwrap(),
         $expected
@@ -177,9 +154,7 @@ macro_rules! test_fs_ops_ok {
   ) => {
     #[test]
     fn $test_name() {
-      #[allow(unused_imports)]
-      use std::io::Write;
-      let $dir = $crate::create_test_fs! {};
+      let $dir = nagato_core::create_test_fs! {};
       let $fs = nagato_core::FileSystem::new($dir.path(), $check);
       $($assertions)*
     }
@@ -194,9 +169,8 @@ macro_rules! test_line_writer_ok {
   ) => {
     #[test]
     fn $test_name() {
-      use nagato_core::LineWriter;
       let mut $buf = Vec::new();
-      let mut $writer = LineWriter::new(&mut $buf);
+      let mut $writer = nagato_core::LineWriter::new(&mut $buf);
       $($assertions)*
     }
   };

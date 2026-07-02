@@ -1,3 +1,7 @@
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 #[cfg(unix)]
 test_atomic_writer_err!(
   fs_atomic_writer_root_err,
@@ -108,7 +112,6 @@ test_fs_ops_ok!(
   fs_permissions_sanitization,
   check_mode: false,
   assertions: |fs, dir| {
-    use std::os::unix::fs::PermissionsExt;
     let path = b"restricted.sh";
     {
       let mut writer = fs.write(path).unwrap();

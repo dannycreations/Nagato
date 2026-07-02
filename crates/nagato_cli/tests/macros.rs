@@ -1,25 +1,4 @@
 #[macro_export]
-macro_rules! create_test_fs {
-  { $($path:expr => $content:expr),* } => {
-    {
-      let dir = tempfile::Builder::new()
-        .prefix("test")
-        .tempdir()
-        .unwrap();
-      $(
-        let file_path = dir.path().join($path);
-        if let Some(parent) = file_path.parent() {
-          std::fs::create_dir_all(parent).unwrap();
-        }
-        let content: &[u8] = $content.as_ref();
-        std::fs::write(file_path, content).unwrap();
-      )*
-      dir
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! test_exec_ok {
   (
     $test_name:ident,
@@ -32,7 +11,7 @@ macro_rules! test_exec_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = $crate::create_test_fs! { $($path => $content),* };
+      let dir = nagato_core::create_test_fs! { $($path => $content),* };
 
       let patch_file_path = dir.path().join(
         None.or(None $(.or(Some($patch_name)))?).unwrap_or("test.patch")

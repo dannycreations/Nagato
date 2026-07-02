@@ -1,25 +1,4 @@
 #[macro_export]
-macro_rules! create_test_fs {
-  { $($path:expr => $content:expr),* } => {
-    {
-      let dir = tempfile::Builder::new()
-        .prefix("test")
-        .tempdir()
-        .unwrap();
-      $(
-        let file_path = dir.path().join($path);
-        if let Some(parent) = file_path.parent() {
-          std::fs::create_dir_all(parent).unwrap();
-        }
-        let content: &[u8] = $content.as_ref();
-        std::fs::write(file_path, content).unwrap();
-      )*
-      dir
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! parse_diff {
   ($diff:expr) => {{
     let diff = indoc::indoc!($diff);
@@ -74,7 +53,7 @@ macro_rules! test_patch_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = create_test_fs! { $($initial_path => $initial_content),* };
+      let dir = nagato_core::create_test_fs! { $($initial_path => $initial_content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path(), false);
       let reverse = false $(|| $reverse)?;
       for patch in parse_diff!($diff) {
@@ -96,7 +75,7 @@ macro_rules! test_patch_err {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = create_test_fs! { $($path => $content),* };
+      let dir = nagato_core::create_test_fs! { $($path => $content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path(), false);
       let patch = parse_diff!($diff).next().unwrap().unwrap();
       let reverse = false $(|| $reverse)?;
@@ -136,9 +115,6 @@ macro_rules! test_lexer_ok {
     #[allow(unused_imports)]
     #[test]
     fn $test_name() {
-      use nagato_core::{split_diff_paths, unquote_path};
-      use nagato_apply::{BinaryPaths, TokenKind};
-
       let input = indoc::indoc!($input);
       let tokens: Vec<_> = nagato_apply::Lexer::new(input.as_bytes())
         .map(|r| r.unwrap().token)
@@ -149,30 +125,30 @@ macro_rules! test_lexer_ok {
       assert_eq!(tokens.len(), expected.len());
       for (got, exp) in tokens.into_iter().zip(expected.into_iter()) {
         match (got, exp) {
-          (TokenKind::FileHeader(g), TokenKind::FileHeader(e)) => {
-            if let Some((old, new)) = split_diff_paths(g.old_file) {
-              assert_eq!(old, unquote_path(e.old_file));
-              assert_eq!(new, unquote_path(e.new_file));
+          (nagato_apply::TokenKind::FileHeader(g), nagato_apply::TokenKind::FileHeader(e)) => {
+            if let Some((old, new)) = nagato_core::split_diff_paths(g.old_file) {
+              assert_eq!(old, nagato_core::unquote_path(e.old_file));
+              assert_eq!(new, nagato_core::unquote_path(e.new_file));
             } else {
-              assert_eq!(unquote_path(g.old_file), unquote_path(e.old_file));
-              assert_eq!(unquote_path(g.new_file), unquote_path(e.new_file));
+              assert_eq!(nagato_core::unquote_path(g.old_file), nagato_core::unquote_path(e.old_file));
+              assert_eq!(nagato_core::unquote_path(g.new_file), nagato_core::unquote_path(e.new_file));
             }
           }
-          (TokenKind::Binary(g), TokenKind::Binary(e)) => {
+          (nagato_apply::TokenKind::Binary(g), nagato_apply::TokenKind::Binary(e)) => {
              let rest = g.old_file;
              if let Some((old, new)) = nagato_core::next_path_pair(rest, b"and ") {
-                assert_eq!(old, unquote_path(e.old_file));
-                assert_eq!(new, unquote_path(e.new_file));
+                assert_eq!(old, nagato_core::unquote_path(e.old_file));
+                assert_eq!(new, nagato_core::unquote_path(e.new_file));
              } else {
-                assert_eq!(unquote_path(g.old_file), unquote_path(e.old_file));
-                assert_eq!(unquote_path(g.new_file), unquote_path(e.new_file));
+                assert_eq!(nagato_core::unquote_path(g.old_file), nagato_core::unquote_path(e.old_file));
+                assert_eq!(nagato_core::unquote_path(g.new_file), nagato_core::unquote_path(e.new_file));
              }
           }
-          (TokenKind::OldFile(g), TokenKind::OldFile(e)) => {
-            assert_eq!(unquote_path(g), unquote_path(e));
+          (nagato_apply::TokenKind::OldFile(g), nagato_apply::TokenKind::OldFile(e)) => {
+            assert_eq!(nagato_core::unquote_path(g), nagato_core::unquote_path(e));
           }
-          (TokenKind::NewFile(g), TokenKind::NewFile(e)) => {
-            assert_eq!(unquote_path(g), unquote_path(e));
+          (nagato_apply::TokenKind::NewFile(g), nagato_apply::TokenKind::NewFile(e)) => {
+            assert_eq!(nagato_core::unquote_path(g), nagato_core::unquote_path(e));
           }
           (g, e) => assert_eq!(g, e),
         }
@@ -192,7 +168,7 @@ macro_rules! test_patch_err_with_line {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = create_test_fs! { $($path => $content),* };
+      let dir = nagato_core::create_test_fs! { $($path => $content),* };
       let mut fs = nagato_core::FileSystem::new(dir.path(), false);
       let patch = parse_diff!($diff).next().unwrap().unwrap();
       let result = nagato_apply::patch_file(&mut fs, patch, false);
@@ -226,18 +202,16 @@ macro_rules! test_patch_invert {
   ) => {
     #[test]
     fn $test_name() {
-      use nagato_apply::Patch;
-      use nagato_core::{strip_diff_prefix, unquote_path};
-      let patch = Patch {
-        old_file: unquote_path($old),
-        new_file: unquote_path($new),
-        $(rename_from: Some(unquote_path($from as &[u8])),)?
-        $(rename_to: Some(unquote_path($to as &[u8])),)?
+      let patch = nagato_apply::Patch {
+        old_file: nagato_core::unquote_path($old),
+        new_file: nagato_core::unquote_path($new),
+        $(rename_from: Some(nagato_core::unquote_path($from as &[u8])),)?
+        $(rename_to: Some(nagato_core::unquote_path($to as &[u8])),)?
         ..Default::default()
       };
       let inverted = patch.invert();
-      assert_eq!(inverted.old_file.as_ref(), strip_diff_prefix($e_old));
-      $(assert_eq!(inverted.rename_from, Some(unquote_path($e_from as &[u8])));)?
+      assert_eq!(inverted.old_file.as_ref(), nagato_core::strip_diff_prefix($e_old));
+      $(assert_eq!(inverted.rename_from, Some(nagato_core::unquote_path($e_from as &[u8])));)?
     }
   };
 }
@@ -268,10 +242,12 @@ macro_rules! test_delta_err {
   ) => {
     #[test]
     fn $test_name() {
-      use std::io::Cursor;
       let mut output = Vec::new();
-      let res =
-        nagato_apply::apply_delta(Cursor::new($delta), $source, &mut output);
+      let res = nagato_apply::apply_delta(
+        ::std::io::Cursor::new($delta),
+        $source,
+        &mut output,
+      );
       assert_eq!(res.unwrap_err().kind, $expected);
     }
   };
@@ -286,7 +262,8 @@ macro_rules! test_reject_mixed {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = create_test_fs! { $initial_path => $initial_content };
+      let dir =
+        nagato_core::create_test_fs! { $initial_path => $initial_content };
       let fs = nagato_core::FileSystem::new(dir.path(), false);
       let res = nagato_apply::patch_file(&fs, $patch, false);
       assert_eq!(
@@ -306,13 +283,12 @@ macro_rules! test_lexer_binary_data_ok {
   ) => {
     #[test]
     fn $test_name() {
-      use nagato_apply::{Lexer, LexerMode, TokenKind};
-      let mut lexer = Lexer::new($input);
-      lexer.set_mode(LexerMode::Binary);
+      let mut lexer = nagato_apply::Lexer::new($input);
+      lexer.set_mode(nagato_apply::LexerMode::Binary);
       $(
         assert!(matches!(
           lexer.next().unwrap().unwrap().token,
-          TokenKind::BinaryData($expected_data)
+          nagato_apply::TokenKind::BinaryData($expected_data)
         ));
       )*
     }
@@ -329,9 +305,8 @@ macro_rules! test_applier_flush_ok {
   ) => {
     #[test]
     fn $test_name() {
-      use nagato_apply::Applier;
       let mut output = Vec::new();
-      let applier = Applier::new(&mut output, $source);
+      let applier = nagato_apply::Applier::new(&mut output, $source);
       applier.process(&$patch).unwrap();
       assert!(String::from_utf8_lossy(&output).contains($expected));
     }
@@ -347,9 +322,8 @@ macro_rules! test_binary_applier_process_ok {
   ) => {
     #[test]
     fn $test_name() {
-      use nagato_apply::Applier;
       let mut output = Vec::new();
-      let mut applier = Applier::new(&mut output, $source);
+      let mut applier = nagato_apply::Applier::new(&mut output, $source);
       let _ = applier.process_binary(&$patch);
     }
   };
