@@ -17,7 +17,7 @@ criterion = "0.8.2"
 flate2 = "1.1.9"
 hex = "0.4.3"
 indoc = "2.0.7"
-memchr = "2.8.2"
+memchr = "2.8.3"
 memmap2 = "0.9.11"
 nagato_apply = { path = "crates/nagato_apply" }
 nagato_core = { path = "crates/nagato_core" }

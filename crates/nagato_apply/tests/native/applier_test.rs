@@ -264,3 +264,16 @@ test_apply_err!(
   "#,
   source: "different line"
 );
+
+test_apply_ok!(
+  applier_hunkless_empty_source,
+  diff: r#"
+    --- a/file.txt
+    +++ b/file.txt
+    +item1
+
+    +item2
+  "#,
+  source: "",
+  expected: "item1\nitem2\n"
+);

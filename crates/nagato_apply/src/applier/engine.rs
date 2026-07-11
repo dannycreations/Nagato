@@ -234,15 +234,17 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
         continue;
       };
 
-      let current_source = &source[current_offset..];
-      if let Ok((match_pos, remaining)) =
-        Matcher.find_match(current_source, hunk, finder.as_ref())
-      {
-        let absolute_pos = initial_pos + current_offset + match_pos;
-        hunks_to_apply.push((absolute_pos, remaining, *hunk));
-        current_offset =
-          (source.len() - remaining.len()).max(current_offset + 1);
-        *hunk_opt = None;
+      if current_offset <= source.len() {
+        let current_source = &source[current_offset..];
+        if let Ok((match_pos, remaining)) =
+          Matcher.find_match(current_source, hunk, finder.as_ref())
+        {
+          let absolute_pos = initial_pos + current_offset + match_pos;
+          hunks_to_apply.push((absolute_pos, remaining, *hunk));
+          current_offset =
+            (source.len() - remaining.len()).max(current_offset + 1);
+          *hunk_opt = None;
+        }
       }
     }
 
