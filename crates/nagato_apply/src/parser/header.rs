@@ -1,4 +1,6 @@
-use nagato_core::{parse_int, split_diff_paths, unquote_path, Error};
+use nagato_core::{
+  next_path_pair, parse_int, split_diff_paths, unquote_path, Error,
+};
 
 use crate::{
   parser::binary::parse_binary_patch, BinaryFragment, Parser, Patch, TokenKind,
@@ -64,15 +66,16 @@ pub fn parse_header<'a>(
       }
       TokenKind::Binary(paths) => {
         if let Some((old_file, new_file)) =
-          nagato_core::next_path_pair(paths.old_file, b"and ")
+          next_path_pair(paths.old_file, b"and ")
         {
           patch.old_file = old_file;
           patch.new_file = new_file;
         } else {
           // Fallback for cases where it's not a standard pair (e.g. diff --git)
-          let paths = nagato_core::split_diff_paths(paths.old_file).unwrap_or(
-            (unquote_path(paths.old_file), unquote_path(paths.new_file)),
-          );
+          let paths = split_diff_paths(paths.old_file).unwrap_or((
+            unquote_path(paths.old_file),
+            unquote_path(paths.new_file),
+          ));
           patch.old_file = paths.0;
           patch.new_file = paths.1;
         }

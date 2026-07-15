@@ -1,6 +1,6 @@
 use nagato_core::{
-  get_line, next_path, parse_int, split_diff_paths, strip_diff_prefix,
-  unquote_path, LineWriter,
+  get_line, next_path, next_path_pair, parse_int, split_diff_paths,
+  strip_diff_prefix, unquote_path, LineWriter,
 };
 
 test_get_line!(
@@ -256,7 +256,6 @@ fn test_next_path_empty_input() {
 
 #[test]
 fn test_next_path_pair_no_separator() {
-  use nagato_core::next_path_pair;
   let res = next_path_pair(b"path1 path2", b"and ");
   assert!(res.is_none());
 }

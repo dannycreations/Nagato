@@ -9,6 +9,7 @@ use std::{
   slice::Iter,
 };
 
+use flate2::read::ZlibDecoder;
 use nagato_core::{Error, ErrorKind};
 
 // Git's base85 alphabet
@@ -141,7 +142,6 @@ pub fn decode_base85(
   lines: &[&[u8]],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
-  use flate2::read::ZlibDecoder;
   let mut decoder = ZlibDecoder::new(Base85Reader::new(lines));
   io_copy(&mut decoder, writer).map_err(|e| {
     let mut is_invalid_line = false;

@@ -1,3 +1,4 @@
+use memchr::memchr;
 use nagato_core::{parse_int, Error, ErrorKind};
 
 use crate::{Hunk, Line, LineKind, Parser, Patch, TokenKind};
@@ -195,7 +196,7 @@ pub fn parse_hunk<'a>(
 }
 
 fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
-  let idx = match memchr::memchr(b',', range_bytes) {
+  let idx = match memchr(b',', range_bytes) {
     Some(i) => i,
     None => {
       let (line, _) =

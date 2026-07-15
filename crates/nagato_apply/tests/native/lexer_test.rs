@@ -1,5 +1,5 @@
-use nagato_apply::{BinaryPaths, Lexer, TokenKind};
-use nagato_core::ErrorKind;
+use nagato_apply::{BinaryPaths, Lexer, LexerMode, TokenKind};
+use nagato_core::{next_path_pair, split_diff_paths, unquote_path, ErrorKind};
 
 test_lexer_ok!(
   lexer_modes,
@@ -111,7 +111,7 @@ test_lexer_ok!(
     },
     TokenKind::BinaryData(b"data"),
     TokenKind::Gap,
-    TokenKind::FileHeader(nagato_apply::BinaryPaths {
+    TokenKind::FileHeader(BinaryPaths {
       old_file: b"file",
       new_file: b"file"
     })

@@ -1,11 +1,14 @@
+use std::io::sink;
+
+use memmap2::Mmap;
 use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
 
-use crate::Patch;
+use crate::{apply, apply_streamed, Parser, Patch};
 
 fn read_source_mapped(
   fs: &FileSystem,
   path: &[u8],
-) -> Result<Option<memmap2::Mmap>, Error> {
+) -> Result<Option<Mmap>, Error> {
   if path.is_dev_null() {
     return Ok(None);
   }
@@ -31,9 +34,9 @@ pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
 
   // Patch application logic is dispatched based on the presence of content changes and the nature of the file operation to minimize redundant I/O.
   let result = match (is_deletion, has_content) {
-    (true, _) => self::apply_deletion(fs, patch, source_path),
-    (false, true) => self::apply_content_change(fs, patch, source_path),
-    (false, false) => self::apply_structural_change(fs, patch, source_path),
+    (true, _) => apply_deletion(fs, patch, source_path),
+    (false, true) => apply_content_change(fs, patch, source_path),
+    (false, false) => apply_structural_change(fs, patch, source_path),
   };
 
   result.map_err(|e: Error| {
@@ -52,20 +55,15 @@ pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
 pub fn patch_file_streamed<'a>(
   fs: &FileSystem,
   patch: &mut Patch<'a>,
-  parser: &mut crate::Parser<'a>,
+  parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
   let is_deletion = patch.new_file.is_dev_null();
   let source_path = patch.source_file();
 
   let res = if is_deletion {
     let source = read_source_mapped(fs, source_path)?;
-    let mut sink = std::io::sink();
-    crate::apply_streamed(
-      &mut sink,
-      patch,
-      source.as_deref().unwrap_or(&[]),
-      parser,
-    )?;
+    let mut sink = sink();
+    apply_streamed(&mut sink, patch, source.as_deref().unwrap_or(&[]), parser)?;
 
     if !patch.source_file().is_dev_null() {
       fs.remove(patch.source_file())?;
@@ -77,7 +75,7 @@ pub fn patch_file_streamed<'a>(
     // Normal content change or structural
     let source = read_source_mapped(fs, source_path)?;
     let mut writer = fs.write(&patch.new_file)?;
-    let res = crate::apply_streamed(
+    let res = apply_streamed(
       &mut writer,
       patch,
       source.as_deref().unwrap_or(&[]),
@@ -114,11 +112,8 @@ fn apply_deletion(
 ) -> Result<(), Error> {
   let source = read_source_mapped(fs, source_path)?;
   // To ensure the patch applies even on deletion, we apply to a sink.
-  crate::apply(
-    &mut std::io::sink(),
-    patch,
-    source.as_deref().unwrap_or(&[]),
-  )?;
+  let mut sink = sink();
+  apply(&mut sink, patch, source.as_deref().unwrap_or(&[]))?;
 
   if !source_path.is_dev_null() {
     fs.remove(source_path)?;
@@ -137,7 +132,7 @@ fn apply_content_change(
 
   let source = read_source_mapped(fs, source_path)?;
   let mut writer = fs.write(&patch.new_file)?;
-  crate::apply(&mut writer, patch, source.as_deref().unwrap_or(&[]))?;
+  apply(&mut writer, patch, source.as_deref().unwrap_or(&[]))?;
   // Explicitly drop source to release memory mapping before attempting to persist (rename) the file.
   // On Windows, an open memory mapping prevents file renaming/moving.
   drop(source);

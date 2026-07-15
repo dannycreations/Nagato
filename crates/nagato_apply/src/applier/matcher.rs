@@ -1,7 +1,11 @@
-use memchr::memmem::{self, Finder};
-use nagato_core::{Error, ErrorKind};
+use memchr::{
+  memchr,
+  memmem::{self, Finder},
+  memrchr,
+};
+use nagato_core::{get_line, Error, ErrorKind};
 
-use crate::Hunk;
+use crate::{Hunk, LineKind};
 
 pub struct Matcher;
 
@@ -20,7 +24,7 @@ impl Matcher {
       for (i, hunk_line) in
         hunk.lines[..anchor_hunk_line_idx].iter().enumerate().rev()
       {
-        if matches!(hunk_line.kind, crate::LineKind::Addition) {
+        if matches!(hunk_line.kind, LineKind::Addition) {
           continue;
         }
 
@@ -33,7 +37,7 @@ impl Matcher {
         }
 
         let search_limit = hunk_start.saturating_sub(1);
-        let prev_newline = memchr::memrchr(b'\n', &source[..search_limit])
+        let prev_newline = memrchr(b'\n', &source[..search_limit])
           .map(|p| p + 1)
           .unwrap_or(0);
 
@@ -60,7 +64,7 @@ impl Matcher {
     let mut current_source = &source[anchor_pos..];
     for (i, hunk_line) in hunk.lines[anchor_hunk_line_idx..].iter().enumerate()
     {
-      if matches!(hunk_line.kind, crate::LineKind::Addition) {
+      if matches!(hunk_line.kind, LineKind::Addition) {
         continue;
       }
 
@@ -112,7 +116,7 @@ impl Matcher {
         continue;
       }
 
-      let line_end = match memchr::memchr(b'\n', &buffer[pos..]) {
+      let line_end = match memchr(b'\n', &buffer[pos..]) {
         Some(i) => pos + i + 1,
         None => buffer.len(),
       };
@@ -279,7 +283,7 @@ impl Matcher {
     let mut anchor_pos = buffer_offset;
     while anchor_pos <= buffer.len() {
       let remaining = &buffer[anchor_pos..];
-      let Some((line, rest)) = nagato_core::get_line(remaining) else {
+      let Some((line, rest)) = get_line(remaining) else {
         break;
       };
       let consumed = remaining.len() - rest.len();

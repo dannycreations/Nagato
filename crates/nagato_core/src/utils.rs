@@ -1,3 +1,7 @@
+#[cfg(unix)]
+use std::ffi::OsStr;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::{
   borrow::Cow,
   io::{Result as IoResult, Write},
@@ -5,6 +9,9 @@ use std::{
 };
 
 use bstr::ByteSlice;
+use memchr::{memchr, memchr2};
+
+use crate::{Error, ErrorKind};
 
 #[inline(always)]
 pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
@@ -20,7 +27,7 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   }
 
   let inner = &s[1..s.len() - 1];
-  let Some(first_esc) = memchr::memchr(b'\\', inner) else {
+  let Some(first_esc) = memchr(b'\\', inner) else {
     return Cow::Borrowed(strip_diff_prefix(inner));
   };
 
@@ -77,7 +84,7 @@ pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
     return None;
   }
   if s[0] != b'\"' {
-    let Some(idx) = memchr::memchr(b' ', s) else {
+    let Some(idx) = memchr(b' ', s) else {
       return Some((s, &[][..]));
     };
 
@@ -87,7 +94,7 @@ pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
 
   let mut i = 1;
   while i < s.len() {
-    let idx = memchr::memchr2(b'\"', b'\\', &s[i..])?;
+    let idx = memchr2(b'\"', b'\\', &s[i..])?;
     i += idx;
     if s[i] == b'\"' {
       return Some((&s[..i + 1], s[i + 1..].trim_start()));
@@ -152,7 +159,7 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
     return None;
   }
 
-  let Some(idx) = memchr::memchr(b'\n', source) else {
+  let Some(idx) = memchr(b'\n', source) else {
     let mut line = source;
     if let Some((&b'\r', _)) = line.split_last() {
       line = &line[..line.len() - 1];
@@ -260,18 +267,17 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
 }
 
 #[inline]
-pub fn to_path_buf(bytes: &[u8]) -> Result<PathBuf, crate::Error> {
+pub fn to_path_buf(bytes: &[u8]) -> Result<PathBuf, Error> {
   #[cfg(unix)]
   {
-    use std::os::unix::ffi::OsStrExt;
-    Ok(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
+    Ok(PathBuf::from(OsStr::from_bytes(bytes)))
   }
   #[cfg(windows)]
   {
     bytes
       .to_str()
       .map(PathBuf::from)
-      .map_err(|_| crate::Error::new(crate::ErrorKind::InvalidPath))
+      .map_err(|_| Error::new(ErrorKind::InvalidPath))
   }
 }
 

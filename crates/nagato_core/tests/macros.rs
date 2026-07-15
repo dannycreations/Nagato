@@ -6,14 +6,14 @@ macro_rules! test_atomic_writer_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = nagato_core::create_test_fs! {};
+      let dir = create_test_fs! {};
       let file_path = dir.path().join("test.txt");
 
-      let mut writer = nagato_core::AtomicWriter::new(&file_path).unwrap();
-      ::std::io::Write::write_all(&mut writer, $content).unwrap();
+      let mut writer = AtomicWriter::new(&file_path).unwrap();
+      Write::write_all(&mut writer, $content).unwrap();
       writer.commit().unwrap();
 
-      assert_eq!(std::fs::read(file_path).unwrap(), $content);
+      assert_eq!(read(file_path).unwrap(), $content);
     }
   };
 }
@@ -26,9 +26,7 @@ macro_rules! test_atomic_writer_err {
   ) => {
     #[test]
     fn $test_name() {
-      assert!(
-        nagato_core::AtomicWriter::new(std::path::Path::new($path)).is_err()
-      );
+      assert!(AtomicWriter::new(Path::new($path)).is_err());
     }
   };
 }
@@ -114,11 +112,11 @@ macro_rules! test_fs_invalid_path {
     $(
       #[test]
       fn $name() {
-        let dir = nagato_core::create_test_fs! {};
-        let fs = nagato_core::FileSystem::new(dir.path(), false);
+        let dir = create_test_fs! {};
+        let fs = FileSystem::new(dir.path(), false);
         assert!(matches!(
           fs.read($input).unwrap_err().kind,
-          nagato_core::ErrorKind::InvalidPath
+          ErrorKind::InvalidPath
         ));
       }
     )*
@@ -135,8 +133,8 @@ macro_rules! test_fs_get_unique_path_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = nagato_core::create_test_fs! { $($path => $content),* };
-      let res = nagato_core::get_unique_path(dir.path(), $base);
+      let dir = create_test_fs! { $($path => $content),* };
+      let res = get_unique_path(dir.path(), $base);
       assert_eq!(
         res.file_name().unwrap().to_str().unwrap(),
         $expected
@@ -154,8 +152,8 @@ macro_rules! test_fs_ops_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let $dir = nagato_core::create_test_fs! {};
-      let $fs = nagato_core::FileSystem::new($dir.path(), $check);
+      let $dir = create_test_fs! {};
+      let $fs = FileSystem::new($dir.path(), $check);
       $($assertions)*
     }
   };
@@ -170,7 +168,7 @@ macro_rules! test_line_writer_ok {
     #[test]
     fn $test_name() {
       let mut $buf = Vec::new();
-      let mut $writer = nagato_core::LineWriter::new(&mut $buf);
+      let mut $writer = LineWriter::new(&mut $buf);
       $($assertions)*
     }
   };

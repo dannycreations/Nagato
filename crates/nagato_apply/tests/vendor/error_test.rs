@@ -1,4 +1,5 @@
-use nagato_core::ErrorKind;
+use nagato_apply::{patch_file, Parser};
+use nagato_core::{create_test_fs, ErrorKind, FileSystem};
 
 test_patch_err_with_line!(
   fails_finding_hunk_context,

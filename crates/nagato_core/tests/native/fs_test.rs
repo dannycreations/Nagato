@@ -1,8 +1,16 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::{borrow::Cow, io::Write};
+use std::{
+  borrow::Cow,
+  fs::{read, write},
+  io::{Error as StdIoError, ErrorKind as StdIoErrorKind, Write},
+  path::Path,
+};
 
-use nagato_core::{Error, ErrorKind, IgnoreNotFound, IsDevNull};
+use nagato_core::{
+  create_test_fs, get_unique_path, AtomicWriter, Error, ErrorKind, FileSystem,
+  IgnoreNotFound, IsDevNull,
+};
 
 #[cfg(unix)]
 test_atomic_writer_err!(
@@ -45,9 +53,9 @@ test_fs_ops_ok!(
     assert_eq!(&fs.read(path).unwrap()[..], b"data");
 
     // Copy clobbers
-    std::fs::write(dir.path().join("dest.txt"), b"old").unwrap();
+    write(dir.path().join("dest.txt"), b"old").unwrap();
     fs.copy(path, b"dest.txt").unwrap();
-    assert_eq!(std::fs::read(dir.path().join("dest.txt")).unwrap(), b"data");
+    assert_eq!(read(dir.path().join("dest.txt")).unwrap(), b"data");
 
     // Remove
     fs.remove(path).unwrap();
@@ -124,7 +132,7 @@ test_fs_ops_ok!(
     // Try to set SUID/SGID bits (06755)
     fs.set_permissions(path, 0o6755).unwrap();
 
-    let metadata = std::fs::metadata(dir.path().join("restricted.sh")).unwrap();
+    let metadata = metadata(dir.path().join("restricted.sh")).unwrap();
     let mode = metadata.permissions().mode();
 
     // Verify SUID (04000) and SGID (02000) are stripped
@@ -163,8 +171,8 @@ fn test_is_dev_null() {
 
 #[test]
 fn test_ignore_not_found() {
-  let err_not_found = Error::new(ErrorKind::Io(std::io::Error::new(
-    std::io::ErrorKind::NotFound,
+  let err_not_found = Error::new(ErrorKind::Io(StdIoError::new(
+    StdIoErrorKind::NotFound,
     "file not found",
   )));
   let res_not_found: Result<Vec<u8>, Error> = Err(err_not_found);

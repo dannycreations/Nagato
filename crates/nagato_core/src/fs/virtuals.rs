@@ -1,3 +1,7 @@
+#[cfg(unix)]
+use std::fs::Permissions;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
@@ -203,12 +207,8 @@ impl FileSystem {
         .unwrap_or(false);
 
       if !self.check || is_staged {
-        use std::os::unix::fs::PermissionsExt;
         let sanitized_mode = mode & !0o6000;
-        fs::set_permissions(
-          full_path,
-          fs::Permissions::from_mode(sanitized_mode),
-        )?;
+        fs::set_permissions(full_path, Permissions::from_mode(sanitized_mode))?;
       }
     }
     Ok(())
@@ -238,7 +238,7 @@ impl FileSystem {
       }
 
       if let Some(tilde_pos) = bytes.find_byte(b'~') {
-        self::check_tilde_restriction(bytes, tilde_pos)?;
+        check_tilde_restriction(bytes, tilde_pos)?;
       }
 
       let base_len = bytes.find_byte(b'.').unwrap_or(bytes.len());

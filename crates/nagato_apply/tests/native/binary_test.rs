@@ -1,7 +1,13 @@
-use std::fs;
+use std::{
+  fs,
+  io::{Cursor, Write},
+};
 
-use nagato_apply::{Applier, BinaryFragment, BinaryKind, Patch};
-use nagato_core::ErrorKind;
+use flate2::{write::ZlibEncoder, Compression};
+use nagato_apply::{
+  apply_delta, patch_file, Applier, BinaryFragment, BinaryKind, Parser, Patch,
+};
+use nagato_core::{create_test_fs, ErrorKind, FileSystem};
 
 test_patch_ok!(
   binary_patch_literal,
@@ -132,10 +138,6 @@ test_patch_ok!(
 
 #[test]
 fn test_binary_applier_fails_immediately_on_invalid_delta() {
-  use std::io::Write;
-
-  use flate2::{write::ZlibEncoder, Compression};
-
   let raw_delta = vec![0x03, 0x03, 0x00];
   let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
   encoder.write_all(&raw_delta).unwrap();

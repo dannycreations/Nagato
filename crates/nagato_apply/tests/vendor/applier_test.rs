@@ -1,5 +1,8 @@
 use std::fs;
 
+use nagato_apply::{apply, patch_file, Parser};
+use nagato_core::{create_test_fs, FileSystem};
+
 test_apply_ok!(
   applier_vendor_hunkless,
   diff: r#"
@@ -238,10 +241,10 @@ fn applier_vendor_hunkless_with_gap_vs_context_empty() {
   let expected =
     "label a(b) {\n \n\t\t\t\tbreak\n\t\t\t}\n\n\t\t\t\tbreak\n\t\t\t}\n\n";
 
-  let mut parser = nagato_apply::Parser::new(diff.as_bytes());
+  let mut parser = Parser::new(diff.as_bytes());
   let patch = parser.next().unwrap().unwrap();
   let mut output = Vec::new();
-  nagato_apply::apply(&mut output, &patch, source.as_bytes()).unwrap();
+  apply(&mut output, &patch, source.as_bytes()).unwrap();
   assert_eq!(String::from_utf8(output).unwrap(), expected);
 }
 

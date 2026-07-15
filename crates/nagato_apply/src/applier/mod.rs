@@ -8,7 +8,7 @@ pub mod matcher;
 
 pub use engine::Applier;
 
-use crate::Patch;
+use crate::{Parser, Patch};
 
 pub fn apply<'a>(
   output: &mut (impl Write + ?Sized),
@@ -26,7 +26,7 @@ pub fn apply_streamed<'a>(
   output: &mut (impl Write + ?Sized),
   patch: &mut Patch<'a>,
   source: &[u8],
-  parser: &mut crate::Parser<'a>,
+  parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
   let mut applier = Applier::new(output, source);
   applier.begin(patch)?;
@@ -76,17 +76,17 @@ pub fn patch_file(
 pub fn patch_file_streamed<'a>(
   fs: &FileSystem,
   patch: &mut Patch<'a>,
-  parser: &mut crate::Parser<'a>,
+  parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
   fs::patch_file_streamed(fs, patch, parser)
 }
 
 pub fn apply_to_fs(
-  fs: &nagato_core::FileSystem,
+  fs: &FileSystem,
   input: &[u8],
   reverse: bool,
 ) -> Result<(), Error> {
-  let mut parser = crate::Parser::new(input);
+  let mut parser = Parser::new(input);
   if reverse {
     for patch in parser {
       patch_file(fs, patch?, reverse)?;

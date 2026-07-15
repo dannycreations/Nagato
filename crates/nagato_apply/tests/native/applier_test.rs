@@ -1,6 +1,12 @@
-use std::fs;
+use std::{fs, io::sink};
 
-use nagato_apply::{BinaryFragment, BinaryKind, Hunk, Line, LineKind, Patch};
+use nagato_apply::{
+  apply, patch_file, Applier, BinaryFragment, BinaryKind, Hunk, Line, LineKind,
+  Parser, Patch,
+};
+use nagato_core::{
+  create_test_fs, strip_diff_prefix, unquote_path, ErrorKind, FileSystem,
+};
 
 test_patch_ok!(
   applier_matches_whitespace,

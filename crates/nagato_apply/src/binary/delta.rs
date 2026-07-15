@@ -1,4 +1,4 @@
-use std::io::{copy, ErrorKind as IoErrorKind, Read, Write};
+use std::io::{copy, BufReader, ErrorKind as IoErrorKind, Read, Write};
 
 use nagato_core::{Error, ErrorKind};
 
@@ -24,7 +24,7 @@ pub fn apply_delta(
   source: &[u8],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
-  let mut delta = std::io::BufReader::with_capacity(8192, delta_reader);
+  let mut delta = BufReader::with_capacity(8192, delta_reader);
 
   let source_size_res = read_variable_length_int(&mut delta);
   if let Err(e) = &source_size_res {

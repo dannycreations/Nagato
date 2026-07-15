@@ -6,7 +6,7 @@ pub(crate) mod hunk;
 
 use nagato_core::{Error, ErrorKind};
 
-use crate::{Lexer, Patch, TokenKind};
+use crate::{Hunk, Lexer, LexerItem, Patch, TokenKind};
 
 pub struct Parser<'a> {
   pub tokens: Peekable<Lexer<'a>>,
@@ -24,7 +24,7 @@ impl<'a> Parser<'a> {
   pub fn next_hunk(
     &mut self,
     patch: &mut Patch<'a>,
-  ) -> Result<Option<crate::Hunk<'a>>, Error> {
+  ) -> Result<Option<Hunk<'a>>, Error> {
     hunk::next_hunk(self, patch)
   }
 
@@ -93,7 +93,7 @@ impl<'a> Parser<'a> {
     Ok(self.peek_token()?.is_some_and(|i| check(&i.token)))
   }
 
-  pub fn peek_token(&mut self) -> Result<Option<&crate::LexerItem<'a>>, Error> {
+  pub fn peek_token(&mut self) -> Result<Option<&LexerItem<'a>>, Error> {
     // Token peeking logic identifies lexer errors by inspecting the next available item without consuming it from the stream.
     if self.tokens.peek().is_some_and(|r| r.is_err()) {
       return Err(self.tokens.next().unwrap().unwrap_err());

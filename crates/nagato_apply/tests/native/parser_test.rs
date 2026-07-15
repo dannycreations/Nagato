@@ -1,3 +1,4 @@
+use nagato_apply::Parser;
 use nagato_core::ErrorKind;
 
 test_parser_err!(

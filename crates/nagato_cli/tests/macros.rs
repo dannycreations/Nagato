@@ -11,14 +11,14 @@ macro_rules! test_exec_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let dir = nagato_core::create_test_fs! { $($path => $content),* };
+      let dir = create_test_fs! { $($path => $content),* };
 
       let patch_file_path = dir.path().join(
         None.or(None $(.or(Some($patch_name)))?).unwrap_or("test.patch")
       );
-      std::fs::write(&patch_file_path, indoc::indoc!($diff)).unwrap();
+      write(&patch_file_path, indoc::indoc!($diff)).unwrap();
 
-      let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_nagato"));
+      let mut cmd = Command::new(env!("CARGO_BIN_EXE_nagato"));
       cmd.current_dir(dir.path());
       $(cmd.arg($arg);)*
       cmd.arg(patch_file_path.file_name().unwrap());
@@ -26,11 +26,11 @@ macro_rules! test_exec_ok {
       cmd
         .assert()
         .success()
-        .stdout(predicates::prelude::predicate::str::is_empty())
-        .stderr(predicates::prelude::predicate::str::is_empty());
+        .stdout(is_empty())
+        .stderr(is_empty());
 
-      assert_eq!(std::fs::read_to_string(dir.path().join($file_to_check)).unwrap(), $expected_content);
-      $(assert_eq!(std::fs::read_to_string(dir.path().join($file_to_check2)).unwrap(), $expected_content2);)?
+      assert_eq!(read_to_string(dir.path().join($file_to_check)).unwrap(), $expected_content);
+      $(assert_eq!(read_to_string(dir.path().join($file_to_check2)).unwrap(), $expected_content2);)?
     }
   };
 }
@@ -45,13 +45,13 @@ macro_rules! test_cli_fail {
   ) => {
     #[test]
     fn $test_name() {
-      let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_nagato"));
+      let mut cmd = Command::new(env!("CARGO_BIN_EXE_nagato"));
       $(cmd.arg($arg);)*
       $(cmd.write_stdin($stdin);)?
       cmd
         .assert()
         .failure()
-        .stderr(predicates::str::contains($stderr));
+        .stderr(contains($stderr));
     }
   };
 }
@@ -67,11 +67,11 @@ macro_rules! test_cli_ok {
   ) => {
     #[test]
     fn $test_name() {
-      let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_nagato"));
+      let mut cmd = Command::new(env!("CARGO_BIN_EXE_nagato"));
       $(cmd.arg($arg);)*
       let assert = cmd.assert().success();
-      $(assert.stdout(predicates::str::contains($stdout));)?
-      $(assert.stderr(predicates::str::contains($stderr));)?
+      $(assert.stdout(contains($stdout));)?
+      $(assert.stderr(contains($stderr));)?
     }
   };
 }
