@@ -50,7 +50,7 @@ pub fn apply_streamed<'a>(
       }
       first = false;
     }
-    applier.process_hunk(&hunk)?;
+    applier.process_hunk(patch, &hunk)?;
   }
 
   if first {

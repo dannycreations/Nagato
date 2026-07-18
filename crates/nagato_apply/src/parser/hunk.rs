@@ -25,20 +25,21 @@ pub fn next_hunk<'a>(
       | TokenKind::Context(_)
       | TokenKind::Gap => {
         let initial_line = item.line_num;
-        let mut lines = Vec::new();
-        let (old_span, new_span) =
-          collect_hunk_lines(parser, &mut lines, patch, |t| {
-            matches!(t, TokenKind::Gap)
-              || matches!(t, TokenKind::Context(s) if s.is_empty())
-          })?;
+        let lines_start = patch.lines.len() as u32;
+        let (old_span, new_span) = collect_hunk_lines(parser, patch, |t| {
+          matches!(t, TokenKind::Gap)
+            || matches!(t, TokenKind::Context(s) if s.is_empty())
+        })?;
+        let lines_len = patch.lines.len() as u32 - lines_start;
 
-        if !lines.is_empty() {
+        if lines_len > 0 {
           Some(Hunk {
             old_line: 0,
             new_line: 0,
             old_span,
             new_span,
-            lines,
+            lines_start,
+            lines_len,
             patch_line_num: initial_line.saturating_sub(1),
             has_header: false,
             label: parser.label.take(),
@@ -60,17 +61,15 @@ pub fn next_hunk<'a>(
 pub fn parse_hunks<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
-  hunks: &mut Vec<Hunk<'a>>,
 ) -> Result<(), Error> {
   while let Some(hunk) = next_hunk(parser, patch)? {
-    hunks.push(hunk);
+    patch.hunks.push(hunk);
   }
   Ok(())
 }
 
 pub fn collect_hunk_lines<'a>(
   parser: &mut Parser<'a>,
-  lines: &mut Vec<Line<'a>>,
   patch: &mut Patch<'a>,
   stop_condition: impl Fn(&TokenKind<'a>) -> bool,
 ) -> Result<(u32, u32), Error> {
@@ -87,7 +86,7 @@ pub fn collect_hunk_lines<'a>(
       TokenKind::Addition(text) => {
         new_span += 1;
         patch.new_file_no_newline = false;
-        lines.push(Line {
+        patch.lines.push(Line {
           kind: LineKind::Addition,
           text,
         });
@@ -96,7 +95,7 @@ pub fn collect_hunk_lines<'a>(
       TokenKind::Deletion(text) => {
         old_span += 1;
         patch.old_file_no_newline = false;
-        lines.push(Line {
+        patch.lines.push(Line {
           kind: LineKind::Deletion,
           text,
         });
@@ -107,7 +106,7 @@ pub fn collect_hunk_lines<'a>(
         new_span += 1;
         patch.old_file_no_newline = false;
         patch.new_file_no_newline = false;
-        lines.push(Line {
+        patch.lines.push(Line {
           kind: LineKind::Context,
           text,
         });
@@ -118,7 +117,7 @@ pub fn collect_hunk_lines<'a>(
         new_span += 1;
         patch.old_file_no_newline = false;
         patch.new_file_no_newline = false;
-        lines.push(Line {
+        patch.lines.push(Line {
           kind: LineKind::Gap,
           text: &[],
         });
@@ -126,7 +125,7 @@ pub fn collect_hunk_lines<'a>(
       }
       TokenKind::NoNewline => {
         parser.tokens.next();
-        let Some(last) = lines.last() else {
+        let Some(last) = patch.lines.last() else {
           continue;
         };
 
@@ -171,24 +170,38 @@ pub fn parse_hunk<'a>(
   let (new_line, new_span) =
     parse_range(new_range).map_err(|k| Error::with_line(k, item.line_num))?;
 
-  let mut lines = Vec::with_capacity(new_span.max(old_span) as usize);
+  let lines_start = patch.lines.len() as u32;
+
+  // reserve capacity in patch.lines to avoid reallocations on the hot path
+  patch.lines.reserve(new_span.max(old_span) as usize);
+
   let (actual_old_span, actual_new_span) =
-    collect_hunk_lines(parser, &mut lines, patch, |_| false)?;
+    match collect_hunk_lines(parser, patch, |_| false) {
+      Ok(spans) => spans,
+      Err(e) => {
+        patch.lines.truncate(lines_start as usize);
+        return Err(e);
+      }
+    };
 
   // Hunk integrity is verified by comparing the actual line counts accumulated during parsing against the expected spans declared in the hunk header.
   if actual_old_span != old_span || actual_new_span != new_span {
+    patch.lines.truncate(lines_start as usize);
     return Err(Error::with_line(
       ErrorKind::HunkLineCountMismatch,
       item.line_num,
     ));
   }
 
+  let lines_len = patch.lines.len() as u32 - lines_start;
+
   Ok(Hunk {
     old_line,
     old_span,
     new_line,
     new_span,
-    lines,
+    lines_start,
+    lines_len,
     patch_line_num: item.line_num,
     has_header: true,
     label,

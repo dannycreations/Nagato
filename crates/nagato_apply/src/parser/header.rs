@@ -2,14 +2,11 @@ use nagato_core::{
   next_path_pair, parse_int, split_diff_paths, unquote_path, Error,
 };
 
-use crate::{
-  parser::binary::parse_binary_patch, BinaryFragment, Parser, Patch, TokenKind,
-};
+use crate::{parser::binary::parse_binary_patch, Parser, Patch, TokenKind};
 
 pub fn parse_header<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
-  binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
   // Patch headers are processed by iteratively peeking at tokens and updating patch metadata until a non-header token is encountered.
   while let Some(item) = parser.peek_token()? {
@@ -84,7 +81,7 @@ pub fn parse_header<'a>(
       }
       TokenKind::GitBinaryPatchHeader => {
         parser.tokens.next();
-        parse_binary_patch(parser, patch, binary_fragments)?;
+        parse_binary_patch(parser, patch)?;
         return Ok(());
       }
       _ => break,

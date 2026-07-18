@@ -102,16 +102,21 @@ test_binary_applier_process_ok!(
   binary_applier_process_binary_fragment_selection,
   source: b"source",
   patch: Patch {
+    binary_lines: vec![b"A00000", b"6|SHe00001"],
     binary_fragments: vec![
       BinaryFragment {
         kind: BinaryKind::Delta,
         size: 5,
-        data: vec![b"A00000"],
+        data_start: 0,
+        data_len: 1,
+        _marker: std::marker::PhantomData,
       },
       BinaryFragment {
         kind: BinaryKind::Literal,
         size: 5,
-        data: vec![b"6|SHe00001"],
+        data_start: 1,
+        data_len: 1,
+        _marker: std::marker::PhantomData,
       },
     ],
     ..Default::default()
@@ -170,16 +175,21 @@ fn test_binary_applier_fails_immediately_on_invalid_delta() {
 
   let patch = Patch {
     binary: true,
+    binary_lines: vec![&encoded, b"Wc-qT001"],
     binary_fragments: vec![
       BinaryFragment {
         kind: BinaryKind::Delta,
         size: 3,
-        data: vec![&encoded],
+        data_start: 0,
+        data_len: 1,
+        _marker: std::marker::PhantomData,
       },
       BinaryFragment {
         kind: BinaryKind::Literal,
         size: 3,
-        data: vec![b"Wc-qT001"], // literal world
+        data_start: 1,
+        data_len: 1,
+        _marker: std::marker::PhantomData,
       },
     ],
     ..Default::default()

@@ -198,15 +198,17 @@ test_applier_flush_ok!(
   applier_flush_remaining,
   source: b"line1\nline2\n",
   patch: Patch {
+    lines: vec![Line {
+      kind: LineKind::Context,
+      text: b"line1",
+    }],
     hunks: vec![Hunk {
       old_line: 1,
       old_span: 1,
       new_line: 1,
       new_span: 1,
-      lines: vec![Line {
-        kind: LineKind::Context,
-        text: b"line1",
-      }],
+      lines_start: 0,
+      lines_len: 1,
       has_header: true,
       ..Default::default()
     }],
@@ -220,10 +222,13 @@ test_reject_mixed!(
   initial_fs: { "file.txt" => "content\n" },
   patch: Patch {
     binary: true,
+    binary_lines: vec![b"Wc-qT"],
     binary_fragments: vec![BinaryFragment {
       kind: BinaryKind::Literal,
       size: 1,
-      data: vec![b"Wc-qT"],
+      data_start: 0,
+      data_len: 1,
+      _marker: std::marker::PhantomData,
     }],
     hunks: vec![Hunk::default()],
     ..Default::default()

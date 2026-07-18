@@ -9,5 +9,9 @@ pub enum BinaryKind {
 pub struct BinaryFragment<'a> {
   pub kind: BinaryKind,
   pub size: u64,
-  pub data: Vec<&'a [u8]>,
+  pub data_start: u32,
+  pub data_len: u32,
+  pub _marker: std::marker::PhantomData<&'a ()>,
 }
+
+const _: () = assert!(std::mem::size_of::<BinaryFragment>() == 24);

@@ -6,7 +6,7 @@ use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
 use crate::{
-  applier::matcher::Matcher, binary, BinaryKind, Hunk, LineKind, Patch,
+  applier::matcher::Matcher, binary, BinaryKind, Hunk, Line, LineKind, Patch,
 };
 
 pub struct Applier<'s, 'b, W: Write + ?Sized> {
@@ -43,7 +43,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
   #[inline]
   pub fn apply_hunk<'p>(
     &mut self,
-    hunk: &Hunk<'p>,
+    lines: &[Line<'p>],
     match_pos: usize,
     remaining_source: &'s [u8],
   ) -> Result<(), Error> {
@@ -55,7 +55,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     self.pos += source.len() - remaining_source.len();
 
-    for line in hunk.lines.iter() {
+    for line in lines {
       match line.kind {
         LineKind::Addition | LineKind::Context | LineKind::Gap => {
           self.write_line(line.text)?;
@@ -67,9 +67,14 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     Ok(())
   }
 
-  pub fn process_hunk<'p>(&mut self, hunk: &Hunk<'p>) -> Result<(), Error> {
+  pub fn process_hunk<'p>(
+    &mut self,
+    patch: &Patch<'p>,
+    hunk: &Hunk<'p>,
+  ) -> Result<(), Error> {
+    let lines = patch.hunk_lines(hunk);
     if hunk.old_span == 0 {
-      for line in hunk.lines.iter() {
+      for line in lines {
         if matches!(line.kind, LineKind::Addition) {
           self.write_line(line.text)?;
         }
@@ -78,8 +83,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     let source = self.source_at();
-    let (match_pos, remaining) = Matcher.find_match(source, hunk, None)?;
-    self.apply_hunk(hunk, match_pos, remaining)
+    let (match_pos, remaining) =
+      Matcher.find_match(source, patch, hunk, None)?;
+    self.apply_hunk(lines, match_pos, remaining)
   }
 
   pub fn verify_binary_source(&self, patch: &Patch<'_>) -> Result<(), Error> {
@@ -131,12 +137,13 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     // Binary patches are applied by processing fragments until a successful literal decoding or delta application occurs.
     for fragment in patch.binary_fragments.iter() {
+      let data = patch.binary_fragment_data(fragment);
       if matches!(fragment.kind, BinaryKind::Literal) {
         let output = self.writer.output();
-        return binary::decode_base85(&fragment.data, output);
+        return binary::decode_base85(data, output);
       }
 
-      let mut decoded = binary::new_base85_decoder(&fragment.data);
+      let mut decoded = binary::new_base85_decoder(data);
       let source = self.source;
       let output = self.writer.output();
       let res = binary::apply_delta(&mut decoded, source, output);
@@ -196,7 +203,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     };
 
     if first_hunk.has_header {
-      patch.hunks.iter().try_for_each(|h| self.process_hunk(h))?;
+      patch
+        .hunks
+        .iter()
+        .try_for_each(|h| self.process_hunk(patch, h))?;
     } else {
       self.process_hunkless_patches(patch)?;
     }
@@ -214,8 +224,9 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       .hunks
       .iter()
       .map(|h| {
+        let lines = patch.hunk_lines(h);
         let finder = h
-          .first_non_empty_match_line()
+          .first_non_empty_match_line(lines)
           .map(|(_, l)| l.text)
           .map(Finder::new);
         Some((h, finder))
@@ -237,7 +248,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       if current_offset <= source.len() {
         let current_source = &source[current_offset..];
         if let Ok((match_pos, remaining)) =
-          Matcher.find_match(current_source, hunk, finder.as_ref())
+          Matcher.find_match(current_source, patch, hunk, finder.as_ref())
         {
           let absolute_pos = initial_pos + current_offset + match_pos;
           hunks_to_apply.push((absolute_pos, remaining, *hunk));
@@ -252,7 +263,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     for hunk_data in pending_hunks.into_iter().flatten() {
       let (hunk, finder) = hunk_data;
       let (match_pos, remaining) =
-        Matcher.find_match(source, hunk, finder.as_ref())?;
+        Matcher.find_match(source, patch, hunk, finder.as_ref())?;
       hunks_to_apply.push((initial_pos + match_pos, remaining, hunk));
     }
 
@@ -260,7 +271,8 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     for (pos, remaining, hunk) in hunks_to_apply {
       let match_pos_rel = pos - self.pos;
-      self.apply_hunk(hunk, match_pos_rel, remaining)?;
+      let lines = patch.hunk_lines(hunk);
+      self.apply_hunk(lines, match_pos_rel, remaining)?;
     }
     Ok(())
   }

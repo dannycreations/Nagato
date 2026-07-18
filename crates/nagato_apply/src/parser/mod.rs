@@ -39,9 +39,7 @@ impl<'a> Parser<'a> {
     }
 
     let mut patch = Patch::default();
-    let mut binary_fragments = Vec::new();
-    header::parse_header(self, &mut patch, &mut binary_fragments)?;
-    patch.binary_fragments = binary_fragments;
+    header::parse_header(self, &mut patch)?;
 
     Ok(Some(patch))
   }
@@ -51,16 +49,11 @@ impl<'a> Parser<'a> {
     self.label = None;
     // Patch initialization involves parsing the header and associated hunks into a default patch structure.
     let mut patch = Patch::default();
-    let mut binary_fragments = Vec::new();
-    let mut hunks = Vec::new();
 
     let start_line = self.peek_token()?.map(|i| i.line_num).unwrap_or(0);
 
-    header::parse_header(self, &mut patch, &mut binary_fragments)?;
-    hunk::parse_hunks(self, &mut patch, &mut hunks)?;
-
-    patch.binary_fragments = binary_fragments;
-    patch.hunks = hunks;
+    header::parse_header(self, &mut patch)?;
+    hunk::parse_hunks(self, &mut patch)?;
 
     // Patch validity is checked by ensuring that any content changes are associated with at least one valid file path.
     if !patch.hunks.is_empty()

@@ -5,7 +5,6 @@ use crate::{BinaryFragment, BinaryKind, Parser, Patch, TokenKind};
 pub fn parse_binary_patch<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
-  binary_fragments: &mut Vec<BinaryFragment<'a>>,
 ) -> Result<(), Error> {
   patch.binary = true;
   // Binary patches are parsed by consuming type-specific headers followed by sequential blocks of encoded binary data.
@@ -20,16 +19,23 @@ pub fn parse_binary_patch<'a>(
         };
         let (size, _) = parse_int::<u64>(size, 10).unwrap_or((0, &[]));
 
-        let mut data = Vec::new();
+        let data_start = patch.binary_lines.len() as u32;
         while let Some(item) = parser.peek_token()? {
           if let TokenKind::BinaryData(line) = item.token {
-            data.push(line);
+            patch.binary_lines.push(line);
             parser.tokens.next();
           } else {
             break;
           }
         }
-        binary_fragments.push(BinaryFragment { kind, size, data });
+        let data_len = patch.binary_lines.len() as u32 - data_start;
+        patch.binary_fragments.push(BinaryFragment {
+          kind,
+          size,
+          data_start,
+          data_len,
+          _marker: std::marker::PhantomData,
+        });
       }
       TokenKind::Context(_) => {
         parser.tokens.next();
