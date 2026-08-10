@@ -11,7 +11,9 @@ use std::{
 use bstr::ByteSlice;
 use memchr::{memchr, memchr2};
 
-use crate::{Error, ErrorKind};
+use crate::Error;
+#[cfg(windows)]
+use crate::ErrorKind;
 
 #[inline(always)]
 pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
@@ -68,14 +70,6 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
   }
 
   Cow::Owned(res)
-}
-
-#[allow(clippy::type_complexity)]
-pub fn split_diff_paths(line: &[u8]) -> Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)> {
-  let (p1, rest) = next_path(line)?;
-  let (p2, _) = next_path(rest)?;
-
-  Some((unquote_path(p1), unquote_path(p2)))
 }
 
 pub fn next_path(s: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -252,12 +246,6 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   #[inline]
   pub fn is_first_line(&self) -> bool {
     self.is_empty
-  }
-
-  #[inline]
-  pub fn reset_to_first_line(&mut self) {
-    self.is_empty = true;
-    self.last_was_newline = false;
   }
 
   #[inline]

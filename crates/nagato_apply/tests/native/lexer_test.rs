@@ -1,5 +1,5 @@
 use nagato_apply::{BinaryPaths, Lexer, LexerMode, TokenKind};
-use nagato_core::{next_path_pair, split_diff_paths, unquote_path, ErrorKind};
+use nagato_core::{next_path_pair, unquote_path, ErrorKind};
 
 test_lexer_ok!(
   lexer_modes,

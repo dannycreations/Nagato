@@ -25,8 +25,6 @@ pub struct Line<'a> {
   pub text: &'a [u8],
 }
 
-const _: () = assert!(std::mem::size_of::<Line>() == 24);
-
 impl<'a> Line<'a> {
   #[inline]
   pub fn invert(&mut self) {

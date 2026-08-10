@@ -1,6 +1,6 @@
 use nagato_core::{
-  get_line, next_path, next_path_pair, parse_int, split_diff_paths,
-  strip_diff_prefix, unquote_path, LineWriter,
+  get_line, next_path, next_path_pair, parse_int, strip_diff_prefix,
+  unquote_path, LineWriter,
 };
 
 test_get_line!(
@@ -145,10 +145,10 @@ fn test_next_path_edge_cases() {
 }
 
 #[test]
-fn test_split_diff_paths_with_escaped_spaces() {
-  // Testing split_diff_paths with quoted paths containing spaces.
+fn test_next_path_pair_with_escaped_spaces() {
+  // Testing next_path_pair (empty separator) with quoted paths containing spaces.
   let line = b" \"a/file name.txt\" \"b/file name.txt\"";
-  let (p1, p2) = split_diff_paths(line).unwrap();
+  let (p1, p2) = next_path_pair(line, b"").unwrap();
   assert_eq!(p1.as_ref(), b"file name.txt");
   assert_eq!(p2.as_ref(), b"file name.txt");
 }

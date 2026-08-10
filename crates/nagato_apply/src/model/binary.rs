@@ -6,12 +6,9 @@ pub enum BinaryKind {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct BinaryFragment<'a> {
+pub struct BinaryFragment {
   pub kind: BinaryKind,
   pub size: u64,
   pub data_start: u32,
   pub data_len: u32,
-  pub _marker: std::marker::PhantomData<&'a ()>,
 }
-
-const _: () = assert!(std::mem::size_of::<BinaryFragment>() == 24);

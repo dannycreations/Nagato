@@ -5,7 +5,7 @@ use std::{
 
 use nagato_core::{ensure_dir, get_unique_path, AtomicWriter, Error};
 
-use crate::cmd::{source::PatchSource, utils::parse_patches};
+use crate::cmd::source::PatchSource;
 
 pub fn process_split(
   files: Vec<OsString>,
@@ -17,9 +17,8 @@ pub fn process_split(
 
   for source_res in PatchSource::iter(files) {
     let source = source_res?;
-    let patches_iter = parse_patches(&source)?;
 
-    for patch_res in patches_iter {
+    for patch_res in source.patches() {
       let patch = patch_res?;
       let target = String::from_utf8_lossy(patch.filename());
       let file_name = Path::new(target.as_ref())
@@ -28,13 +27,11 @@ pub fn process_split(
         .unwrap_or_else(|| target.clone());
       let base_name = format!("{}.trim.patch", file_name);
 
-      let out_path = match directory.as_ref() {
-        Some(dir) => get_unique_path(dir, &base_name),
-        None => get_unique_path(Path::new("."), &base_name),
-      };
+      let dir = directory.as_deref().unwrap_or_else(|| Path::new("."));
+      let out_path = get_unique_path(dir, &base_name);
 
       let mut writer = AtomicWriter::new(&out_path)?;
-      patch.to_bytes(&mut writer)?;
+      patch.write_to(&mut writer)?;
       writer.commit()?;
     }
   }

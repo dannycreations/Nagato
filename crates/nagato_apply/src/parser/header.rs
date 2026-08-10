@@ -1,6 +1,4 @@
-use nagato_core::{
-  next_path_pair, parse_int, split_diff_paths, unquote_path, Error,
-};
+use nagato_core::{next_path_pair, parse_int, unquote_path, Error};
 
 use crate::{parser::binary::parse_binary_patch, Parser, Patch, TokenKind};
 
@@ -12,7 +10,7 @@ pub fn parse_header<'a>(
   while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::FileHeader(paths) => {
-        if let Some((old, new)) = split_diff_paths(paths.old_file) {
+        if let Some((old, new)) = next_path_pair(paths.old_file, b"") {
           patch.old_file = old;
           patch.new_file = new;
         } else {
@@ -69,7 +67,7 @@ pub fn parse_header<'a>(
           patch.new_file = new_file;
         } else {
           // Fallback for cases where it's not a standard pair (e.g. diff --git)
-          let paths = split_diff_paths(paths.old_file).unwrap_or((
+          let paths = next_path_pair(paths.old_file, b"").unwrap_or((
             unquote_path(paths.old_file),
             unquote_path(paths.new_file),
           ));

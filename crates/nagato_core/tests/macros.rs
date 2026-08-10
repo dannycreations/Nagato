@@ -90,23 +90,6 @@ macro_rules! test_unquote_path {
 }
 
 #[macro_export]
-macro_rules! test_fs_err {
-  (
-    $test_name:ident,
-    fs: $fs:expr,
-    method: $method:ident,
-    arg: $arg:expr,
-    expected: $expected:pat
-  ) => {
-    #[test]
-    fn $test_name() {
-      let res = $fs.$method($arg);
-      assert!(matches!(res.unwrap_err().kind, $expected));
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! test_fs_invalid_path {
   ($($name:ident => $input:expr),* $(,)?) => {
     $(

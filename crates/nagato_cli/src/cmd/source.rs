@@ -6,7 +6,10 @@ use std::{
 };
 
 use memmap2::Mmap;
+use nagato_apply::{Parser, Patch};
 use nagato_core::{Error, ErrorKind};
+
+const MAX_STDIN_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub enum PatchSource {
   Stdin(Vec<u8>),
@@ -21,7 +24,7 @@ impl PatchSource {
       let mut content = Vec::new();
       let res = stdin()
         .lock()
-        .take(1024 * 1024 * 1024)
+        .take(MAX_STDIN_BYTES)
         .read_to_end(&mut content)
         .map(|_| Self::Stdin(content))
         .map_err(Error::from);
@@ -33,6 +36,9 @@ impl PatchSource {
       let file = File::open(&path).map_err(|e| {
         Error::new(ErrorKind::CantOpenPatch(path.to_string_lossy().into(), e))
       })?;
+      // SAFETY: The patch file is only read, never written, for the lifetime
+      // of the mapping. A concurrent external truncation could still fault,
+      // which is the same exposure every mmap-based reader accepts.
       let content = unsafe { Mmap::map(&file)? };
       Ok(Self::File {
         name: path.to_string_lossy().into(),
@@ -53,5 +59,10 @@ impl PatchSource {
       Self::Stdin(c) => c,
       Self::File { content, .. } => content,
     }
+  }
+
+  pub fn patches(&self) -> impl Iterator<Item = Result<Patch<'_>, Error>> {
+    Parser::new(self.content())
+      .map(|res| res.map_err(|e| e.with_origin(self.name().to_string())))
   }
 }

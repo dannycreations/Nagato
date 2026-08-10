@@ -17,7 +17,6 @@ mod merge;
 mod source;
 mod split;
 mod trim;
-mod utils;
 
 pub use args::*;
 

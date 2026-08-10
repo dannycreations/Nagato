@@ -52,10 +52,10 @@ macro_rules! test_patch_ok {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($initial_path => $initial_content),* };
-      let mut fs = FileSystem::new(dir.path(), false);
+      let fs = FileSystem::new(dir.path(), false);
       let reverse = false $(|| $reverse)?;
       for patch in parse_diff!($diff) {
-        patch_file(&mut fs, patch.unwrap(), reverse).unwrap();
+        patch_file(&fs, patch.unwrap(), reverse).unwrap();
       }
       let $root = dir.path();
       $($assertions)*
@@ -74,10 +74,10 @@ macro_rules! test_patch_err {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
-      let mut fs = FileSystem::new(dir.path(), false);
+      let fs = FileSystem::new(dir.path(), false);
       let patch = parse_diff!($diff).next().unwrap().unwrap();
       let reverse = false $(|| $reverse)?;
-      assert!(patch_file(&mut fs, patch, reverse).is_err());
+      assert!(patch_file(&fs, patch, reverse).is_err());
     }
   };
 }
@@ -124,7 +124,7 @@ macro_rules! test_lexer_ok {
       for (got, exp) in tokens.into_iter().zip(expected.into_iter()) {
         match (got, exp) {
           (TokenKind::FileHeader(g), TokenKind::FileHeader(e)) => {
-            if let Some((old, new)) = split_diff_paths(g.old_file) {
+            if let Some((old, new)) = next_path_pair(g.old_file, b"") {
               assert_eq!(old, unquote_path(e.old_file));
               assert_eq!(new, unquote_path(e.new_file));
             } else {
@@ -167,9 +167,9 @@ macro_rules! test_patch_err_with_line {
     #[test]
     fn $test_name() {
       let dir = create_test_fs! { $($path => $content),* };
-      let mut fs = FileSystem::new(dir.path(), false);
+      let fs = FileSystem::new(dir.path(), false);
       let patch = parse_diff!($diff).next().unwrap().unwrap();
-      let result = patch_file(&mut fs, patch, false);
+      let result = patch_file(&fs, patch, false);
       match result {
         Err(e) => {
           assert_eq!(e.line, Some($expected_line));

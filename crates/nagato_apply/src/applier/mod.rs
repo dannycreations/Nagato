@@ -10,9 +10,9 @@ pub use engine::Applier;
 
 use crate::{Parser, Patch};
 
-pub fn apply<'a>(
+pub fn apply(
   output: &mut (impl Write + ?Sized),
-  patch: &Patch<'a>,
+  patch: &Patch<'_>,
   source: &[u8],
 ) -> Result<(), Error> {
   if !patch.has_content_changes() && patch.copy_to.is_none() {
@@ -22,7 +22,7 @@ pub fn apply<'a>(
   Applier::new(output, source).process(patch)
 }
 
-pub fn apply_streamed<'a>(
+pub(crate) fn apply_streamed<'a>(
   output: &mut (impl Write + ?Sized),
   patch: &mut Patch<'a>,
   source: &[u8],
@@ -39,23 +39,18 @@ pub fn apply_streamed<'a>(
   while let Some(hunk) = parser.next_hunk(patch)? {
     if first {
       if !hunk.has_header {
-        // Fallback to buffered for hunkless
+        // Hunkless patches need every hunk up front, so fall back to the
+        // buffered path once the first one turns out to be headerless.
         patch.hunks.push(hunk);
         while let Some(h) = parser.next_hunk(patch)? {
           patch.hunks.push(h);
         }
-        return applier
-          .process_hunkless_patches(patch)
-          .and_then(|_| applier.end(patch));
+        applier.process_hunkless_patches(patch)?;
+        return applier.end(patch);
       }
       first = false;
     }
     applier.process_hunk(patch, &hunk)?;
-  }
-
-  if first {
-    // No hunks found
-    return applier.end(patch);
   }
 
   applier.end(patch)
@@ -66,19 +61,8 @@ pub fn patch_file(
   patch: Patch<'_>,
   reverse: bool,
 ) -> Result<(), Error> {
-  if reverse {
-    fs::patch_file(fs, &patch.invert())
-  } else {
-    fs::patch_file(fs, &patch)
-  }
-}
-
-pub fn patch_file_streamed<'a>(
-  fs: &FileSystem,
-  patch: &mut Patch<'a>,
-  parser: &mut Parser<'a>,
-) -> Result<(), Error> {
-  fs::patch_file_streamed(fs, patch, parser)
+  let patch = if reverse { patch.invert() } else { patch };
+  fs::patch_file(fs, &patch)
 }
 
 pub fn apply_to_fs(
@@ -87,6 +71,9 @@ pub fn apply_to_fs(
   reverse: bool,
 ) -> Result<(), Error> {
   let mut parser = Parser::new(input);
+
+  // Reversed patches must be fully buffered before they can be inverted, so
+  // only the forward direction can be streamed hunk by hunk.
   if reverse {
     for patch in parser {
       patch_file(fs, patch?, reverse)?;
@@ -95,7 +82,7 @@ pub fn apply_to_fs(
   }
 
   while let Some(mut patch) = parser.parse_patch_header()? {
-    patch_file_streamed(fs, &mut patch, &mut parser)?;
+    fs::patch_file_streamed(fs, &mut patch, &mut parser)?;
   }
   Ok(())
 }

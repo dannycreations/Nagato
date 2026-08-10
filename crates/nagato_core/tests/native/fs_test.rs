@@ -1,11 +1,11 @@
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::{
   borrow::Cow,
   fs::{read, write},
   io::{Error as StdIoError, ErrorKind as StdIoErrorKind, Write},
   path::Path,
 };
+#[cfg(unix)]
+use std::{fs::metadata, os::unix::fs::PermissionsExt};
 
 use nagato_core::{
   create_test_fs, get_unique_path, AtomicWriter, Error, ErrorKind, FileSystem,

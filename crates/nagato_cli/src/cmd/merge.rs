@@ -8,7 +8,7 @@ use std::{
 use nagato_apply::Patch;
 use nagato_core::{AtomicWriter, Error};
 
-use crate::cmd::{source::PatchSource, utils::parse_patches};
+use crate::cmd::source::PatchSource;
 
 pub fn process_merge(
   files: Vec<OsString>,
@@ -21,7 +21,7 @@ pub fn process_merge(
   let mut filenames_order: Vec<Vec<u8>> = Vec::new();
 
   for source in &sources {
-    for patch_res in parse_patches(source)? {
+    for patch_res in source.patches() {
       let patch = patch_res?;
       let filename = patch.filename();
 
@@ -45,7 +45,7 @@ pub fn process_merge(
       writer.write_all(b"\n")?;
     }
     if let Some(patch) = merged_patches.get(filename) {
-      patch.to_bytes(&mut writer)?;
+      patch.write_to(&mut writer)?;
     }
   }
 

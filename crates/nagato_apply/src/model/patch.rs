@@ -26,7 +26,7 @@ pub struct Patch<'a> {
   pub binary: bool,
   pub old_file_no_newline: bool,
   pub new_file_no_newline: bool,
-  pub binary_fragments: Vec<BinaryFragment<'a>>,
+  pub binary_fragments: Vec<BinaryFragment>,
   pub lines: Vec<Line<'a>>,
   pub binary_lines: Vec<&'a [u8]>,
 }
@@ -45,17 +45,7 @@ impl<'a> Patch<'a> {
   }
 
   #[inline]
-  pub fn hunk_lines_mut(&mut self, hunk: &Hunk<'a>) -> &mut [Line<'a>] {
-    let start = hunk.lines_start as usize;
-    let end = start + hunk.lines_len as usize;
-    &mut self.lines[start..end]
-  }
-
-  #[inline]
-  pub fn binary_fragment_data(
-    &self,
-    fragment: &BinaryFragment<'a>,
-  ) -> &[&'a [u8]] {
+  pub fn binary_fragment_data(&self, fragment: &BinaryFragment) -> &[&'a [u8]] {
     let start = fragment.data_start as usize;
     let end = start + fragment.data_len as usize;
     &self.binary_lines[start..end]
@@ -105,7 +95,7 @@ impl<'a> Patch<'a> {
     self.binary_fragments.extend(other.binary_fragments);
   }
 
-  pub fn to_bytes(&self, out: &mut impl Write) -> IoResult<()> {
+  pub fn write_to(&self, out: &mut impl Write) -> IoResult<()> {
     let mut writer = LineWriter::new(out);
 
     writer.write_bytes(b"file ")?;

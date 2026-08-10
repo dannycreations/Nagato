@@ -34,7 +34,6 @@ pub fn parse_binary_patch<'a>(
           size,
           data_start,
           data_len,
-          _marker: std::marker::PhantomData,
         });
       }
       TokenKind::Context(_) => {

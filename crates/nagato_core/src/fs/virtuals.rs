@@ -28,15 +28,6 @@ pub struct FileSystem {
   resolved: RefCell<HashMap<Box<[u8]>, PathBuf>>,
 }
 
-impl Default for FileSystem {
-  fn default() -> Self {
-    Self::new(
-      env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-      false,
-    )
-  }
-}
-
 impl FileSystem {
   pub fn new(root: impl Into<PathBuf>, check: bool) -> Self {
     let root = root.into();
@@ -95,7 +86,12 @@ impl FileSystem {
       .unwrap_or_else(|| self.root.join(rel));
 
     let file = File::open(full_path)?;
-    // SAFETY: Mmap is used for efficient reading.
+    // SAFETY: The mapping is read-only and lives no longer than the patch run
+    // that requested it. Nagato never writes a file through its own mapping;
+    // it stages every write through `AtomicWriter` and replaces the path by
+    // rename instead. A concurrent external truncation could still fault,
+    // which is the exposure every mmap-based reader accepts in exchange for
+    // avoiding a full copy of the source file.
     unsafe { Mmap::map(&file) }.map_err(Into::into)
   }
 

@@ -79,62 +79,70 @@ impl<'a> Base85Reader<'a> {
   }
 }
 
-impl<'a> Read for Base85Reader<'a> {
+impl Read for Base85Reader<'_> {
   fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-    loop {
+    let mut written = 0;
+
+    // Keep decoding lines until the caller's buffer is full or input runs out.
+    // Returning one 52-byte line per call would make the zlib decoder above
+    // issue several times as many reads for the same payload.
+    while written < buf.len() {
       if self.pos < self.buf_len {
-        let len = cmp::min(buf.len(), self.buf_len - self.pos);
-        buf[..len].copy_from_slice(&self.buffer[self.pos..self.pos + len]);
+        let len = cmp::min(buf.len() - written, self.buf_len - self.pos);
+        buf[written..written + len]
+          .copy_from_slice(&self.buffer[self.pos..self.pos + len]);
         self.pos += len;
-        return Ok(len);
-      }
-
-      let Some(line) = self.lines.next() else {
-        return Ok(0);
-      };
-
-      if line.is_empty() {
+        written += len;
         continue;
       }
 
-      self.buf_len = 0;
-      self.pos = 0;
-
-      let len_char = line[0];
-      let expected_len = decode_len_char(len_char).ok_or_else(|| {
-        IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError)
-      })?;
-
-      let data = &line[1..];
-      for chunk in data.as_chunks::<5>().0 {
-        let d0 = DECODE_MAP[chunk[0] as usize];
-        let d1 = DECODE_MAP[chunk[1] as usize];
-        let d2 = DECODE_MAP[chunk[2] as usize];
-        let d3 = DECODE_MAP[chunk[3] as usize];
-        let d4 = DECODE_MAP[chunk[4] as usize];
-
-        if (d0 | d1 | d2 | d3 | d4) == 0xFF {
-          return Err(IoError::new(
-            IoErrorKind::InvalidData,
-            InvalidBinaryLineError,
-          ));
-        }
-
-        let val = (d0 as u32) * 52_200_625
-          + (d1 as u32) * 614_125
-          + (d2 as u32) * 7_225
-          + (d3 as u32) * 85
-          + (d4 as u32);
-
-        self.buffer[self.buf_len..self.buf_len + 4]
-          .copy_from_slice(&val.to_be_bytes());
-        self.buf_len += 4;
+      let Some(line) = self.lines.next() else {
+        break;
+      };
+      if line.is_empty() {
+        continue;
       }
-
-      if self.buf_len > expected_len {
-        self.buf_len = expected_len;
-      }
+      self.decode_line(line)?;
     }
+
+    Ok(written)
+  }
+}
+
+impl Base85Reader<'_> {
+  fn decode_line(&mut self, line: &[u8]) -> IoResult<()> {
+    let invalid =
+      || IoError::new(IoErrorKind::InvalidData, InvalidBinaryLineError);
+
+    self.buf_len = 0;
+    self.pos = 0;
+
+    let expected_len = decode_len_char(line[0]).ok_or_else(invalid)?;
+
+    for chunk in line[1..].as_chunks::<5>().0 {
+      let d0 = DECODE_MAP[chunk[0] as usize];
+      let d1 = DECODE_MAP[chunk[1] as usize];
+      let d2 = DECODE_MAP[chunk[2] as usize];
+      let d3 = DECODE_MAP[chunk[3] as usize];
+      let d4 = DECODE_MAP[chunk[4] as usize];
+
+      if (d0 | d1 | d2 | d3 | d4) == 0xFF {
+        return Err(invalid());
+      }
+
+      let val = (d0 as u32) * 52_200_625
+        + (d1 as u32) * 614_125
+        + (d2 as u32) * 7_225
+        + (d3 as u32) * 85
+        + (d4 as u32);
+
+      self.buffer[self.buf_len..self.buf_len + 4]
+        .copy_from_slice(&val.to_be_bytes());
+      self.buf_len += 4;
+    }
+
+    self.buf_len = self.buf_len.min(expected_len);
+    Ok(())
   }
 }
 

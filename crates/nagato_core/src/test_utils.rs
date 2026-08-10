@@ -3,7 +3,6 @@ use std::{
   path::Path,
 };
 
-pub use tempfile;
 use tempfile::{Builder, TempDir};
 
 pub fn create_temp_dir() -> TempDir {

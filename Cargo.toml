@@ -9,13 +9,12 @@ license = "GPL"
 repository = "https://github.com/dannycreations/Nagato"
 
 [workspace.dependencies]
-anyhow = "1.0.103"
+anyhow = "1.0.104"
 assert_cmd = "2.2.2"
-bstr = { version = "1.12.3", features = ["std"] }
-clap = { version = "4.6.1", features = ["derive"] }
+bstr = { version = "1.13.1", features = ["std"] }
+clap = { version = "4.6.6", features = ["derive"] }
 criterion = "0.8.2"
 flate2 = "1.1.9"
-hex = "0.4.3"
 indoc = "2.0.7"
 memchr = "2.8.3"
 memmap2 = "0.9.11"
@@ -24,7 +23,7 @@ nagato_core = { path = "crates/nagato_core" }
 predicates = "3.1.4"
 sha1 = "0.11.0"
 tempfile = "3.27.0"
-thiserror = "2.0.18"
+thiserror = "2.0.20"
 
 [profile.dev]
 codegen-units = 16

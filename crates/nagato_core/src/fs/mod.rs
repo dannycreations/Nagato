@@ -12,12 +12,10 @@ pub use virtuals::*;
 
 use crate::Error;
 
-/// Ensures that the specified directory exists, creating it and any necessary parent directories if they do not.
 pub fn ensure_dir(dir: &Path) -> Result<(), Error> {
   fs::create_dir_all(dir).map_err(Into::into)
 }
 
-/// Generates a unique file path within a directory by appending a numeric counter if the target name already exists.
 pub fn get_unique_path(dir: &Path, name: &str) -> PathBuf {
   let mut path = dir.join(name);
   if !path.try_exists().unwrap_or(true) {

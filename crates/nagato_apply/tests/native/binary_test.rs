@@ -109,14 +109,12 @@ test_binary_applier_process_ok!(
         size: 5,
         data_start: 0,
         data_len: 1,
-        _marker: std::marker::PhantomData,
       },
       BinaryFragment {
         kind: BinaryKind::Literal,
         size: 5,
         data_start: 1,
         data_len: 1,
-        _marker: std::marker::PhantomData,
       },
     ],
     ..Default::default()
@@ -182,14 +180,12 @@ fn test_binary_applier_fails_immediately_on_invalid_delta() {
         size: 3,
         data_start: 0,
         data_len: 1,
-        _marker: std::marker::PhantomData,
       },
       BinaryFragment {
         kind: BinaryKind::Literal,
         size: 3,
         data_start: 1,
         data_len: 1,
-        _marker: std::marker::PhantomData,
       },
     ],
     ..Default::default()

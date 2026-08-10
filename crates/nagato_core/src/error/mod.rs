@@ -83,12 +83,6 @@ impl Error {
     // Error classification for missing resources is determined by inspecting the underlying I/O error kind for a NotFound status.
     self.kind.io_kind() == Some(IoErrorKind::NotFound)
   }
-
-  #[inline]
-  pub fn is_already_exists(&self) -> bool {
-    matches!(self.kind, ErrorKind::AlreadyExists)
-      || self.kind.io_kind() == Some(IoErrorKind::AlreadyExists)
-  }
 }
 
 impl From<ErrorKind> for Error {

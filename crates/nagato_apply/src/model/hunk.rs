@@ -1,7 +1,5 @@
 use std::mem;
 
-use crate::{Line, LineKind};
-
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Hunk<'a> {
   pub old_line: u32,
@@ -15,41 +13,9 @@ pub struct Hunk<'a> {
   pub label: Option<&'a [u8]>,
 }
 
-const _: () = assert!(std::mem::size_of::<Hunk>() == 48);
-
-impl<'a> Hunk<'a> {
+impl Hunk<'_> {
   pub fn invert(&mut self) {
     mem::swap(&mut self.old_line, &mut self.new_line);
     mem::swap(&mut self.old_span, &mut self.new_span);
-  }
-
-  #[inline]
-  pub fn lines_to_match<'h>(
-    &self,
-    lines: &'h [Line<'a>],
-  ) -> impl Iterator<Item = (usize, &'h Line<'a>)> + Clone {
-    lines
-      .iter()
-      .enumerate()
-      .filter(|(_, l)| !matches!(l.kind, LineKind::Addition))
-  }
-
-  #[inline]
-  pub fn first_non_empty_match_line<'h>(
-    &self,
-    lines: &'h [Line<'a>],
-  ) -> Option<(usize, &'h Line<'a>)> {
-    self.lines_to_match(lines).find(|(_, l)| !l.text.is_empty())
-  }
-
-  #[inline]
-  pub fn best_match_line<'h>(
-    &self,
-    lines: &'h [Line<'a>],
-  ) -> Option<(usize, &'h Line<'a>)> {
-    self
-      .lines_to_match(lines)
-      .filter(|(_, l)| !l.text.is_empty())
-      .max_by_key(|(_, l)| l.text.len())
   }
 }

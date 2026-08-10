@@ -228,7 +228,6 @@ test_reject_mixed!(
       size: 1,
       data_start: 0,
       data_len: 1,
-      _marker: std::marker::PhantomData,
     }],
     hunks: vec![Hunk::default()],
     ..Default::default()
