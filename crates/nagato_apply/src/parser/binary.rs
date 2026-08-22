@@ -7,7 +7,6 @@ pub fn parse_binary_patch<'a>(
   patch: &mut Patch<'a>,
 ) -> Result<(), Error> {
   patch.binary = true;
-  // Binary patches are parsed by consuming type-specific headers followed by sequential blocks of encoded binary data.
   while let Some(item) = parser.peek_token()? {
     match item.token {
       TokenKind::BinaryPatchType { kind, size } => {

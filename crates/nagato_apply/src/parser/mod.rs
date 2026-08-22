@@ -9,8 +9,8 @@ use nagato_core::{Error, ErrorKind};
 use crate::{Hunk, Lexer, LexerItem, Patch, TokenKind};
 
 pub struct Parser<'a> {
-  pub tokens: Peekable<Lexer<'a>>,
-  pub label: Option<&'a [u8]>,
+  pub(crate) tokens: Peekable<Lexer<'a>>,
+  pub(crate) label: Option<&'a [u8]>,
 }
 
 impl<'a> Parser<'a> {
@@ -47,15 +47,15 @@ impl<'a> Parser<'a> {
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
     // Ensure label state doesn't leak between patches.
     self.label = None;
-    // Patch initialization involves parsing the header and associated hunks into a default patch structure.
     let mut patch = Patch::default();
 
     let start_line = self.peek_token()?.map(|i| i.line_num).unwrap_or(0);
 
     header::parse_header(self, &mut patch)?;
-    hunk::parse_hunks(self, &mut patch)?;
+    while let Some(hunk) = hunk::next_hunk(self, &mut patch)? {
+      patch.hunks.push(hunk);
+    }
 
-    // Patch validity is checked by ensuring that any content changes are associated with at least one valid file path.
     if !patch.hunks.is_empty()
       && patch.old_file.is_empty()
       && patch.new_file.is_empty()
@@ -70,10 +70,7 @@ impl<'a> Parser<'a> {
   }
 
   pub fn skip_empty_context_lines(&mut self) -> Result<(), Error> {
-    while self.peek_is(|t| {
-      matches!(t, TokenKind::Gap)
-        || matches!(t, TokenKind::Context(s) if s.is_empty())
-    })? {
+    while self.peek_is(TokenKind::is_padding)? {
       self.tokens.next();
     }
     Ok(())
@@ -87,7 +84,7 @@ impl<'a> Parser<'a> {
   }
 
   pub fn peek_token(&mut self) -> Result<Option<&LexerItem<'a>>, Error> {
-    // Token peeking logic identifies lexer errors by inspecting the next available item without consuming it from the stream.
+    // Lexer errors are pulled off the stream as soon as a peek sees them.
     if self.tokens.peek().is_some_and(|r| r.is_err()) {
       return Err(self.tokens.next().unwrap().unwrap_err());
     }
@@ -99,7 +96,6 @@ impl<'a> Iterator for Parser<'a> {
   type Item = Result<Patch<'a>, Error>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    // Patch iteration proceeds by skipping leading whitespace and attempting to parse the next patch until the end of the token stream is reached or an error occurs.
     if let Err(e) = self.skip_empty_context_lines() {
       return Some(Err(e));
     }

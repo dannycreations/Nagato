@@ -31,7 +31,6 @@ impl PatchSource {
       return Box::new(once(res));
     }
 
-    // Multiple patch files are processed by mapping each path to a memory-mapped file source, providing efficient read access for the parser.
     Box::new(files.into_iter().map(|path| {
       let file = File::open(&path).map_err(|e| {
         Error::new(ErrorKind::CantOpenPatch(path.to_string_lossy().into(), e))

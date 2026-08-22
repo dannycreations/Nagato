@@ -16,7 +16,8 @@ use memmap2::Mmap;
 use tempfile::TempDir;
 
 use crate::{
-  traits::IsDevNull, utils::to_path_buf, AtomicWriter, Error, ErrorKind,
+  utils::{to_path_buf, IsDevNull},
+  AtomicWriter, Error, ErrorKind,
 };
 
 #[derive(Debug)]
@@ -175,7 +176,6 @@ impl FileSystem {
     let from_full = self.root.join(&from_rel);
     let to_full = self.root.join(&to_rel);
 
-    // If from and to are the same path (after resolution), this is a no-op.
     if from_full == to_full {
       return Ok(());
     }
@@ -202,6 +202,7 @@ impl FileSystem {
         .map(|s| full_path.starts_with(s.path()))
         .unwrap_or(false);
 
+      // In check mode only staged copies are chmod'ed; real targets stay untouched.
       if !self.check || is_staged {
         let sanitized_mode = mode & !0o6000;
         fs::set_permissions(full_path, Permissions::from_mode(sanitized_mode))?;

@@ -67,3 +67,13 @@ pub struct BinaryPaths<'a> {
   pub old_file: &'a [u8],
   pub new_file: &'a [u8],
 }
+
+impl TokenKind<'_> {
+  pub(crate) fn is_padding(&self) -> bool {
+    match self {
+      TokenKind::Gap => true,
+      TokenKind::Context(text) => text.is_empty(),
+      _ => false,
+    }
+  }
+}

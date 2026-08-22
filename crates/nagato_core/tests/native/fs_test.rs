@@ -1,15 +1,15 @@
 use std::{
   borrow::Cow,
   fs::{read, write},
-  io::{Error as StdIoError, ErrorKind as StdIoErrorKind, Write},
+  io::Write,
   path::Path,
 };
 #[cfg(unix)]
 use std::{fs::metadata, os::unix::fs::PermissionsExt};
 
 use nagato_core::{
-  create_test_fs, get_unique_path, AtomicWriter, Error, ErrorKind, FileSystem,
-  IgnoreNotFound, IsDevNull,
+  create_test_fs, get_unique_path, AtomicWriter, ErrorKind, FileSystem,
+  IsDevNull,
 };
 
 #[cfg(unix)]
@@ -167,23 +167,6 @@ fn test_is_dev_null() {
   assert!(!b"not/dev/null".is_dev_null());
   assert!(Cow::Borrowed(b"dev/null" as &[u8]).is_dev_null());
   assert!(!Cow::Borrowed(b"other" as &[u8]).is_dev_null());
-}
-
-#[test]
-fn test_ignore_not_found() {
-  let err_not_found = Error::new(ErrorKind::Io(StdIoError::new(
-    StdIoErrorKind::NotFound,
-    "file not found",
-  )));
-  let res_not_found: Result<Vec<u8>, Error> = Err(err_not_found);
-  assert_eq!(res_not_found.ignore_not_found().unwrap(), Vec::<u8>::new());
-
-  let err_other = Error::new(ErrorKind::AlreadyExists);
-  let res_other: Result<Vec<u8>, Error> = Err(err_other);
-  assert!(res_other.ignore_not_found().is_err());
-
-  let res_ok: Result<Vec<u8>, Error> = Ok(vec![1, 2, 3]);
-  assert_eq!(res_ok.ignore_not_found().unwrap(), vec![1, 2, 3]);
 }
 
 test_fs_ops_ok!(

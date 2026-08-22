@@ -1,6 +1,10 @@
 use std::process::exit;
 
-use nagato_cli::{execute, Cli, Parser};
+use clap::Parser;
+
+mod cmd;
+
+use cmd::{execute, Cli};
 
 fn main() {
   let cli = Cli::parse();

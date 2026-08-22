@@ -45,7 +45,7 @@ impl<'a> Lexer<'a> {
     let line = self.next_line()?;
     let line_num = self.line_num;
 
-    // Tokenization mode is dynamically toggled between text and binary based on the current lexer state to ensure correct parsing of mixed-content patches.
+    // The mode flips between text and binary while a patch interleaves both.
     let res = match self.mode {
       LexerMode::Binary => self.tokenize_binary(line),
       LexerMode::Text => self.tokenize_text(line),

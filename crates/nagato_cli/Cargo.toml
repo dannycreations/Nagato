@@ -6,9 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[lib]
-doctest = false
-
 [[bin]]
 name = "nagato"
 path = "src/main.rs"

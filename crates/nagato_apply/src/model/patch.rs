@@ -60,9 +60,10 @@ impl<'a> Patch<'a> {
   }
 
   pub fn filename(&self) -> &[u8] {
-    match !self.new_file.is_empty() && !self.new_file.is_dev_null() {
-      true => &self.new_file,
-      false => &self.old_file,
+    if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
+      &self.new_file
+    } else {
+      &self.old_file
     }
   }
 
@@ -74,7 +75,7 @@ impl<'a> Patch<'a> {
     mem::swap(&mut self.copy_from, &mut self.copy_to);
     mem::swap(&mut self.rename_from, &mut self.rename_to);
 
-    self.lines.iter_mut().for_each(|line| line.invert());
+    self.lines.iter_mut().for_each(|line| line.kind.invert());
     self.hunks.iter_mut().for_each(|hunk| hunk.invert());
     self
   }

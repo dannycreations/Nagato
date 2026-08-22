@@ -26,10 +26,8 @@ pub fn next_hunk<'a>(
       | TokenKind::Gap => {
         let initial_line = item.line_num;
         let lines_start = patch.lines.len() as u32;
-        let (old_span, new_span) = collect_hunk_lines(parser, patch, |t| {
-          matches!(t, TokenKind::Gap)
-            || matches!(t, TokenKind::Context(s) if s.is_empty())
-        })?;
+        let (old_span, new_span) =
+          collect_hunk_lines(parser, patch, TokenKind::is_padding)?;
         let lines_len = patch.lines.len() as u32 - lines_start;
 
         if lines_len > 0 {
@@ -58,16 +56,6 @@ pub fn next_hunk<'a>(
   Ok(None)
 }
 
-pub fn parse_hunks<'a>(
-  parser: &mut Parser<'a>,
-  patch: &mut Patch<'a>,
-) -> Result<(), Error> {
-  while let Some(hunk) = next_hunk(parser, patch)? {
-    patch.hunks.push(hunk);
-  }
-  Ok(())
-}
-
 pub fn collect_hunk_lines<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
@@ -81,48 +69,11 @@ pub fn collect_hunk_lines<'a>(
       break;
     }
 
-    // Hunk line processing resets the no-newline flags to ensure that markers only apply when they are the final elements for their respective file versions.
-    match &item.token {
-      TokenKind::Addition(text) => {
-        new_span += 1;
-        patch.new_file_no_newline = false;
-        patch.lines.push(Line {
-          kind: LineKind::Addition,
-          text,
-        });
-        parser.tokens.next();
-      }
-      TokenKind::Deletion(text) => {
-        old_span += 1;
-        patch.old_file_no_newline = false;
-        patch.lines.push(Line {
-          kind: LineKind::Deletion,
-          text,
-        });
-        parser.tokens.next();
-      }
-      TokenKind::Context(text) => {
-        old_span += 1;
-        new_span += 1;
-        patch.old_file_no_newline = false;
-        patch.new_file_no_newline = false;
-        patch.lines.push(Line {
-          kind: LineKind::Context,
-          text,
-        });
-        parser.tokens.next();
-      }
-      TokenKind::Gap => {
-        old_span += 1;
-        new_span += 1;
-        patch.old_file_no_newline = false;
-        patch.new_file_no_newline = false;
-        patch.lines.push(Line {
-          kind: LineKind::Gap,
-          text: &[],
-        });
-        parser.tokens.next();
-      }
+    let (kind, text) = match &item.token {
+      TokenKind::Addition(text) => (LineKind::Addition, *text),
+      TokenKind::Deletion(text) => (LineKind::Deletion, *text),
+      TokenKind::Context(text) => (LineKind::Context, *text),
+      TokenKind::Gap => (LineKind::Gap, &[][..]),
       TokenKind::NoNewline => {
         parser.tokens.next();
         let Some(last) = patch.lines.last() else {
@@ -135,10 +86,25 @@ pub fn collect_hunk_lines<'a>(
         if old_span > 0 && last.kind != LineKind::Addition {
           patch.old_file_no_newline = true;
         }
+        continue;
       }
       _ => break,
     };
+
+    // A line that contributes to one file version resets that side's
+    // no-newline flag; only a trailing marker may set it again.
+    if kind != LineKind::Addition {
+      old_span += 1;
+      patch.old_file_no_newline = false;
+    }
+    if kind != LineKind::Deletion {
+      new_span += 1;
+      patch.new_file_no_newline = false;
+    }
+    patch.lines.push(Line { kind, text });
+    parser.tokens.next();
   }
+
   Ok((old_span, new_span))
 }
 
@@ -184,7 +150,6 @@ pub fn parse_hunk<'a>(
       }
     };
 
-  // Hunk integrity is verified by comparing the actual line counts accumulated during parsing against the expected spans declared in the hunk header.
   if actual_old_span != old_span || actual_new_span != new_span {
     patch.lines.truncate(lines_start as usize);
     return Err(Error::with_line(

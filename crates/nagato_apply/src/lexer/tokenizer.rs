@@ -165,19 +165,9 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    // Hunk headers are parsed by splitting the line into range and optional label components using byte-level patterns.
     let header = &line[3..];
     let Some(idx) = memmem::find(header, b" @@") else {
-      let mut parts = header.fields();
-      let old_range = parts
-        .next()
-        .and_then(|s| s.strip_prefix(b"-"))
-        .ok_or(ErrorKind::MissingRange)?;
-      let new_range = parts
-        .next()
-        .and_then(|s| s.strip_prefix(b"+"))
-        .ok_or(ErrorKind::MissingRange)?;
-
+      let (old_range, new_range) = parse_ranges(header)?;
       return Ok(TokenKind::HunkHeader {
         old_range,
         new_range,
@@ -185,20 +175,8 @@ impl<'a> Lexer<'a> {
       });
     };
 
-    let content = &header[..idx];
-    let label_part = &header[idx + 3..];
-    let mut parts = content.fields();
-
-    let old_range = parts
-      .next()
-      .and_then(|s| s.strip_prefix(b"-"))
-      .ok_or(ErrorKind::MissingRange)?;
-    let new_range = parts
-      .next()
-      .and_then(|s| s.strip_prefix(b"+"))
-      .ok_or(ErrorKind::MissingRange)?;
-
-    let label = label_part.trim_start();
+    let (old_range, new_range) = parse_ranges(&header[..idx])?;
+    let label = header[idx + 3..].trim_start();
     let label = (!label.is_empty()).then_some(label);
 
     Ok(TokenKind::HunkHeader {
@@ -239,7 +217,6 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    // Index lines are processed by extracting the hash pair and optional mode from the space-delimited fields.
     let mut parts = line[6..].fields();
     let (old_hash, new_hash) = parts
       .next()
@@ -279,7 +256,6 @@ impl<'a> Lexer<'a> {
     &mut self,
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
-    // Binary file markers are parsed by extracting the file paths from a standardized "Binary files ... differ" message using byte-level split operations.
     let rest = &line[13..];
     let rest = rest.strip_suffix(b" differ").unwrap_or(rest);
 
@@ -322,4 +298,17 @@ impl<'a> Lexer<'a> {
       Err(ErrorKind::InvalidPercentage)
     }
   }
+}
+
+fn parse_ranges(s: &[u8]) -> Result<(&[u8], &[u8]), ErrorKind> {
+  let mut parts = s.fields();
+  let old_range = parts
+    .next()
+    .and_then(|r| r.strip_prefix(b"-"))
+    .ok_or(ErrorKind::MissingRange)?;
+  let new_range = parts
+    .next()
+    .and_then(|r| r.strip_prefix(b"+"))
+    .ok_or(ErrorKind::MissingRange)?;
+  Ok((old_range, new_range))
 }

@@ -1,10 +1,12 @@
 use std::io::sink;
 
 use memmap2::Mmap;
-use nagato_core::{Error, ErrorKind, FileSystem, IgnoreNotFound, IsDevNull};
+use nagato_core::{Error, ErrorKind, FileSystem, IsDevNull};
 
 use crate::{applier::apply_streamed, apply, Parser, Patch};
 
+// Each caller releases the mapping before unlinking or renaming the file;
+// Windows refuses both operations while a memory mapping of it is alive.
 fn read_source_mapped(
   fs: &FileSystem,
   path: &[u8],
@@ -12,7 +14,11 @@ fn read_source_mapped(
   if path.is_dev_null() {
     return Ok(None);
   }
-  fs.read(path).map(Some).ignore_not_found()
+  match fs.read(path) {
+    Ok(source) => Ok(Some(source)),
+    Err(e) if e.is_not_found() => Ok(None),
+    Err(e) => Err(e),
+  }
 }
 
 fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
@@ -21,6 +27,13 @@ fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
   } else {
     Ok(())
   }
+}
+
+fn remove_source(fs: &FileSystem, source_path: &[u8]) -> Result<(), Error> {
+  if source_path.is_dev_null() {
+    return Ok(());
+  }
+  fs.remove(source_path)
 }
 
 fn finish(
@@ -48,7 +61,10 @@ fn drop_renamed_source(
   if patch.rename_to.is_none() || patch.new_file == source_path {
     return Ok(());
   }
-  fs.remove(source_path).ignore_not_found()
+  match fs.remove(source_path) {
+    Err(e) if e.is_not_found() => Ok(()),
+    res => res,
+  }
 }
 
 pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
@@ -60,7 +76,6 @@ pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
   let has_content = patch.has_content_changes();
   let source_path = patch.source_file();
 
-  // Patch application logic is dispatched based on the presence of content changes and the nature of the file operation to minimize redundant I/O.
   let result = match (is_deletion, has_content) {
     (true, _) => apply_deletion(fs, patch, source_path),
     (false, true) => apply_content_change(fs, patch, source_path),
@@ -92,26 +107,17 @@ fn stream_deletion<'a>(
   patch: &mut Patch<'a>,
   parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  let source = read_source_mapped(fs, source_path)?;
-  // The patch is still applied to a sink so that a mismatching hunk is
-  // reported instead of silently deleting the file.
-  let res = apply_streamed(
-    &mut sink(),
-    patch,
-    source.as_deref().unwrap_or(&[]),
-    parser,
-  );
-  // Release the mapping before unlinking; Windows refuses to remove a file
-  // that still has a live mapping.
-  drop(source);
-  res?;
+  // Owned so that the closure below can take `patch` mutably.
+  let source_path = patch.source_file().to_vec();
 
-  let source_path = patch.source_file();
-  if source_path.is_dev_null() {
-    return Ok(());
-  }
-  fs.remove(source_path)
+  // Applied to a sink so that a mismatching hunk is reported instead of
+  // silently deleting the file.
+  let applied = read_source_mapped(fs, &source_path).and_then(|source| {
+    apply_streamed(&mut sink(), patch, source.as_deref().unwrap_or(&[]), parser)
+  });
+  applied?;
+
+  remove_source(fs, &source_path)
 }
 
 fn stream_content_change<'a>(
@@ -119,22 +125,20 @@ fn stream_content_change<'a>(
   patch: &mut Patch<'a>,
   parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  let source = read_source_mapped(fs, source_path)?;
-  let mut writer = fs.write(&patch.new_file)?;
-  let res = apply_streamed(
-    &mut writer,
-    patch,
-    source.as_deref().unwrap_or(&[]),
-    parser,
-  );
-  // Explicitly drop source to release memory mapping before attempting to persist (rename) the file.
-  // On Windows, an open memory mapping prevents file renaming/moving.
-  drop(source);
-  res?;
+  if patch.old_file.is_dev_null() {
+    ensure_not_exists(fs, &patch.new_file)?;
+  }
 
+  let source_path = patch.source_file().to_vec();
+
+  let writer = read_source_mapped(fs, &source_path).and_then(|source| {
+    let mut writer = fs.write(&patch.new_file)?;
+    apply_streamed(&mut writer, patch, source.as_deref().unwrap_or(&[]), parser)
+      .map(|_| writer)
+  })?;
   writer.commit()?;
-  drop_renamed_source(fs, patch, patch.source_file())
+
+  drop_renamed_source(fs, patch, &source_path)
 }
 
 fn apply_deletion(
@@ -142,18 +146,14 @@ fn apply_deletion(
   patch: &Patch<'_>,
   source_path: &[u8],
 ) -> Result<(), Error> {
-  let source = read_source_mapped(fs, source_path)?;
-  // To ensure the patch applies even on deletion, we apply to a sink.
-  let res = apply(&mut sink(), patch, source.as_deref().unwrap_or(&[]));
-  // Release the mapping before unlinking; Windows refuses to remove a file
-  // that still has a live mapping.
-  drop(source);
-  res?;
+  // Applied to a sink so that a mismatching hunk is reported instead of
+  // silently deleting the file.
+  let applied = read_source_mapped(fs, source_path).and_then(|source| {
+    apply(&mut sink(), patch, source.as_deref().unwrap_or(&[]))
+  });
+  applied?;
 
-  if source_path.is_dev_null() {
-    return Ok(());
-  }
-  fs.remove(source_path)
+  remove_source(fs, source_path)
 }
 
 fn apply_content_change(
@@ -165,15 +165,12 @@ fn apply_content_change(
     ensure_not_exists(fs, &patch.new_file)?;
   }
 
-  let source = read_source_mapped(fs, source_path)?;
-  let mut writer = fs.write(&patch.new_file)?;
-  let res = apply(&mut writer, patch, source.as_deref().unwrap_or(&[]));
-  // Explicitly drop source to release memory mapping before attempting to persist (rename) the file.
-  // On Windows, an open memory mapping prevents file renaming/moving.
-  drop(source);
-  res?;
-
+  let writer = read_source_mapped(fs, source_path).and_then(|source| {
+    let mut writer = fs.write(&patch.new_file)?;
+    apply(&mut writer, patch, source.as_deref().unwrap_or(&[])).map(|_| writer)
+  })?;
   writer.commit()?;
+
   drop_renamed_source(fs, patch, source_path)
 }
 
@@ -182,7 +179,6 @@ fn apply_structural_change(
   patch: &Patch<'_>,
   source_path: &[u8],
 ) -> Result<(), Error> {
-  // Structural changes like renames, copies, or file creations are handled by mapping the intended operation to the corresponding filesystem primitive.
   if patch.rename_to.is_some() {
     return fs.rename(source_path, &patch.new_file);
   }

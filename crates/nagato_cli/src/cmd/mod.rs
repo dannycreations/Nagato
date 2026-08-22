@@ -32,8 +32,7 @@ pub fn execute(cli: Cli) -> Result<(), Error> {
       process_merge(files, output.map(PathBuf::from))
     }
     None => {
-      // Default to "apply" if no subcommand is provided.
-      // If no files are provided and stdin is a terminal, print help.
+      // With no files on an interactive stdin there is nothing to read.
       if cli.files.is_empty() && stdin().is_terminal() {
         Cli::command().print_help().expect("failed to print help");
         return Ok(());

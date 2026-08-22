@@ -5,7 +5,7 @@ use nagato_core::{Error, ErrorKind, LineWriter};
 use sha1::{Digest, Sha1};
 
 use crate::{
-  applier::matcher::{first_non_empty_match_line, Matcher},
+  applier::matcher::{find_match, first_non_empty_match_line},
   binary, BinaryKind, Hunk, Line, LineKind, Patch,
 };
 
@@ -76,7 +76,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     // Binary patches apply to the entire file state; consume remaining source to prevent trailing junk.
     self.pos = self.source.len();
 
-    // Binary patches are applied by processing fragments until a successful literal decoding or delta application occurs.
     for fragment in patch.binary_fragments.iter() {
       let data = patch.binary_fragment_data(fragment);
       if matches!(fragment.kind, BinaryKind::Literal) {
@@ -145,8 +144,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     }
 
     let source = self.source_at();
-    let (match_pos, remaining) =
-      Matcher.find_match(source, patch, hunk, None)?;
+    let (match_pos, remaining) = find_match(source, patch, hunk, None)?;
     self.apply_hunk(lines, match_pos, remaining)
   }
 
@@ -155,7 +153,6 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
     // Hunkless patches are often used in "diff-lite" formats where headers are missing.
-    // Pre-compute Finders for all hunks to speed up search.
     let mut pending: Vec<Option<(&Hunk<'_>, Option<Finder>)>> = patch
       .hunks
       .iter()
@@ -183,7 +180,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       }
 
       let Ok((match_pos, remaining)) =
-        Matcher.find_match(&source[offset..], patch, hunk, finder.as_ref())
+        find_match(&source[offset..], patch, hunk, finder.as_ref())
       else {
         continue;
       };
@@ -196,7 +193,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     // Second pass: anything left over is matched against the whole source.
     for (hunk, finder) in pending.into_iter().flatten() {
       let (match_pos, remaining) =
-        Matcher.find_match(source, patch, hunk, finder.as_ref())?;
+        find_match(source, patch, hunk, finder.as_ref())?;
       to_apply.push((initial_pos + match_pos, remaining, hunk));
     }
 

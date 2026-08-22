@@ -146,11 +146,17 @@ impl Base85Reader<'_> {
   }
 }
 
+pub fn new_base85_decoder<'a>(
+  lines: &'a [&'a [u8]],
+) -> ZlibDecoder<Base85Reader<'a>> {
+  ZlibDecoder::new(Base85Reader::new(lines))
+}
+
 pub fn decode_base85(
   lines: &[&[u8]],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
-  let mut decoder = ZlibDecoder::new(Base85Reader::new(lines));
+  let mut decoder = new_base85_decoder(lines);
   io_copy(&mut decoder, writer).map_err(|e| {
     let mut is_invalid_line = false;
     if let Some(r) = e.get_ref() {

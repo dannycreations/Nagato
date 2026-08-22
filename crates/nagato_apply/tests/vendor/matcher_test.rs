@@ -1,4 +1,4 @@
-use nagato_apply::{Hunk, Line, LineKind, Matcher, Patch};
+use nagato_apply::{find_match, Hunk, Line, LineKind, Patch};
 
 #[test]
 fn test_match_hunk_with_no_matchable_lines() {
@@ -17,10 +17,9 @@ fn test_match_hunk_with_no_matchable_lines() {
   };
 
   let buffer = b"existing content";
-  let matcher = Matcher;
 
   // This should not panic and should match at position 0.
-  let res = matcher.find_match(buffer, &patch, &hunk, None);
+  let res = find_match(buffer, &patch, &hunk, None);
   assert!(res.is_ok());
   let (pos, remaining) = res.unwrap();
   assert_eq!(pos, 0);
@@ -50,10 +49,9 @@ fn test_match_hunk_with_only_empty_context() {
   };
 
   let buffer = b"\nexisting content";
-  let matcher = Matcher;
 
   // This should match the empty line.
-  let res = matcher.find_match(buffer, &patch, &hunk, None);
+  let res = find_match(buffer, &patch, &hunk, None);
   assert!(res.is_ok());
   let (pos, remaining) = res.unwrap();
   assert_eq!(pos, 0);

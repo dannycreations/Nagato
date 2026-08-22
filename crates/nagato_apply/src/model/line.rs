@@ -24,10 +24,3 @@ pub struct Line<'a> {
   pub kind: LineKind,
   pub text: &'a [u8],
 }
-
-impl<'a> Line<'a> {
-  #[inline]
-  pub fn invert(&mut self) {
-    self.kind.invert();
-  }
-}

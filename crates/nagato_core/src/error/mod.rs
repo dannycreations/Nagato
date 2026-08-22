@@ -80,7 +80,6 @@ impl Error {
 
   #[inline]
   pub fn is_not_found(&self) -> bool {
-    // Error classification for missing resources is determined by inspecting the underlying I/O error kind for a NotFound status.
     self.kind.io_kind() == Some(IoErrorKind::NotFound)
   }
 }

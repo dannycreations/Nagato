@@ -6,7 +6,6 @@ pub fn parse_header<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
 ) -> Result<(), Error> {
-  // Patch headers are processed by iteratively peeking at tokens and updating patch metadata until a non-header token is encountered.
   while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::FileHeader(paths) => {

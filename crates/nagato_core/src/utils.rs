@@ -15,6 +15,17 @@ use crate::Error;
 #[cfg(windows)]
 use crate::ErrorKind;
 
+pub trait IsDevNull {
+  fn is_dev_null(&self) -> bool;
+}
+
+impl IsDevNull for [u8] {
+  #[inline]
+  fn is_dev_null(&self) -> bool {
+    self == b"dev/null" || self == b"/dev/null"
+  }
+}
+
 #[inline(always)]
 pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
   if s.starts_with(b"a/") || s.starts_with(b"b/") {
