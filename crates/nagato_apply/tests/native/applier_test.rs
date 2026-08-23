@@ -202,9 +202,7 @@ fn applier_flush_remaining() {
       text: b"line1",
     }],
     hunks: vec![Hunk {
-      old_line: 1,
       old_span: 1,
-      new_line: 1,
       new_span: 1,
       lines_start: 0,
       lines_len: 1,

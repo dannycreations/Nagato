@@ -3,18 +3,11 @@ mod virtuals;
 
 use std::{
   fmt::Write,
-  fs,
   path::{Path, PathBuf},
 };
 
 pub use atomic::*;
 pub use virtuals::*;
-
-use crate::Error;
-
-pub fn ensure_dir(dir: &Path) -> Result<(), Error> {
-  fs::create_dir_all(dir).map_err(Into::into)
-}
 
 pub fn get_unique_path(dir: &Path, name: &str) -> PathBuf {
   let mut path = dir.join(name);

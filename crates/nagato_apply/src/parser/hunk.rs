@@ -32,8 +32,6 @@ pub fn next_hunk<'a>(
 
         if lines_len > 0 {
           Some(Hunk {
-            old_line: 0,
-            new_line: 0,
             old_span,
             new_span,
             lines_start,
@@ -131,9 +129,9 @@ pub fn parse_hunk<'a>(
     }
   };
 
-  let (old_line, old_span) =
+  let old_span =
     parse_range(old_range).map_err(|k| Error::with_line(k, item.line_num))?;
-  let (new_line, new_span) =
+  let new_span =
     parse_range(new_range).map_err(|k| Error::with_line(k, item.line_num))?;
 
   let lines_start = patch.lines.len() as u32;
@@ -161,9 +159,7 @@ pub fn parse_hunk<'a>(
   let lines_len = patch.lines.len() as u32 - lines_start;
 
   Ok(Hunk {
-    old_line,
     old_span,
-    new_line,
     new_span,
     lines_start,
     lines_len,
@@ -173,23 +169,22 @@ pub fn parse_hunk<'a>(
   })
 }
 
-fn parse_range(range_bytes: &[u8]) -> Result<(u32, u32), ErrorKind> {
-  let idx = match memchr(b',', range_bytes) {
-    Some(i) => i,
-    None => {
-      let (line, _) =
-        parse_int::<u32>(range_bytes, 10).ok_or(ErrorKind::InvalidHunkRange)?;
-      return Ok((line, 1));
-    }
+fn parse_range(range_bytes: &[u8]) -> Result<u32, ErrorKind> {
+  // Only the span drives application; the line number is still parsed so
+  // malformed ranges such as "-x,2" keep failing here.
+  let (line_part, span_part) = match memchr(b',', range_bytes) {
+    Some(i) => (&range_bytes[..i], Some(&range_bytes[i + 1..])),
+    None => (range_bytes, None),
   };
 
-  let line_part = &range_bytes[..idx];
-  let span_part = &range_bytes[idx + 1..];
+  parse_int::<u32>(line_part, 10).ok_or(ErrorKind::InvalidHunkRange)?;
 
-  let (line, _) =
-    parse_int::<u32>(line_part, 10).ok_or(ErrorKind::InvalidHunkRange)?;
-  let (span, _) =
-    parse_int::<u32>(span_part, 10).ok_or(ErrorKind::InvalidHunkRange)?;
-
-  Ok((line, span))
+  match span_part {
+    Some(bytes) => {
+      let (span, _) =
+        parse_int::<u32>(bytes, 10).ok_or(ErrorKind::InvalidHunkRange)?;
+      Ok(span)
+    }
+    None => Ok(1),
+  }
 }

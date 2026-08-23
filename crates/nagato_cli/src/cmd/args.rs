@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser as ClapParser, Subcommand};
 
@@ -25,7 +25,7 @@ pub struct Cli {
   pub check: bool,
   /// The directory to run the patch in.
   #[arg(short, long)]
-  pub directory: Option<OsString>,
+  pub directory: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -36,7 +36,7 @@ pub enum Commands {
     files: Vec<OsString>,
     /// The directory to store the trim patches.
     #[arg(short, long)]
-    directory: Option<OsString>,
+    directory: Option<PathBuf>,
   },
   /// Split multi-file patches into independent files.
   Split {
@@ -44,7 +44,7 @@ pub enum Commands {
     files: Vec<OsString>,
     /// The directory to store the split patches.
     #[arg(short, long)]
-    directory: Option<OsString>,
+    directory: Option<PathBuf>,
   },
   /// Merge multiple patch files into a single patch file.
   Merge {
@@ -52,6 +52,6 @@ pub enum Commands {
     files: Vec<OsString>,
     /// The output path for the merged patch.
     #[arg(short, long)]
-    output: Option<OsString>,
+    output: Option<PathBuf>,
   },
 }

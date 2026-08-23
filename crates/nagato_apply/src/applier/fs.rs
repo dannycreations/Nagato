@@ -77,7 +77,7 @@ pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
   let source_path = patch.source_file();
 
   let result = match (is_deletion, has_content) {
-    (true, _) => apply_deletion(fs, patch, source_path),
+    (true, _) => apply_deletion(fs, patch),
     (false, true) => apply_content_change(fs, patch, source_path),
     (false, false) => apply_structural_change(fs, patch, source_path),
   };
@@ -109,15 +109,9 @@ fn stream_deletion<'a>(
 ) -> Result<(), Error> {
   // Owned so that the closure below can take `patch` mutably.
   let source_path = patch.source_file().to_vec();
-
-  // Applied to a sink so that a mismatching hunk is reported instead of
-  // silently deleting the file.
-  let applied = read_source_mapped(fs, &source_path).and_then(|source| {
-    apply_streamed(&mut sink(), patch, source.as_deref().unwrap_or(&[]), parser)
-  });
-  applied?;
-
-  remove_source(fs, &source_path)
+  apply_then_remove(fs, &source_path, |source| {
+    apply_streamed(&mut sink(), patch, source, parser)
+  })
 }
 
 fn stream_content_change<'a>(
@@ -141,19 +135,23 @@ fn stream_content_change<'a>(
   drop_renamed_source(fs, patch, &source_path)
 }
 
-fn apply_deletion(
+fn apply_then_remove(
   fs: &FileSystem,
-  patch: &Patch<'_>,
   source_path: &[u8],
+  validate: impl FnOnce(&[u8]) -> Result<(), Error>,
 ) -> Result<(), Error> {
   // Applied to a sink so that a mismatching hunk is reported instead of
   // silently deleting the file.
-  let applied = read_source_mapped(fs, source_path).and_then(|source| {
-    apply(&mut sink(), patch, source.as_deref().unwrap_or(&[]))
-  });
+  let applied = read_source_mapped(fs, source_path)
+    .and_then(|source| validate(source.as_deref().unwrap_or(&[])));
   applied?;
 
   remove_source(fs, source_path)
+}
+
+fn apply_deletion(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
+  let source_path = patch.source_file();
+  apply_then_remove(fs, source_path, |source| apply(&mut sink(), patch, source))
 }
 
 fn apply_content_change(

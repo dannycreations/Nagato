@@ -84,10 +84,7 @@ impl FileSystem {
     if self.deleted.borrow().contains(&rel) {
       return Err(ErrorKind::Io(IoError::from(IoErrorKind::NotFound)).into());
     }
-    let full_path = self
-      .get_staged_path(&rel)
-      .filter(|p| p.exists())
-      .unwrap_or_else(|| self.root.join(rel));
+    let full_path = self.effective_path(&rel);
 
     let file = File::open(full_path)?;
     // SAFETY: The mapping is read-only and lives no longer than the patch run
@@ -185,10 +182,7 @@ impl FileSystem {
     #[cfg(unix)]
     {
       let rel = self.resolve_relative(path)?;
-      let full_path = match self.get_staged_path(&rel) {
-        Some(staged) if staged.exists() => staged,
-        _ => self.root.join(&rel),
-      };
+      let full_path = self.effective_path(&rel);
 
       let is_staged = self
         .staging
@@ -250,6 +244,14 @@ impl FileSystem {
 
   fn get_staged_path(&self, rel: &Path) -> Option<PathBuf> {
     self.staging.as_ref().map(|s| s.path().join(rel))
+  }
+
+  // Prefer a staged copy while it exists; otherwise resolve against the root.
+  fn effective_path(&self, rel: &Path) -> PathBuf {
+    self
+      .get_staged_path(rel)
+      .filter(|p| p.exists())
+      .unwrap_or_else(|| self.root.join(rel))
   }
 }
 

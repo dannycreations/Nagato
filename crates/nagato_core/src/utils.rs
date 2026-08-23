@@ -232,18 +232,10 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
 
   #[inline]
   pub fn write_block(&mut self, block: &[u8]) -> IoResult<()> {
-    if block.is_empty() {
-      return Ok(());
-    }
-
-    if !self.is_empty && !self.last_was_newline {
+    if !block.is_empty() && !self.is_empty && !self.last_was_newline {
       self.output.write_all(b"\n")?;
     }
-
-    self.is_empty = false;
-    self.output.write_all(block)?;
-    self.last_was_newline = block.last() == Some(&b'\n');
-    Ok(())
+    self.write_bytes(block)
   }
 
   #[inline]
@@ -255,18 +247,13 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   }
 
   #[inline]
-  pub fn is_first_line(&self) -> bool {
-    self.is_empty
-  }
-
-  #[inline]
   pub fn output(&mut self) -> &mut W {
     self.output
   }
 }
 
 #[inline]
-pub fn to_path_buf(bytes: &[u8]) -> Result<PathBuf, Error> {
+pub(crate) fn to_path_buf(bytes: &[u8]) -> Result<PathBuf, Error> {
   #[cfg(unix)]
   {
     Ok(PathBuf::from(OsStr::from_bytes(bytes)))

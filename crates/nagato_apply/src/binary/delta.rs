@@ -26,15 +26,14 @@ pub fn apply_delta(
 ) -> Result<(), Error> {
   let mut delta = delta_reader;
 
-  let source_size_res = read_variable_length_int(&mut delta);
-  if let Err(e) = &source_size_res {
+  let source_size = read_variable_length_int(&mut delta).map_err(|e| {
     if matches!(e.kind, ErrorKind::Io(ref io) if io.kind() == IoErrorKind::UnexpectedEof)
     {
-      return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));
+      Error::new(ErrorKind::BinaryPatchSourceMismatch)
+    } else {
+      e
     }
-    return Err(source_size_res.unwrap_err());
-  }
-  let source_size = source_size_res.unwrap();
+  })?;
 
   if source_size != source.len() as u64 {
     return Err(Error::new(ErrorKind::BinaryPatchSourceMismatch));

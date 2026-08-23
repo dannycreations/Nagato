@@ -280,21 +280,12 @@ test_strip_prefix!(
 fn test_line_writer_behavior() {
   let mut buf = Vec::new();
   let mut writer = LineWriter::new(&mut buf);
-  assert!(writer.is_first_line());
-
-  writer.write_bytes(b"").unwrap();
-  assert!(
-    writer.is_first_line(),
-    "Empty write should not change first line state"
-  );
 
   writer.write_bytes(b"data").unwrap();
-  assert!(!writer.is_first_line());
 
   let mut buf2 = Vec::new();
   let mut writer2 = LineWriter::new(&mut buf2);
   writer2.write_newline().unwrap();
-  assert!(!writer2.is_first_line());
 
   // Consecutive ensures
   let mut buf3 = Vec::new();

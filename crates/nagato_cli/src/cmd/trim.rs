@@ -1,10 +1,11 @@
 use std::{
   ffi::OsString,
+  fs,
   io::Write,
   path::{Path, PathBuf},
 };
 
-use nagato_core::{ensure_dir, get_unique_path, AtomicWriter, Error};
+use nagato_core::{get_unique_path, AtomicWriter, Error};
 
 use crate::cmd::source::PatchSource;
 
@@ -13,7 +14,7 @@ pub fn process_trim(
   directory: Option<PathBuf>,
 ) -> Result<(), Error> {
   if let Some(dir) = directory.as_deref() {
-    ensure_dir(dir)?;
+    fs::create_dir_all(dir)?;
   }
 
   for source_res in PatchSource::iter(files) {

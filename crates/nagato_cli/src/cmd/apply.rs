@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::env;
 
 use nagato_apply::apply_to_fs;
 use nagato_core::{Error, FileSystem};
@@ -7,7 +7,7 @@ use crate::cmd::{source::PatchSource, Cli};
 
 pub fn process_apply(cli: Cli) -> Result<(), Error> {
   let root = match cli.directory {
-    Some(dir) => PathBuf::from(dir),
+    Some(dir) => dir,
     None => env::current_dir()?,
   };
   let fs = FileSystem::new(root, cli.check);

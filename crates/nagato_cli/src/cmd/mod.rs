@@ -1,7 +1,4 @@
-use std::{
-  io::{stdin, IsTerminal},
-  path::PathBuf,
-};
+use std::io::{stdin, IsTerminal};
 
 use clap::CommandFactory;
 use nagato_core::Error;
@@ -22,15 +19,11 @@ pub use args::*;
 
 pub fn execute(cli: Cli) -> Result<(), Error> {
   match cli.command {
-    Some(Commands::Trim { files, directory }) => {
-      process_trim(files, directory.map(PathBuf::from))
-    }
+    Some(Commands::Trim { files, directory }) => process_trim(files, directory),
     Some(Commands::Split { files, directory }) => {
-      process_split(files, directory.map(PathBuf::from))
+      process_split(files, directory)
     }
-    Some(Commands::Merge { files, output }) => {
-      process_merge(files, output.map(PathBuf::from))
-    }
+    Some(Commands::Merge { files, output }) => process_merge(files, output),
     None => {
       // With no files on an interactive stdin there is nothing to read.
       if cli.files.is_empty() && stdin().is_terminal() {

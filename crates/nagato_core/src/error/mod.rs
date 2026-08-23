@@ -80,7 +80,12 @@ impl Error {
 
   #[inline]
   pub fn is_not_found(&self) -> bool {
-    self.kind.io_kind() == Some(IoErrorKind::NotFound)
+    match &self.kind {
+      ErrorKind::Io(e) => e.kind() == IoErrorKind::NotFound,
+      ErrorKind::Persist(e) => e.error.kind() == IoErrorKind::NotFound,
+      ErrorKind::CantOpenPatch(_, e) => e.kind() == IoErrorKind::NotFound,
+      _ => false,
+    }
   }
 }
 

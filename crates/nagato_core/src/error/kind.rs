@@ -1,7 +1,4 @@
-use std::{
-  io::{Error as IoError, ErrorKind as IoErrorKind},
-  mem::discriminant,
-};
+use std::{io::Error as IoError, mem::discriminant};
 
 use tempfile::PersistError;
 use thiserror::Error as ThisError;
@@ -70,18 +67,6 @@ impl PartialEq for ErrorKind {
         // This reduces maintenance as new data-less variants won't need manual eq updates.
         discriminant(self) == discriminant(other)
       }
-    }
-  }
-}
-
-impl ErrorKind {
-  pub fn io_kind(&self) -> Option<IoErrorKind> {
-    match self {
-      Self::Io(e) => Some(e.kind()),
-      Self::CantOpenPatch(_, e) => Some(e.kind()),
-      Self::Persist(e) => Some(e.error.kind()),
-      Self::AlreadyExists => Some(IoErrorKind::AlreadyExists),
-      _ => None,
     }
   }
 }
