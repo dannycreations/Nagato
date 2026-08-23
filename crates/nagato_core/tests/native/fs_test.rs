@@ -13,27 +13,38 @@ use nagato_core::{
 };
 
 #[cfg(unix)]
-test_atomic_writer_err!(
-  fs_atomic_writer_root_err,
-  path: "/"
-);
+#[test]
+fn fs_atomic_writer_root_err() {
+  assert!(AtomicWriter::new(Path::new("/")).is_err());
+}
+
 #[cfg(windows)]
-test_atomic_writer_err!(
-  fs_atomic_writer_root_err,
-  path: "C:\\"
-);
+#[test]
+fn fs_atomic_writer_root_err() {
+  assert!(AtomicWriter::new(Path::new("C:\\")).is_err());
+}
 
-test_atomic_writer_ok!(
-  fs_atomic_writer_success,
-  content: b"content"
-);
+#[test]
+fn fs_atomic_writer_success() {
+  let dir = create_test_fs! {};
+  let file_path = dir.path().join("test.txt");
 
-test_fs_get_unique_path_ok!(
-  fs_get_unique_path,
-  initial_fs: { "test.trim.patch" => "v1" },
-  base_name: "test.trim.patch",
-  expected_file_name: "test-1.trim.patch"
-);
+  let mut writer = AtomicWriter::new(&file_path).unwrap();
+  writer.write_all(b"content").unwrap();
+  writer.commit().unwrap();
+
+  assert_eq!(read(file_path).unwrap(), b"content");
+}
+
+#[test]
+fn fs_get_unique_path() {
+  let dir = create_test_fs! { "test.trim.patch" => "v1" };
+  let res = get_unique_path(dir.path(), "test.trim.patch");
+  assert_eq!(
+    res.file_name().unwrap().to_str().unwrap(),
+    "test-1.trim.patch"
+  );
+}
 
 test_fs_ops_ok!(
   fs_basic_operations,

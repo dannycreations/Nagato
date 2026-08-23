@@ -19,29 +19,27 @@ pub fn process_trim(
   for source_res in PatchSource::iter(files) {
     let source = source_res?;
 
-    let source_path = match &source {
-      PatchSource::File { name, .. } => PathBuf::from(name.as_ref()),
+    let name = match &source {
+      PatchSource::File { name, .. } => name,
       PatchSource::Stdin(_) => continue,
     };
+    let source_path = Path::new(name.as_ref());
 
-    let ext = source_path
-      .extension()
-      .map(|e| format!("trim.{}", e.to_string_lossy()))
-      .unwrap_or_else(|| "trim.patch".to_string());
-    let base_name = source_path
-      .with_extension(ext)
-      .file_name()
-      .unwrap()
-      .to_os_string();
-
-    let base_name_str = base_name.to_string_lossy();
     // `get_unique_path` already returns `dir` joined with the resolved name,
     // so the result must not be joined onto the parent a second time.
     let dir = match directory.as_deref() {
       Some(dir) => dir,
       None => source_path.parent().unwrap_or_else(|| Path::new(".")),
     };
-    let out_path = get_unique_path(dir, &base_name_str);
+
+    // "dir/test.patch" -> "test.trim.patch"; keeps the original extension.
+    let stem = source_path.file_stem().unwrap().to_string_lossy();
+    let base_name = match source_path.extension() {
+      Some(ext) => format!("{}.trim.{}", stem, ext.to_string_lossy()),
+      None => format!("{}.trim.patch", stem),
+    };
+
+    let out_path = get_unique_path(dir, &base_name);
 
     let mut writer = AtomicWriter::new(&out_path)?;
     for (i, patch_res) in source.patches().enumerate() {

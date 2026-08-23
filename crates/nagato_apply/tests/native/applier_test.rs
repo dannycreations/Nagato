@@ -180,24 +180,23 @@ test_patch_err!(
   "#
 );
 
-test_patch_invert!(
-  test_applier_invert,
-  patch: {
-    old_file: b"a/file",
-    new_file: b"b/file",
-    rename_from: b"old",
-    rename_to: b"new",
-  },
-  expected: {
-    old_file: b"b/file",
-    rename_from: b"new",
-  }
-);
+#[test]
+fn test_applier_invert() {
+  let patch = Patch {
+    old_file: unquote_path(b"a/file"),
+    new_file: unquote_path(b"b/file"),
+    rename_from: Some(unquote_path(b"old")),
+    rename_to: Some(unquote_path(b"new")),
+    ..Default::default()
+  };
+  let inverted = patch.invert();
+  assert_eq!(inverted.old_file.as_ref(), strip_diff_prefix(b"b/file"));
+  assert_eq!(inverted.rename_from, Some(unquote_path(b"new")));
+}
 
-test_applier_flush_ok!(
-  applier_flush_remaining,
-  source: b"line1\nline2\n",
-  patch: Patch {
+#[test]
+fn applier_flush_remaining() {
+  let patch = Patch {
     lines: vec![Line {
       kind: LineKind::Context,
       text: b"line1",
@@ -213,14 +212,21 @@ test_applier_flush_ok!(
       ..Default::default()
     }],
     ..Default::default()
-  },
-  expected_contains: "line2"
-);
+  };
 
-test_reject_mixed!(
-  test_rejects_mixed_binary_and_hunks,
-  initial_fs: { "file.txt" => "content\n" },
-  patch: Patch {
+  let mut output = Vec::new();
+  Applier::new(&mut output, b"line1\nline2\n")
+    .process(&patch)
+    .unwrap();
+  assert!(String::from_utf8_lossy(&output).contains("line2"));
+}
+
+#[test]
+fn test_rejects_mixed_binary_and_hunks() {
+  let dir = create_test_fs! { "file.txt" => "content\n" };
+  let fs = FileSystem::new(dir.path(), false);
+
+  let patch = Patch {
     binary: true,
     binary_lines: vec![b"Wc-qT"],
     binary_fragments: vec![BinaryFragment {
@@ -231,8 +237,10 @@ test_reject_mixed!(
     }],
     hunks: vec![Hunk::default()],
     ..Default::default()
-  }
-);
+  };
+  let res = patch_file(&fs, patch, false);
+  assert_eq!(res.unwrap_err().kind, ErrorKind::UnsupportedBinaryPatch);
+}
 
 test_apply_ok!(
   applier_best_match_anchor,

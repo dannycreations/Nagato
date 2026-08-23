@@ -276,39 +276,39 @@ test_strip_prefix!(
   expected: b""
 );
 
-test_line_writer_ok!(
-  test_line_writer_behavior,
-  assertions: |writer, buf| {
-    assert!(writer.is_first_line());
+#[test]
+fn test_line_writer_behavior() {
+  let mut buf = Vec::new();
+  let mut writer = LineWriter::new(&mut buf);
+  assert!(writer.is_first_line());
 
-    writer.write_bytes(b"").unwrap();
-    assert!(
-      writer.is_first_line(),
-      "Empty write should not change first line state"
-    );
+  writer.write_bytes(b"").unwrap();
+  assert!(
+    writer.is_first_line(),
+    "Empty write should not change first line state"
+  );
 
-    writer.write_bytes(b"data").unwrap();
-    assert!(!writer.is_first_line());
+  writer.write_bytes(b"data").unwrap();
+  assert!(!writer.is_first_line());
 
-    let mut buf2 = Vec::new();
-    let mut writer2 = LineWriter::new(&mut buf2);
-    writer2.write_newline().unwrap();
-    assert!(!writer2.is_first_line());
+  let mut buf2 = Vec::new();
+  let mut writer2 = LineWriter::new(&mut buf2);
+  writer2.write_newline().unwrap();
+  assert!(!writer2.is_first_line());
 
-    // Consecutive ensures
-    let mut buf3 = Vec::new();
-    {
-      let mut w = LineWriter::new(&mut buf3);
-      w.ensure_newline().unwrap(); // First line, does nothing
-    }
-    assert_eq!(buf3, b"");
-
-    {
-      let mut w = LineWriter::new(&mut buf3);
-      w.write_bytes(b"first").unwrap();
-      w.ensure_newline().unwrap(); // Now not first line, should add \n
-      w.ensure_newline().unwrap(); // Should not add another \n if already there
-    }
-    assert_eq!(buf3, b"first\n");
+  // Consecutive ensures
+  let mut buf3 = Vec::new();
+  {
+    let mut w = LineWriter::new(&mut buf3);
+    w.ensure_newline().unwrap(); // First line, does nothing
   }
-);
+  assert_eq!(buf3, b"");
+
+  {
+    let mut w = LineWriter::new(&mut buf3);
+    w.write_bytes(b"first").unwrap();
+    w.ensure_newline().unwrap(); // Now not first line, should add \n
+    w.ensure_newline().unwrap(); // Should not add another \n if already there
+  }
+  assert_eq!(buf3, b"first\n");
+}

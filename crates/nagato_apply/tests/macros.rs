@@ -182,55 +182,6 @@ macro_rules! test_patch_err_with_line {
 }
 
 #[macro_export]
-macro_rules! test_patch_invert {
-  (
-    $test_name:ident,
-    patch: {
-      old_file: $old:expr,
-      new_file: $new:expr
-      $(, rename_from: $from:expr)?
-      $(, rename_to: $to:expr)?
-      $(,)?
-    },
-    expected: {
-      old_file: $e_old:expr
-      $(, rename_from: $e_from:expr)?
-      $(,)?
-    }
-  ) => {
-    #[test]
-    fn $test_name() {
-      let patch = Patch {
-        old_file: unquote_path($old),
-        new_file: unquote_path($new),
-        $(rename_from: Some(unquote_path($from as &[u8])),)?
-        $(rename_to: Some(unquote_path($to as &[u8])),)?
-        ..Default::default()
-      };
-      let inverted = patch.invert();
-      assert_eq!(inverted.old_file.as_ref(), strip_diff_prefix($e_old));
-      $(assert_eq!(inverted.rename_from, Some(unquote_path($e_from as &[u8])));)?
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_parser_ok {
-  (
-    $test_name:ident,
-    $diff:expr,
-    assertions: |$patch:ident| { $($assertions:tt)* }
-  ) => {
-    #[test]
-    fn $test_name() {
-      let mut parser = parse_diff!($diff);
-      let $patch = parser.next().unwrap().unwrap();
-      $($assertions)*
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! test_delta_err {
   (
     $test_name:ident,
@@ -243,78 +194,6 @@ macro_rules! test_delta_err {
       let mut output = Vec::new();
       let res = apply_delta(Cursor::new($delta), $source, &mut output);
       assert_eq!(res.unwrap_err().kind, $expected);
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_reject_mixed {
-  (
-    $test_name:ident,
-    initial_fs: { $initial_path:expr => $initial_content:expr },
-    patch: $patch:expr
-  ) => {
-    #[test]
-    fn $test_name() {
-      let dir = create_test_fs! { $initial_path => $initial_content };
-      let fs = FileSystem::new(dir.path(), false);
-      let res = patch_file(&fs, $patch, false);
-      assert_eq!(res.unwrap_err().kind, ErrorKind::UnsupportedBinaryPatch);
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_lexer_binary_data_ok {
-  (
-    $test_name:ident,
-    input: $input:expr,
-    expected: [$($expected_data:expr),*]
-  ) => {
-    #[test]
-    fn $test_name() {
-      let mut lexer = Lexer::new($input);
-      lexer.set_mode(LexerMode::Binary);
-      $(
-        assert!(matches!(
-          lexer.next().unwrap().unwrap().token,
-          TokenKind::BinaryData($expected_data)
-        ));
-      )*
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_applier_flush_ok {
-  (
-    $test_name:ident,
-    source: $source:expr,
-    patch: $patch:expr,
-    expected_contains: $expected:expr
-  ) => {
-    #[test]
-    fn $test_name() {
-      let mut output = Vec::new();
-      let applier = Applier::new(&mut output, $source);
-      applier.process(&$patch).unwrap();
-      assert!(String::from_utf8_lossy(&output).contains($expected));
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_binary_applier_process_ok {
-  (
-    $test_name:ident,
-    source: $source:expr,
-    patch: $patch:expr
-  ) => {
-    #[test]
-    fn $test_name() {
-      let mut output = Vec::new();
-      let mut applier = Applier::new(&mut output, $source);
-      let _ = applier.process_binary(&$patch);
     }
   };
 }

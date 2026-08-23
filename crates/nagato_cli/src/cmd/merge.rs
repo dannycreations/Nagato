@@ -44,9 +44,7 @@ pub fn process_merge(
     if i > 0 {
       writer.write_all(b"\n")?;
     }
-    if let Some(patch) = merged_patches.get(filename) {
-      patch.write_to(&mut writer)?;
-    }
+    merged_patches[filename].write_to(&mut writer)?;
   }
 
   writer.commit()?;

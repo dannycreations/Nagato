@@ -118,11 +118,20 @@ test_lexer_ok!(
   ]
 );
 
-test_lexer_binary_data_ok!(
-  lexer_binary_tokenization_literal_prefix_data,
-  input: b"literal_not_a_header\ndelta_not_a_header",
-  expected: [b"literal_not_a_header", b"delta_not_a_header"]
-);
+#[test]
+fn lexer_binary_tokenization_literal_prefix_data() {
+  let mut lexer = Lexer::new(b"literal_not_a_header\ndelta_not_a_header");
+  lexer.set_mode(LexerMode::Binary);
+
+  assert!(matches!(
+    lexer.next().unwrap().unwrap().token,
+    TokenKind::BinaryData(b"literal_not_a_header")
+  ));
+  assert!(matches!(
+    lexer.next().unwrap().unwrap().token,
+    TokenKind::BinaryData(b"delta_not_a_header")
+  ));
+}
 
 #[test]
 fn test_lexer_errors() {

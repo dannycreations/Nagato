@@ -22,8 +22,6 @@ pub enum ErrorKind {
   InvalidPercentage,
   #[error("Invalid file mode")]
   InvalidFileMode,
-  #[error("Invalid file header")]
-  InvalidFileHeader,
   #[error("Invalid index header")]
   InvalidIndexHeader,
   #[error("Invalid binary files line")]

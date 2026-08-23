@@ -1,37 +1,4 @@
 #[macro_export]
-macro_rules! test_atomic_writer_ok {
-  (
-    $test_name:ident,
-    content: $content:expr
-  ) => {
-    #[test]
-    fn $test_name() {
-      let dir = create_test_fs! {};
-      let file_path = dir.path().join("test.txt");
-
-      let mut writer = AtomicWriter::new(&file_path).unwrap();
-      Write::write_all(&mut writer, $content).unwrap();
-      writer.commit().unwrap();
-
-      assert_eq!(read(file_path).unwrap(), $content);
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_atomic_writer_err {
-  (
-    $test_name:ident,
-    path: $path:expr
-  ) => {
-    #[test]
-    fn $test_name() {
-      assert!(AtomicWriter::new(Path::new($path)).is_err());
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! test_get_line {
   (
     $test_name:ident,
@@ -107,26 +74,6 @@ macro_rules! test_fs_invalid_path {
 }
 
 #[macro_export]
-macro_rules! test_fs_get_unique_path_ok {
-  (
-    $test_name:ident,
-    initial_fs: { $($path:expr => $content:expr),* },
-    base_name: $base:expr,
-    expected_file_name: $expected:expr
-  ) => {
-    #[test]
-    fn $test_name() {
-      let dir = create_test_fs! { $($path => $content),* };
-      let res = get_unique_path(dir.path(), $base);
-      assert_eq!(
-        res.file_name().unwrap().to_str().unwrap(),
-        $expected
-      );
-    }
-  };
-}
-
-#[macro_export]
 macro_rules! test_fs_ops_ok {
   (
     $test_name:ident,
@@ -137,21 +84,6 @@ macro_rules! test_fs_ops_ok {
     fn $test_name() {
       let $dir = create_test_fs! {};
       let $fs = FileSystem::new($dir.path(), $check);
-      $($assertions)*
-    }
-  };
-}
-
-#[macro_export]
-macro_rules! test_line_writer_ok {
-  (
-    $test_name:ident,
-    assertions: |$writer:ident, $buf:ident| { $($assertions:tt)* }
-  ) => {
-    #[test]
-    fn $test_name() {
-      let mut $buf = Vec::new();
-      let mut $writer = LineWriter::new(&mut $buf);
       $($assertions)*
     }
   };

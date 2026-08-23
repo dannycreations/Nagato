@@ -13,22 +13,27 @@ test_parser_err!(
   expected: ErrorKind::HunkLineCountMismatch
 );
 
-test_parser_ok!(
-  test_parser_index_mode,
-  "diff --git a/file b/file\nindex abcdef0..1234567 100755\n--- a/file\n+++ b/file\n",
-  assertions: |patch| {
-    assert_eq!(patch.new_mode, Some(0o100755));
-  }
-);
+#[test]
+fn test_parser_index_mode() {
+  let patch = parse_diff!(
+    "diff --git a/file b/file\nindex abcdef0..1234567 100755\n--- a/file\n+++ b/file\n"
+  )
+  .next()
+  .unwrap()
+  .unwrap();
+  assert_eq!(patch.new_mode, Some(0o100755));
+}
 
-test_parser_ok!(
-  test_parser_hunk_range_defaults,
-  "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n",
-  assertions: |patch| {
-    assert_eq!(patch.hunks[0].old_span, 1);
-    assert_eq!(patch.hunks[0].new_span, 1);
-  }
-);
+#[test]
+fn test_parser_hunk_range_defaults() {
+  let patch =
+    parse_diff!("--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n")
+      .next()
+      .unwrap()
+      .unwrap();
+  assert_eq!(patch.hunks[0].old_span, 1);
+  assert_eq!(patch.hunks[0].new_span, 1);
+}
 
 test_parser_err!(
   test_parser_error_invalid_hunk_range_old_non_digit,

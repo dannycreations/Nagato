@@ -20,6 +20,9 @@ use crate::{
   AtomicWriter, Error, ErrorKind,
 };
 
+// Upper bound on cached path resolutions before the cache resets itself.
+const PATH_CACHE_LIMIT: usize = 10_000;
+
 #[derive(Debug)]
 pub struct FileSystem {
   root: PathBuf,
@@ -142,23 +145,14 @@ impl FileSystem {
     self.deleted.borrow_mut().insert(rel.clone());
 
     if let Some(staged) = self.get_staged_path(&rel) {
-      match remove_file(staged) {
-        Ok(_) => {}
-        Err(e) if e.kind() == IoErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
-      }
+      remove_file_missing_ok(staged)?;
     }
 
     if self.check {
       return Ok(());
     }
 
-    let full = self.root.join(rel);
-    match remove_file(full) {
-      Ok(_) => Ok(()),
-      Err(e) if e.kind() == IoErrorKind::NotFound => Ok(()),
-      Err(e) => Err(e.into()),
-    }
+    remove_file_missing_ok(self.root.join(rel))
   }
 
   pub fn rename(&self, from: &[u8], to: &[u8]) -> Result<(), Error> {
@@ -247,7 +241,7 @@ impl FileSystem {
 
     let res = rel.clone();
     let mut cache = self.resolved.borrow_mut();
-    if cache.len() >= 10_000 {
+    if cache.len() >= PATH_CACHE_LIMIT {
       cache.clear();
     }
     cache.insert(Box::from(path), rel);
@@ -257,6 +251,13 @@ impl FileSystem {
   fn get_staged_path(&self, rel: &Path) -> Option<PathBuf> {
     self.staging.as_ref().map(|s| s.path().join(rel))
   }
+}
+
+fn remove_file_missing_ok(path: PathBuf) -> Result<(), Error> {
+  remove_file(path).or_else(|e| match e.kind() {
+    IoErrorKind::NotFound => Ok(()),
+    _ => Err(e.into()),
+  })
 }
 
 fn is_reserved_name(bytes: &[u8]) -> bool {
