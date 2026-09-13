@@ -14,7 +14,7 @@ assert_cmd = "2.2.2"
 bstr = { version = "1.13.1", features = ["std"] }
 clap = { version = "4.6.6", features = ["derive"] }
 criterion = "0.8.2"
-flate2 = "1.1.9"
+flate2 = "1.1.10"
 indoc = "2.0.7"
 memchr = "2.8.3"
 memmap2 = "0.9.11"
