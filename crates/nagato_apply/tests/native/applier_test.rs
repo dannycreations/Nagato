@@ -1,8 +1,8 @@
 use std::{fs, io::sink};
 
 use nagato_apply::{
-  apply, patch_file, Applier, BinaryFragment, BinaryKind, Hunk, Line, LineKind,
-  Parser, Patch,
+  apply, apply_to_fs, patch_file, Applier, BinaryFragment, BinaryKind, Hunk,
+  Line, LineKind, Parser, Patch,
 };
 use nagato_core::{
   create_test_fs, strip_diff_prefix, unquote_path, ErrorKind, FileSystem,
@@ -293,3 +293,22 @@ test_apply_ok!(
   source: "",
   expected: "item1\nitem2\n"
 );
+
+#[test]
+fn applier_streamed_applies_hunks_in_document_order() {
+  // Only the first hunk of a streamed patch decides whether the rest are
+  // planned as a batch. The last hunk here can only match before the position
+  // the previous one reached, so it must fail instead of being reordered ahead
+  // of it, and the target must survive untouched.
+  let dir = create_test_fs! { "file.txt" => "head\naaa\nbbb\n" };
+  let fs = FileSystem::new(dir.path(), false);
+  let patch = b"--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-head\n+HEAD\nlabel two\n-bbb\n+BBB\nlabel three\n-aaa\n+AAA\n";
+
+  let res = apply_to_fs(&fs, patch, false);
+
+  assert_eq!(res.unwrap_err().kind, ErrorKind::CouldNotApplyHunk);
+  assert_eq!(
+    fs::read_to_string(dir.path().join("file.txt")).unwrap(),
+    "head\naaa\nbbb\n"
+  );
+}

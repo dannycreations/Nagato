@@ -6,7 +6,7 @@ pub(crate) mod hunk;
 
 use nagato_core::{Error, ErrorKind};
 
-use crate::{Hunk, Lexer, LexerItem, Patch, TokenKind};
+use crate::{Hunk, Lexer, LexerItem, Patch};
 
 pub struct Parser<'a> {
   pub(crate) tokens: Peekable<Lexer<'a>>,
@@ -31,28 +31,30 @@ impl<'a> Parser<'a> {
   pub(crate) fn parse_patch_header(
     &mut self,
   ) -> Result<Option<Patch<'a>>, Error> {
-    self.label = None;
     self.skip_empty_context_lines()?;
 
     if self.tokens.peek().is_none() {
       return Ok(None);
     }
 
+    Ok(Some(self.start_patch()?))
+  }
+
+  fn start_patch(&mut self) -> Result<Patch<'a>, Error> {
+    // A label belongs to the patch it was declared in.
+    self.label = None;
+
     let mut patch = Patch::default();
     header::parse_header(self, &mut patch)?;
 
-    Ok(Some(patch))
+    Ok(patch)
   }
 
   fn parse_patch(&mut self) -> Result<Patch<'a>, Error> {
-    // Ensure label state doesn't leak between patches.
-    self.label = None;
-    let mut patch = Patch::default();
+    let start_line = self.peek_token()?.map_or(0, |item| item.line_num);
+    let mut patch = self.start_patch()?;
 
-    let start_line = self.peek_token()?.map(|i| i.line_num).unwrap_or(0);
-
-    header::parse_header(self, &mut patch)?;
-    while let Some(hunk) = hunk::next_hunk(self, &mut patch)? {
+    while let Some(hunk) = self.next_hunk(&mut patch)? {
       patch.hunks.push(hunk);
     }
 
@@ -69,18 +71,11 @@ impl<'a> Parser<'a> {
     Ok(patch)
   }
 
-  pub fn skip_empty_context_lines(&mut self) -> Result<(), Error> {
-    while self.peek_is(TokenKind::is_padding)? {
+  pub(crate) fn skip_empty_context_lines(&mut self) -> Result<(), Error> {
+    while matches!(self.peek_token()?, Some(item) if item.token.is_padding()) {
       self.tokens.next();
     }
     Ok(())
-  }
-
-  pub fn peek_is(
-    &mut self,
-    check: impl Fn(&TokenKind<'a>) -> bool,
-  ) -> Result<bool, Error> {
-    Ok(self.peek_token()?.is_some_and(|i| check(&i.token)))
   }
 
   pub fn peek_token(&mut self) -> Result<Option<&LexerItem<'a>>, Error> {

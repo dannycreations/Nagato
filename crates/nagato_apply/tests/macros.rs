@@ -123,29 +123,10 @@ macro_rules! test_lexer_ok {
       assert_eq!(tokens.len(), expected.len());
       for (got, exp) in tokens.into_iter().zip(expected.into_iter()) {
         match (got, exp) {
-          (TokenKind::FileHeader(g), TokenKind::FileHeader(e)) => {
-            if let Some((old, new)) = next_path_pair(g.old_file, b"") {
-              assert_eq!(old, unquote_path(e.old_file));
-              assert_eq!(new, unquote_path(e.new_file));
-            } else {
-              assert_eq!(unquote_path(g.old_file), unquote_path(e.old_file));
-              assert_eq!(unquote_path(g.new_file), unquote_path(e.new_file));
-            }
-          }
-          (TokenKind::Binary(g), TokenKind::Binary(e)) => {
-             let rest = g.old_file;
-             if let Some((old, new)) = next_path_pair(rest, b"and ") {
-                assert_eq!(old, unquote_path(e.old_file));
-                assert_eq!(new, unquote_path(e.new_file));
-             } else {
-                assert_eq!(unquote_path(g.old_file), unquote_path(e.old_file));
-                assert_eq!(unquote_path(g.new_file), unquote_path(e.new_file));
-             }
-          }
-          (TokenKind::OldFile(g), TokenKind::OldFile(e)) => {
-            assert_eq!(unquote_path(g), unquote_path(e));
-          }
-          (TokenKind::NewFile(g), TokenKind::NewFile(e)) => {
+          // `---`/`+++` keep the "a/" or "b/" prefix the lexer saw, so
+          // compare them after the parser's unquoting step.
+          (TokenKind::OldFile(g), TokenKind::OldFile(e))
+          | (TokenKind::NewFile(g), TokenKind::NewFile(e)) => {
             assert_eq!(unquote_path(g), unquote_path(e));
           }
           (g, e) => assert_eq!(g, e),

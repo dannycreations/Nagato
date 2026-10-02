@@ -91,14 +91,19 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
       };
 
       // A fragment that does not describe this source is not fatal; git emits
-      // both directions and only one of them applies.
-      let is_wrong_fragment =
-        matches!(e.kind, ErrorKind::BinaryPatchSourceMismatch)
-          || matches!(
-            e.kind,
-            ErrorKind::Io(ref io) if io.kind() == IoErrorKind::InvalidData
-          );
-      if !is_wrong_fragment {
+      // both directions and only one of them applies. A size mismatch and a
+      // payload that fails to decode both mean the fragment was written for
+      // the other side of the patch, so the next one gets its turn.
+      let belongs_to_other_source = match &e.kind {
+        ErrorKind::BinaryPatchSourceMismatch => true,
+        ErrorKind::Io(io) => matches!(
+          io.kind(),
+          IoErrorKind::InvalidData | IoErrorKind::InvalidInput
+        ),
+        _ => false,
+      };
+
+      if !belongs_to_other_source {
         return Err(e);
       }
     }
@@ -153,45 +158,44 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
     // Hunkless patches are often used in "diff-lite" formats where headers are missing.
-    let mut pending: Vec<Option<(&Hunk<'_>, Option<Finder>)>> = patch
+    let pending: Vec<(&Hunk<'_>, Option<Finder>)> = patch
       .hunks
       .iter()
       .map(|h| {
         let lines = patch.hunk_lines(h);
         let finder =
           first_non_empty_match_line(lines).map(|(_, l)| Finder::new(l.text));
-        Some((h, finder))
+        (h, finder)
       })
       .collect();
 
     let mut to_apply = Vec::with_capacity(pending.len());
+    let mut unmatched = Vec::new();
     let source = self.source_at();
     let initial_pos = self.pos;
     let mut offset = 0;
 
     // First pass: match hunks in document order, advancing past each match so
     // repeated content binds to successive occurrences.
-    for slot in pending.iter_mut() {
-      let Some((hunk, finder)) = slot else {
-        continue;
-      };
+    for (hunk, finder) in pending {
       if offset > source.len() {
+        unmatched.push((hunk, finder));
         continue;
       }
 
       let Ok((match_pos, remaining)) =
         find_match(&source[offset..], patch, hunk, finder.as_ref())
       else {
+        unmatched.push((hunk, finder));
         continue;
       };
 
-      to_apply.push((initial_pos + offset + match_pos, remaining, *hunk));
+      to_apply.push((initial_pos + offset + match_pos, remaining, hunk));
       offset = (source.len() - remaining.len()).max(offset + 1);
-      *slot = None;
     }
 
     // Second pass: anything left over is matched against the whole source.
-    for (hunk, finder) in pending.into_iter().flatten() {
+    for (hunk, finder) in unmatched {
       let (match_pos, remaining) =
         find_match(source, patch, hunk, finder.as_ref())?;
       to_apply.push((initial_pos + match_pos, remaining, hunk));

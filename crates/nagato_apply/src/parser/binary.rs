@@ -35,7 +35,7 @@ pub fn parse_binary_patch<'a>(
           data_len,
         });
       }
-      TokenKind::Context(_) => {
+      TokenKind::Context(_) | TokenKind::Gap => {
         parser.tokens.next();
       }
       _ => break,

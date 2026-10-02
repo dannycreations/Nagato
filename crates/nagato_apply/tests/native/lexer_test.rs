@@ -1,5 +1,5 @@
-use nagato_apply::{BinaryPaths, Lexer, LexerMode, TokenKind};
-use nagato_core::{next_path_pair, unquote_path, ErrorKind};
+use nagato_apply::{Lexer, LexerMode, TokenKind};
+use nagato_core::{unquote_path, ErrorKind};
 
 test_lexer_ok!(
   lexer_modes,
@@ -29,14 +29,8 @@ test_lexer_ok!(
   lexer_binary_files_differ,
   input: "Binary files a/old.bin and b/new.bin differ\nBinary files \"a/salt and pepper.png\" and \"b/salt and pepper.png\" differ",
   expected: [
-    TokenKind::Binary(BinaryPaths {
-      old_file: b"old.bin",
-      new_file: b"new.bin",
-    }),
-    TokenKind::Binary(BinaryPaths {
-      old_file: b"salt and pepper.png",
-      new_file: b"salt and pepper.png",
-    })
+    TokenKind::Binary(b"a/old.bin and b/new.bin"),
+    TokenKind::Binary(b"\"a/salt and pepper.png\" and \"b/salt and pepper.png\"")
   ]
 );
 
@@ -53,10 +47,7 @@ test_lexer_ok!(
      context
   "#,
   expected: [
-    TokenKind::FileHeader(BinaryPaths {
-      old_file: b"file.txt",
-      new_file: b"file.txt",
-    }),
+    TokenKind::FileHeader(b"a/file.txt b/file.txt"),
     TokenKind::Index {
       old_hash: b"1234567",
       new_hash: b"abcdefg",
@@ -111,12 +102,25 @@ test_lexer_ok!(
     },
     TokenKind::BinaryData(b"data"),
     TokenKind::Gap,
-    TokenKind::FileHeader(BinaryPaths {
-      old_file: b"file",
-      new_file: b"file"
-    })
+    TokenKind::FileHeader(b"a/file b/file")
   ]
 );
+
+#[test]
+fn lexer_binary_fragment_header_with_single_digit_size() {
+  // A one digit size makes the header shorter than the payload lines that
+  // follow it, so it must still be read as a header.
+  let mut lexer = Lexer::new(b"delta 1");
+  lexer.set_mode(LexerMode::Binary);
+
+  assert!(matches!(
+    lexer.next().unwrap().unwrap().token,
+    TokenKind::BinaryPatchType {
+      kind: b"delta",
+      size: b"1"
+    }
+  ));
+}
 
 #[test]
 fn lexer_binary_tokenization_literal_prefix_data() {

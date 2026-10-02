@@ -15,20 +15,22 @@ pub fn process_split(
   if let Some(dir) = directory.as_deref() {
     fs::create_dir_all(dir)?;
   }
+  let dir = directory.as_deref().unwrap_or(Path::new("."));
 
   for source_res in PatchSource::iter(files) {
     let source = source_res?;
 
     for patch_res in source.patches() {
       let patch = patch_res?;
+      // Lossy decoding already yields valid UTF-8, so the file name carved
+      // out of it needs no second conversion.
       let target = String::from_utf8_lossy(patch.filename());
       let file_name = Path::new(target.as_ref())
         .file_name()
-        .map(|s| s.to_string_lossy())
-        .unwrap_or_else(|| target.clone());
-      let base_name = format!("{}.trim.patch", file_name);
+        .and_then(|name| name.to_str())
+        .unwrap_or(target.as_ref());
+      let base_name = format!("{file_name}.trim.patch");
 
-      let dir = directory.as_deref().unwrap_or_else(|| Path::new("."));
       let out_path = get_unique_path(dir, &base_name);
 
       let mut writer = AtomicWriter::new(&out_path)?;

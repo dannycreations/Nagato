@@ -9,7 +9,6 @@ license = "GPL"
 repository = "https://github.com/dannycreations/Nagato"
 
 [workspace.dependencies]
-anyhow = "1.0.104"
 assert_cmd = "2.2.2"
 bstr = { version = "1.13.1", features = ["std"] }
 clap = { version = "4.6.6", features = ["derive"] }

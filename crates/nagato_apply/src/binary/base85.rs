@@ -51,7 +51,7 @@ fn decode_len_char(c: u8) -> Option<usize> {
 }
 
 #[derive(Debug)]
-pub struct InvalidBinaryLineError;
+pub(crate) struct InvalidBinaryLineError;
 
 impl Display for InvalidBinaryLineError {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
@@ -61,7 +61,7 @@ impl Display for InvalidBinaryLineError {
 
 impl StdError for InvalidBinaryLineError {}
 
-pub struct Base85Reader<'a> {
+pub(crate) struct Base85Reader<'a> {
   lines: Iter<'a, &'a [u8]>,
   buffer: [u8; MAX_DECODED_LINE_LEN],
   buf_len: usize,
@@ -69,7 +69,7 @@ pub struct Base85Reader<'a> {
 }
 
 impl<'a> Base85Reader<'a> {
-  pub fn new(lines: &'a [&'a [u8]]) -> Self {
+  pub(crate) fn new(lines: &'a [&'a [u8]]) -> Self {
     Self {
       lines: lines.iter(),
       buffer: [0u8; MAX_DECODED_LINE_LEN],
@@ -119,6 +119,9 @@ impl Base85Reader<'_> {
 
     let expected_len = decode_len_char(line[0]).ok_or_else(invalid)?;
 
+    // The length character caps how much this line may produce, so a body
+    // longer than it declares is malformed. Stopping at the declared length
+    // keeps a corrupt patch line from writing past the fixed-size buffer.
     for chunk in line[1..].as_chunks::<5>().0 {
       let d0 = DECODE_MAP[chunk[0] as usize];
       let d1 = DECODE_MAP[chunk[1] as usize];
@@ -139,6 +142,10 @@ impl Base85Reader<'_> {
       self.buffer[self.buf_len..self.buf_len + 4]
         .copy_from_slice(&val.to_be_bytes());
       self.buf_len += 4;
+
+      if self.buf_len >= expected_len {
+        break;
+      }
     }
 
     self.buf_len = self.buf_len.min(expected_len);
@@ -146,26 +153,22 @@ impl Base85Reader<'_> {
   }
 }
 
-pub fn new_base85_decoder<'a>(
+pub(crate) fn new_base85_decoder<'a>(
   lines: &'a [&'a [u8]],
 ) -> ZlibDecoder<Base85Reader<'a>> {
   ZlibDecoder::new(Base85Reader::new(lines))
 }
 
-pub fn decode_base85(
+pub(crate) fn decode_base85(
   lines: &[&[u8]],
   writer: &mut (impl Write + ?Sized),
 ) -> Result<(), Error> {
   let mut decoder = new_base85_decoder(lines);
   io_copy(&mut decoder, writer).map_err(|e| {
-    let mut is_invalid_line = false;
-    if let Some(r) = e.get_ref() {
-      if r.is::<InvalidBinaryLineError>() {
-        is_invalid_line = true;
-      }
-    }
-
-    if is_invalid_line {
+    if e
+      .get_ref()
+      .is_some_and(|err| err.is::<InvalidBinaryLineError>())
+    {
       return Error::from(ErrorKind::InvalidBinaryFilesLine);
     }
     Error::from(e)

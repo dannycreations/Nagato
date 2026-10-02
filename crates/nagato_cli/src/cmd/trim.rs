@@ -33,8 +33,12 @@ pub fn process_trim(
       None => source_path.parent().unwrap_or_else(|| Path::new(".")),
     };
 
-    // "dir/test.patch" -> "test.trim.patch"; keeps the original extension.
-    let stem = source_path.file_stem().unwrap().to_string_lossy();
+    // A path such as "/" or ".." has no file stem, so fall back to the path
+    // itself rather than panicking on a name the user can legitimately pass.
+    let stem = source_path
+      .file_stem()
+      .unwrap_or(source_path.as_os_str())
+      .to_string_lossy();
     let base_name = match source_path.extension() {
       Some(ext) => format!("{}.trim.{}", stem, ext.to_string_lossy()),
       None => format!("{}.trim.patch", stem),

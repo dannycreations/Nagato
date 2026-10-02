@@ -303,3 +303,23 @@ fn test_line_writer_behavior() {
   }
   assert_eq!(buf3, b"first\n");
 }
+
+#[test]
+fn test_line_writer_separates_lines_and_blocks() {
+  let mut buf = Vec::new();
+  let mut writer = LineWriter::new(&mut buf);
+
+  // Nothing written yet, so the first line opens without a separator.
+  writer.write_line(b"first").unwrap();
+  writer.write_line(b"second").unwrap();
+  writer.write_block(b"third").unwrap();
+  // A block that already ends in a newline is not given a second one.
+  writer.write_block(b"fourth\n").unwrap();
+  // An empty block adds neither content nor a separator.
+  writer.write_block(b"").unwrap();
+
+  assert_eq!(
+    writer.output().as_slice(),
+    b"first\nsecond\nthird\nfourth\n"
+  );
+}

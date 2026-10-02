@@ -1,8 +1,9 @@
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind<'a> {
-  // The header of a file diff, containing the old and new file paths.
-  FileHeader(BinaryPaths<'a>),
+  // The header of a file diff. Both paths are still one raw segment; the
+  // parser splits them.
+  FileHeader(&'a [u8]),
   // The index line, containing the hashes of the old and new files.
   Index {
     old_hash: &'a [u8],
@@ -48,7 +49,7 @@ pub enum TokenKind<'a> {
   // The dissimilarity index in a rename or copy operation.
   Dissimilarity(u32),
   // Indicates that two binary files are different.
-  Binary(BinaryPaths<'a>),
+  Binary(&'a [u8]),
   // The header of a git binary patch.
   GitBinaryPatchHeader,
   // The type and size of a binary patch fragment.
@@ -60,12 +61,6 @@ pub enum TokenKind<'a> {
   BinaryData(&'a [u8]),
   // A label for the following hunk.
   Label(&'a [u8]),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct BinaryPaths<'a> {
-  pub old_file: &'a [u8],
-  pub new_file: &'a [u8],
 }
 
 impl TokenKind<'_> {

@@ -1,6 +1,7 @@
 use std::fs;
 
 use assert_cmd::Command;
+use predicates::{prelude::PredicateBooleanExt, str::contains};
 use tempfile::tempdir;
 
 #[test]
@@ -89,4 +90,19 @@ fn cli_trim_stdin_and_malformed() {
     .arg("trim")
     .arg("invalid.patch");
   cmd2.assert().success();
+}
+
+#[test]
+fn cli_trim_path_without_file_name() {
+  // "." has no file stem. Deriving the output name must not panic; the
+  // command reports the failure instead.
+  let dir = tempdir().unwrap();
+
+  let mut cmd = Command::new(env!("CARGO_BIN_EXE_nagato"));
+  cmd.current_dir(dir.path()).arg("trim").arg(".");
+
+  cmd
+    .assert()
+    .failure()
+    .stderr(contains("Error").and(contains("panicked").not()));
 }

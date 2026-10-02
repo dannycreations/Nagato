@@ -59,6 +59,15 @@ impl BestError {
   }
 }
 
+#[inline]
+fn after_line_end(text: &[u8]) -> Option<&[u8]> {
+  match text {
+    [b'\r', b'\n', rest @ ..] | [b'\n', rest @ ..] => Some(rest),
+    [] => Some(text),
+    _ => None,
+  }
+}
+
 fn needle_anchors<'a>(
   buffer: &'a [u8],
   search_buffer: &'a [u8],
@@ -79,12 +88,9 @@ fn needle_anchors<'a>(
       return None;
     }
 
-    let after = buffer.get(anchor + needle_len..);
-    matches!(
-      after,
-      Some([b'\n', ..]) | Some([b'\r', b'\n', ..]) | Some([]) | None
-    )
-    .then_some(anchor)
+    after_line_end(&buffer[anchor + needle_len..])
+      .is_some()
+      .then_some(anchor)
   })
 }
 
@@ -298,11 +304,10 @@ fn verify_match<'s, 'p>(
       return fail(idx);
     };
 
-    current_source = match after_text {
-      [b'\n', rest @ ..] | [b'\r', b'\n', rest @ ..] => rest,
-      [] => after_text,
-      _ => return fail(idx),
+    let Some(rest) = after_line_end(after_text) else {
+      return fail(idx);
     };
+    current_source = rest;
   }
 
   Ok((hunk_start, current_source))

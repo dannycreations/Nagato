@@ -27,8 +27,13 @@ impl IsDevNull for [u8] {
 }
 
 #[inline(always)]
+fn has_diff_prefix(s: &[u8]) -> bool {
+  s.starts_with(b"a/") || s.starts_with(b"b/")
+}
+
+#[inline(always)]
 pub fn strip_diff_prefix(s: &[u8]) -> &[u8] {
-  if s.starts_with(b"a/") || s.starts_with(b"b/") {
+  if has_diff_prefix(s) {
     return &s[2..];
   }
   s
@@ -76,7 +81,7 @@ pub fn unquote_path(s: &[u8]) -> Cow<'_, [u8]> {
     i += 1;
   }
 
-  if res.starts_with(b"a/") || res.starts_with(b"b/") {
+  if has_diff_prefix(&res) {
     res.drain(..2);
   }
 
@@ -182,10 +187,19 @@ pub fn get_line(source: &[u8]) -> Option<(&[u8], &[u8])> {
   Some((line, rest))
 }
 
+/// How the bytes written so far end. Every method below needs exactly this
+/// fact to decide whether to emit a separating newline first.
+#[derive(Clone, Copy, PartialEq)]
+enum State {
+  /// The output ends with a newline, or nothing has been written yet.
+  Terminated,
+  /// The output holds content that does not end with a newline.
+  Unterminated,
+}
+
 pub struct LineWriter<'a, W: Write + ?Sized> {
   output: &'a mut W,
-  last_was_newline: bool,
-  is_empty: bool,
+  state: State,
 }
 
 impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
@@ -193,29 +207,25 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
   pub fn new(output: &'a mut W) -> Self {
     Self {
       output,
-      last_was_newline: false,
-      is_empty: true,
+      state: State::Terminated,
     }
   }
 
   #[inline]
   pub fn write_line(&mut self, line: &[u8]) -> IoResult<()> {
-    if !self.is_empty && !self.last_was_newline {
-      self.output.write_all(b"\n")?;
-    }
-    self.is_empty = false;
+    self.ensure_newline()?;
     self.output.write_all(line)?;
-    self.last_was_newline = false;
+    self.state = State::Unterminated;
     Ok(())
   }
 
   #[inline]
   pub fn ensure_newline(&mut self) -> IoResult<()> {
-    if self.is_empty || self.last_was_newline {
+    if self.state != State::Unterminated {
       return Ok(());
     }
     self.output.write_all(b"\n")?;
-    self.last_was_newline = true;
+    self.state = State::Terminated;
     Ok(())
   }
 
@@ -224,25 +234,27 @@ impl<'a, W: Write + ?Sized> LineWriter<'a, W> {
     if bytes.is_empty() {
       return Ok(());
     }
-    self.is_empty = false;
     self.output.write_all(bytes)?;
-    self.last_was_newline = bytes.last() == Some(&b'\n');
+    self.state = if bytes.last() == Some(&b'\n') {
+      State::Terminated
+    } else {
+      State::Unterminated
+    };
     Ok(())
   }
 
   #[inline]
   pub fn write_block(&mut self, block: &[u8]) -> IoResult<()> {
-    if !block.is_empty() && !self.is_empty && !self.last_was_newline {
-      self.output.write_all(b"\n")?;
+    if !block.is_empty() {
+      self.ensure_newline()?;
     }
     self.write_bytes(block)
   }
 
   #[inline]
   pub fn write_newline(&mut self) -> IoResult<()> {
-    self.is_empty = false;
     self.output.write_all(b"\n")?;
-    self.last_was_newline = true;
+    self.state = State::Terminated;
     Ok(())
   }
 
@@ -260,10 +272,10 @@ pub(crate) fn to_path_buf(bytes: &[u8]) -> Result<PathBuf, Error> {
   }
   #[cfg(windows)]
   {
-    bytes
+    let text = bytes
       .to_str()
-      .map(PathBuf::from)
-      .map_err(|_| Error::new(ErrorKind::InvalidPath))
+      .map_err(|_| Error::new(ErrorKind::InvalidPath))?;
+    Ok(PathBuf::from(text))
   }
 }
 

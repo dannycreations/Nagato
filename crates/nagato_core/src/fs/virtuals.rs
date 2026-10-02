@@ -6,6 +6,7 @@ use std::{
   cell::RefCell,
   collections::{HashMap, HashSet},
   env,
+  ffi::OsStr,
   fs::{self, remove_file, File},
   io::{Error as IoError, ErrorKind as IoErrorKind},
   path::{Component, Path, PathBuf},
@@ -23,10 +24,14 @@ use crate::{
 // Upper bound on cached path resolutions before the cache resets itself.
 const PATH_CACHE_LIMIT: usize = 10_000;
 
+/// Setuid and setgid bits, stripped so that a patch cannot turn a file
+/// executable under a user it does not belong to.
+#[cfg(unix)]
+const PRIVILEGE_BITS: u32 = 0o6000;
+
 #[derive(Debug)]
 pub struct FileSystem {
   root: PathBuf,
-  check: bool,
   staging: Option<TempDir>,
   deleted: RefCell<HashSet<PathBuf>>,
   resolved: RefCell<HashMap<Box<[u8]>, PathBuf>>,
@@ -50,7 +55,6 @@ impl FileSystem {
 
     Self {
       root,
-      check,
       staging,
       deleted: RefCell::new(HashSet::new()),
       resolved: RefCell::new(HashMap::new()),
@@ -58,24 +62,17 @@ impl FileSystem {
   }
 
   #[inline]
+  fn is_check(&self) -> bool {
+    self.staging.is_some()
+  }
+
+  #[inline]
   pub fn exists(&self, path: &[u8]) -> bool {
-    let rel = match self.resolve_relative(path) {
-      Ok(r) => r,
-      Err(_) => return false,
+    let Ok(rel) = self.resolve_relative(path) else {
+      return false;
     };
 
-    if self.deleted.borrow().contains(&rel) {
-      return false;
-    }
-
-    let staged_path = self.get_staged_path(&rel);
-    if let Some(staged) = staged_path {
-      if staged.exists() {
-        return true;
-      }
-    }
-
-    self.root.join(rel).exists()
+    !self.deleted.borrow().contains(&rel) && self.effective_path(&rel).exists()
   }
 
   #[inline]
@@ -99,14 +96,9 @@ impl FileSystem {
   pub fn write(&self, path: &[u8]) -> Result<AtomicWriter, Error> {
     let rel = self.resolve_relative(path)?;
     self.deleted.borrow_mut().remove(&rel);
-    let full = match self.get_staged_path(&rel) {
-      Some(staged) => staged,
-      None => self.root.join(&rel),
-    };
+    let full = self.destination_path(&rel);
 
-    if let Some(parent) = full.parent() {
-      fs::create_dir_all(parent)?;
-    }
+    create_parent_dir(&full)?;
     AtomicWriter::new(&full)
   }
 
@@ -114,21 +106,13 @@ impl FileSystem {
     let from_rel = self.resolve_relative(from)?;
     let to_rel = self.resolve_relative(to)?;
 
-    let from_path = match self.get_staged_path(&from_rel) {
-      Some(staged) if staged.exists() => staged,
-      _ => self.root.join(&from_rel),
-    };
+    let from_path = self.effective_path(&from_rel);
 
     self.deleted.borrow_mut().remove(&to_rel);
 
-    let to_path = match self.get_staged_path(&to_rel) {
-      Some(staged) => staged,
-      None => self.root.join(&to_rel),
-    };
+    let to_path = self.destination_path(&to_rel);
 
-    if let Some(parent) = to_path.parent() {
-      fs::create_dir_all(parent)?;
-    }
+    create_parent_dir(&to_path)?;
 
     fs::copy(from_path, to_path)?;
     Ok(())
@@ -145,7 +129,7 @@ impl FileSystem {
       remove_file_missing_ok(staged)?;
     }
 
-    if self.check {
+    if self.is_check() {
       return Ok(());
     }
 
@@ -157,7 +141,7 @@ impl FileSystem {
     let to_rel = self.resolve_relative(to)?;
 
     // If we are in check mode, rename is simulated via copy and remove.
-    if self.check {
+    if self.is_check() {
       self.copy(from, to)?;
       self.remove(from)?;
       return Ok(());
@@ -171,9 +155,7 @@ impl FileSystem {
       return Ok(());
     }
 
-    if let Some(parent) = to_full.parent() {
-      fs::create_dir_all(parent)?;
-    }
+    create_parent_dir(&to_full)?;
     fs::rename(from_full, to_full).map_err(Into::into)
   }
 
@@ -184,17 +166,14 @@ impl FileSystem {
       let rel = self.resolve_relative(path)?;
       let full_path = self.effective_path(&rel);
 
-      let is_staged = self
-        .staging
-        .as_ref()
-        .map(|s| full_path.starts_with(s.path()))
-        .unwrap_or(false);
-
-      // In check mode only staged copies are chmod'ed; real targets stay untouched.
-      if !self.check || is_staged {
-        let sanitized_mode = mode & !0o6000;
-        fs::set_permissions(full_path, Permissions::from_mode(sanitized_mode))?;
+      // A check run only chmod'es its own staged copies; the real target on
+      // disk has to stay untouched.
+      if self.is_check() && full_path == self.root.join(&rel) {
+        return Ok(());
       }
+
+      let sanitized_mode = mode & !PRIVILEGE_BITS;
+      fs::set_permissions(full_path, Permissions::from_mode(sanitized_mode))?;
     }
     Ok(())
   }
@@ -204,33 +183,18 @@ impl FileSystem {
       return Ok(res.clone());
     }
 
-    let path_obj =
-      to_path_buf(path).map_err(|_| Error::new(ErrorKind::InvalidPath))?;
-
+    let path_obj = to_path_buf(path)?;
     let mut rel = PathBuf::with_capacity(path_obj.as_os_str().len());
+
     for component in path_obj.components() {
-      let c = match component {
-        Component::Normal(c) => c,
+      match component {
+        Component::Normal(c) => {
+          check_component(c)?;
+          rel.push(c);
+        }
         Component::CurDir => continue,
-        _ => return Err(Error::new(ErrorKind::InvalidPath)),
-      };
-
-      let s = c.to_str().ok_or(Error::new(ErrorKind::InvalidPath))?;
-      let bytes = s.as_bytes();
-
-      if matches!(bytes.last(), Some(b'.' | b' ')) {
-        return Err(Error::new(ErrorKind::InvalidPath));
+        _ => return Err(invalid_path()),
       }
-
-      if let Some(tilde_pos) = bytes.find_byte(b'~') {
-        check_tilde_restriction(bytes, tilde_pos)?;
-      }
-
-      let base_len = bytes.find_byte(b'.').unwrap_or(bytes.len());
-      if is_reserved_name(&bytes[..base_len]) {
-        return Err(Error::new(ErrorKind::InvalidPath));
-      }
-      rel.push(c);
     }
 
     let res = rel.clone();
@@ -246,7 +210,12 @@ impl FileSystem {
     self.staging.as_ref().map(|s| s.path().join(rel))
   }
 
-  // Prefer a staged copy while it exists; otherwise resolve against the root.
+  fn destination_path(&self, rel: &Path) -> PathBuf {
+    self
+      .get_staged_path(rel)
+      .unwrap_or_else(|| self.root.join(rel))
+  }
+
   fn effective_path(&self, rel: &Path) -> PathBuf {
     self
       .get_staged_path(rel)
@@ -255,11 +224,40 @@ impl FileSystem {
   }
 }
 
+fn create_parent_dir(path: &Path) -> Result<(), Error> {
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent)?;
+  }
+  Ok(())
+}
+
 fn remove_file_missing_ok(path: PathBuf) -> Result<(), Error> {
   remove_file(path).or_else(|e| match e.kind() {
     IoErrorKind::NotFound => Ok(()),
     _ => Err(e.into()),
   })
+}
+
+fn invalid_path() -> Error {
+  Error::new(ErrorKind::InvalidPath)
+}
+
+fn check_component(component: &OsStr) -> Result<(), Error> {
+  let bytes = component.to_str().ok_or_else(invalid_path)?.as_bytes();
+
+  if matches!(bytes.last(), Some(b'.' | b' ')) {
+    return Err(invalid_path());
+  }
+
+  if let Some(tilde_pos) = bytes.find_byte(b'~') {
+    check_tilde_restriction(bytes, tilde_pos)?;
+  }
+
+  let base_len = bytes.find_byte(b'.').unwrap_or(bytes.len());
+  if is_reserved_name(&bytes[..base_len]) {
+    return Err(invalid_path());
+  }
+  Ok(())
 }
 
 fn is_reserved_name(bytes: &[u8]) -> bool {

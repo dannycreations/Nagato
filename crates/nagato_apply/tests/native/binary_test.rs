@@ -85,17 +85,24 @@ test_patch_err!(
 
 test_patch_ok!(
   test_binary_patch_continues_on_delta_mismatch,
-  initial_fs: { "binary.dat" => [1u8, 2, 3] },
+  initial_fs: { "binary.dat" => [104u8, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0] },
   diff: r#"
     diff --git a/binary.dat b/binary.dat
     GIT binary patch
     delta 10
     fcmZ?W&B@7E0000000000
 
-    literal 3
-    Wc-qT001
+    literal 6
+    Nc-kw^FUm<_000Qj0x19h
   "#,
-  assertions: |_root| {}
+  assertions: |root| {
+    // The delta fragment was written for the other side of the patch and
+    // never decodes, so the literal one that follows has to take over.
+    assert_eq!(
+      fs::read(root.join("binary.dat")).unwrap(),
+      vec![119, 111, 114, 108, 100, 0]
+    );
+  }
 );
 
 #[test]
@@ -201,4 +208,30 @@ fn test_binary_applier_fails_immediately_on_invalid_delta() {
   let mut applier = Applier::new(&mut output, b"src");
   let res = applier.process_binary(&patch);
   assert_eq!(res.unwrap_err().kind, ErrorKind::InvalidBinaryPatch);
+}
+
+#[test]
+fn test_binary_literal_line_longer_than_declared_length() {
+  // The first character declares how many bytes the line decodes to, so a
+  // longer body is malformed and must be reported as a decode failure rather
+  // than overflowing the fixed-size decode buffer. Release builds use
+  // `panic = "abort"`, so a panic here takes the whole process down.
+  let overlong =
+    b"z0000000000000000000000000000000000000000000000000000000000000000000000";
+  let patch = Patch {
+    binary: true,
+    binary_lines: vec![&overlong[..]],
+    binary_fragments: vec![BinaryFragment {
+      kind: BinaryKind::Literal,
+      size: 52,
+      data_start: 0,
+      data_len: 1,
+    }],
+    ..Default::default()
+  };
+
+  let mut output = Vec::new();
+  let mut applier = Applier::new(&mut output, b"src");
+  let res = applier.process_binary(&patch);
+  assert!(res.is_err());
 }

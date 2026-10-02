@@ -2,10 +2,7 @@ use bstr::ByteSlice;
 use memchr::memmem;
 use nagato_core::{parse_int, ErrorKind};
 
-use crate::{
-  lexer::{token::BinaryPaths, LexerMode},
-  Lexer, TokenKind,
-};
+use crate::{lexer::LexerMode, Lexer, TokenKind};
 
 impl<'a> Lexer<'a> {
   #[inline]
@@ -17,26 +14,27 @@ impl<'a> Lexer<'a> {
       return Ok(TokenKind::Gap);
     }
 
-    // Fast path for binary data lines which usually start with base85 chars.
-    if line.len() > 8 {
-      if line.starts_with(b"literal ") {
-        return Ok(TokenKind::BinaryPatchType {
-          kind: b"literal",
-          size: &line[8..],
-        });
-      }
-      if line.starts_with(b"delta ") {
-        return Ok(TokenKind::BinaryPatchType {
-          kind: b"delta",
-          size: &line[6..],
-        });
-      }
+    // The fragment headers are checked first, which is safe because the space
+    // in their keyword puts them out of reach of the base85 payload alphabet.
+    if line.starts_with(b"literal ") {
+      return Ok(TokenKind::BinaryPatchType {
+        kind: b"literal",
+        size: &line[8..],
+      });
+    }
+    if line.starts_with(b"delta ") {
+      return Ok(TokenKind::BinaryPatchType {
+        kind: b"delta",
+        size: &line[6..],
+      });
     }
 
+    // Payload lines make up the bulk of a binary patch, so the leading byte is
+    // compared before each full prefix match.
     let first = line[0];
-    if first == b'd' && line.starts_with(b"diff --git")
-      || first == b'-' && line.starts_with(b"--- ")
-      || first == b'+' && line.starts_with(b"+++ ")
+    if (first == b'd' && line.starts_with(b"diff --git"))
+      || (first == b'-' && line.starts_with(b"--- "))
+      || (first == b'+' && line.starts_with(b"+++ "))
     {
       self.set_mode(LexerMode::Text);
       return self.tokenize_text(line);
@@ -90,10 +88,7 @@ impl<'a> Lexer<'a> {
       }
       b'f' => {
         if line.starts_with(b"file ") {
-          Ok(TokenKind::FileHeader(BinaryPaths {
-            old_file: line[5..].trim(),
-            new_file: line[5..].trim(),
-          }))
+          Ok(TokenKind::FileHeader(line[5..].trim()))
         } else {
           Err(ErrorKind::UnexpectedLine)
         }
@@ -122,14 +117,14 @@ impl<'a> Lexer<'a> {
       }
       b'n' => {
         if line.starts_with(b"new ") {
-          self.parse_mode_rest(&line[4..], TokenKind::NewFileMode)
+          Self::parse_mode_rest(&line[4..], TokenKind::NewFileMode)
         } else {
           Err(ErrorKind::UnexpectedLine)
         }
       }
       b'o' => {
         if line.starts_with(b"old ") {
-          self.parse_mode_rest(&line[4..], TokenKind::OldFileMode)
+          Self::parse_mode_rest(&line[4..], TokenKind::OldFileMode)
         } else {
           Err(ErrorKind::UnexpectedLine)
         }
@@ -137,7 +132,7 @@ impl<'a> Lexer<'a> {
       b'r' | b'c' => self.parse_rename_copy_line(line),
       b's' => {
         if line.starts_with(b"similarity index ") {
-          self.parse_percentage_token(&line[17..], TokenKind::Similarity)
+          Self::parse_percentage_token(&line[17..], TokenKind::Similarity)
         } else {
           Err(ErrorKind::UnexpectedLine)
         }
@@ -166,23 +161,16 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     let header = &line[3..];
-    let Some(idx) = memmem::find(header, b" @@") else {
-      let (old_range, new_range) = parse_ranges(header)?;
-      return Ok(TokenKind::HunkHeader {
-        old_range,
-        new_range,
-        label: None,
-      });
+    let (ranges, label) = match memmem::find(header, b" @@") {
+      Some(idx) => (&header[..idx], Some(header[idx + 3..].trim_start())),
+      None => (header, None),
     };
 
-    let (old_range, new_range) = parse_ranges(&header[..idx])?;
-    let label = header[idx + 3..].trim_start();
-    let label = (!label.is_empty()).then_some(label);
-
+    let (old_range, new_range) = parse_ranges(ranges)?;
     Ok(TokenKind::HunkHeader {
       old_range,
       new_range,
-      label,
+      label: label.filter(|label| !label.is_empty()),
     })
   }
 
@@ -192,21 +180,17 @@ impl<'a> Lexer<'a> {
     line: &'a [u8],
   ) -> Result<TokenKind<'a>, ErrorKind> {
     if line.starts_with(b"diff --git ") {
-      let rest = &line[11..];
-      return Ok(TokenKind::FileHeader(BinaryPaths {
-        old_file: rest,
-        new_file: rest,
-      }));
+      return Ok(TokenKind::FileHeader(&line[11..]));
     }
 
     if line.starts_with(b"dissimilarity index ") {
       let rest = &line[20..];
-      return self.parse_percentage_token(rest, TokenKind::Dissimilarity);
+      return Self::parse_percentage_token(rest, TokenKind::Dissimilarity);
     }
 
     if line.starts_with(b"deleted ") {
       let rest = &line[8..];
-      return self.parse_mode_rest(rest, TokenKind::DeletedFileMode);
+      return Self::parse_mode_rest(rest, TokenKind::DeletedFileMode);
     }
 
     Err(ErrorKind::UnexpectedLine)
@@ -260,15 +244,11 @@ impl<'a> Lexer<'a> {
     let rest = rest.strip_suffix(b" differ").unwrap_or(rest);
 
     // We store the raw line segment to avoid eager Cow allocation and lifetime issues.
-    Ok(TokenKind::Binary(BinaryPaths {
-      old_file: rest,
-      new_file: rest,
-    }))
+    Ok(TokenKind::Binary(rest))
   }
 
   #[inline]
   fn parse_mode_rest(
-    &self,
     rest: &'a [u8],
     f: impl FnOnce(&'a [u8]) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {
@@ -285,7 +265,6 @@ impl<'a> Lexer<'a> {
 
   #[inline]
   fn parse_percentage_token(
-    &self,
     s: &[u8],
     f: impl FnOnce(u32) -> TokenKind<'a>,
   ) -> Result<TokenKind<'a>, ErrorKind> {

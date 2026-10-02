@@ -8,14 +8,11 @@ pub fn parse_header<'a>(
 ) -> Result<(), Error> {
   while let Some(item) = parser.peek_token()? {
     match &item.token {
-      TokenKind::FileHeader(paths) => {
-        if let Some((old, new)) = next_path_pair(paths.old_file, b"") {
-          patch.old_file = old;
-          patch.new_file = new;
-        } else {
-          patch.old_file = unquote_path(paths.old_file);
-          patch.new_file = unquote_path(paths.new_file);
-        }
+      TokenKind::FileHeader(path) => {
+        let (old, new) = next_path_pair(path, b"")
+          .unwrap_or_else(|| (unquote_path(path), unquote_path(path)));
+        patch.old_file = old;
+        patch.new_file = new;
       }
       TokenKind::Index {
         old_hash,
@@ -58,21 +55,14 @@ pub fn parse_header<'a>(
       TokenKind::Dissimilarity(p) => {
         patch.dissimilarity = Some(*p);
       }
-      TokenKind::Binary(paths) => {
-        if let Some((old_file, new_file)) =
-          next_path_pair(paths.old_file, b"and ")
-        {
-          patch.old_file = old_file;
-          patch.new_file = new_file;
-        } else {
-          // Fallback for cases where it's not a standard pair (e.g. diff --git)
-          let paths = next_path_pair(paths.old_file, b"").unwrap_or((
-            unquote_path(paths.old_file),
-            unquote_path(paths.new_file),
-          ));
-          patch.old_file = paths.0;
-          patch.new_file = paths.1;
-        }
+      TokenKind::Binary(path) => {
+        // "a/x and b/y" is the standard form; fall back to a bare pair for
+        // the lines that carry only one path.
+        let (old, new) = next_path_pair(path, b"and ")
+          .or_else(|| next_path_pair(path, b""))
+          .unwrap_or_else(|| (unquote_path(path), unquote_path(path)));
+        patch.old_file = old;
+        patch.new_file = new;
         patch.binary = true;
         parser.tokens.next();
       }

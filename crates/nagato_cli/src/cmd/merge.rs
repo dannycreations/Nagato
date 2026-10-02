@@ -1,9 +1,4 @@
-use std::{
-  collections::{hash_map::Entry, HashMap},
-  ffi::OsString,
-  io::Write,
-  path::PathBuf,
-};
+use std::{collections::HashMap, ffi::OsString, io::Write, path::PathBuf};
 
 use nagato_apply::Patch;
 use nagato_core::{AtomicWriter, Error};
@@ -17,21 +12,21 @@ pub fn process_merge(
   let sources: Vec<PatchSource> =
     PatchSource::iter(files).collect::<Result<_, _>>()?;
 
-  let mut merged_patches: HashMap<Vec<u8>, Patch> = HashMap::new();
-  let mut filenames_order: Vec<Vec<u8>> = Vec::new();
+  // Patches keep their first-seen order in `merged`, while `by_filename` maps
+  // a file name to the slot holding every patch for it.
+  let mut merged: Vec<Patch> = Vec::new();
+  let mut by_filename: HashMap<Vec<u8>, usize> = HashMap::new();
 
   for source in &sources {
     for patch_res in source.patches() {
       let patch = patch_res?;
       let filename = patch.filename();
 
-      match merged_patches.entry(filename.to_vec()) {
-        Entry::Occupied(mut entry) => {
-          entry.get_mut().append(patch);
-        }
-        Entry::Vacant(entry) => {
-          filenames_order.push(entry.key().clone());
-          entry.insert(patch);
+      match by_filename.get(filename) {
+        Some(&slot) => merged[slot].append(patch),
+        None => {
+          by_filename.insert(filename.to_vec(), merged.len());
+          merged.push(patch);
         }
       }
     }
@@ -40,11 +35,11 @@ pub fn process_merge(
   let out_path = output.unwrap_or_else(|| PathBuf::from("merge.patch"));
   let mut writer = AtomicWriter::new(&out_path)?;
 
-  for (i, filename) in filenames_order.iter().enumerate() {
+  for (i, patch) in merged.iter().enumerate() {
     if i > 0 {
       writer.write_all(b"\n")?;
     }
-    merged_patches[filename].write_to(&mut writer)?;
+    patch.write_to(&mut writer)?;
   }
 
   writer.commit()?;

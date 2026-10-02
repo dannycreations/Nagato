@@ -1,7 +1,7 @@
 use std::io::sink;
 
 use memmap2::Mmap;
-use nagato_core::{Error, ErrorKind, FileSystem, IsDevNull};
+use nagato_core::{AtomicWriter, Error, ErrorKind, FileSystem, IsDevNull};
 
 use crate::{applier::apply_streamed, apply, Parser, Patch};
 
@@ -67,19 +67,41 @@ fn drop_renamed_source(
   }
 }
 
-pub fn patch_file(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
+fn rewrite_file<'a>(
+  fs: &FileSystem,
+  patch: &mut Patch<'a>,
+  apply: impl FnOnce(&mut AtomicWriter, &mut Patch<'a>, &[u8]) -> Result<(), Error>,
+) -> Result<(), Error> {
+  if patch.old_file.is_dev_null() {
+    ensure_not_exists(fs, &patch.new_file)?;
+  }
+
+  // The closure owns the source mapping so that it is released before the
+  // destination is replaced, which Windows refuses to do while a mapping of
+  // the same file is still alive.
+  let writer =
+    read_source_mapped(fs, patch.source_file()).and_then(|source| {
+      let mut writer = fs.write(&patch.new_file)?;
+      apply(&mut writer, patch, source.as_deref().unwrap_or(&[]))
+        .map(|_| writer)
+    })?;
+  writer.commit()?;
+
+  drop_renamed_source(fs, patch, patch.source_file())
+}
+
+pub fn patch_file(fs: &FileSystem, patch: &mut Patch<'_>) -> Result<(), Error> {
   if patch.binary && !patch.hunks.is_empty() {
     return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
 
   let is_deletion = patch.new_file.is_dev_null();
   let has_content = patch.has_content_changes();
-  let source_path = patch.source_file();
 
   let result = match (is_deletion, has_content) {
     (true, _) => apply_deletion(fs, patch),
-    (false, true) => apply_content_change(fs, patch, source_path),
-    (false, false) => apply_structural_change(fs, patch, source_path),
+    (false, true) => apply_content_change(fs, patch),
+    (false, false) => apply_structural_change(fs, patch),
   };
 
   finish(fs, patch, result)
@@ -90,11 +112,16 @@ pub fn patch_file_streamed<'a>(
   patch: &mut Patch<'a>,
   parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
-  let result = if patch.new_file.is_dev_null() {
-    stream_deletion(fs, patch, parser)
-  } else if !patch.binary_fragments.is_empty() {
-    // Binary payloads are already fully buffered by the header parse.
+  let is_deletion = patch.new_file.is_dev_null();
+
+  // Binary payloads are already fully buffered by the header parse, so they
+  // take the whole-file path rather than the streaming one.
+  if !is_deletion && !patch.binary_fragments.is_empty() {
     return patch_file(fs, patch);
+  }
+
+  let result = if is_deletion {
+    stream_deletion(fs, patch, parser)
   } else {
     stream_content_change(fs, patch, parser)
   };
@@ -119,20 +146,9 @@ fn stream_content_change<'a>(
   patch: &mut Patch<'a>,
   parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
-  if patch.old_file.is_dev_null() {
-    ensure_not_exists(fs, &patch.new_file)?;
-  }
-
-  let source_path = patch.source_file().to_vec();
-
-  let writer = read_source_mapped(fs, &source_path).and_then(|source| {
-    let mut writer = fs.write(&patch.new_file)?;
-    apply_streamed(&mut writer, patch, source.as_deref().unwrap_or(&[]), parser)
-      .map(|_| writer)
-  })?;
-  writer.commit()?;
-
-  drop_renamed_source(fs, patch, &source_path)
+  rewrite_file(fs, patch, |writer, patch, source| {
+    apply_streamed(writer, patch, source, parser)
+  })
 }
 
 fn apply_then_remove(
@@ -150,39 +166,30 @@ fn apply_then_remove(
 }
 
 fn apply_deletion(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
-  let source_path = patch.source_file();
-  apply_then_remove(fs, source_path, |source| apply(&mut sink(), patch, source))
+  apply_then_remove(fs, patch.source_file(), |source| {
+    apply(&mut sink(), patch, source)
+  })
 }
 
 fn apply_content_change(
   fs: &FileSystem,
-  patch: &Patch<'_>,
-  source_path: &[u8],
+  patch: &mut Patch<'_>,
 ) -> Result<(), Error> {
-  if patch.old_file.is_dev_null() {
-    ensure_not_exists(fs, &patch.new_file)?;
-  }
-
-  let writer = read_source_mapped(fs, source_path).and_then(|source| {
-    let mut writer = fs.write(&patch.new_file)?;
-    apply(&mut writer, patch, source.as_deref().unwrap_or(&[])).map(|_| writer)
-  })?;
-  writer.commit()?;
-
-  drop_renamed_source(fs, patch, source_path)
+  rewrite_file(fs, patch, |writer, patch, source| {
+    apply(writer, patch, source)
+  })
 }
 
 fn apply_structural_change(
   fs: &FileSystem,
   patch: &Patch<'_>,
-  source_path: &[u8],
 ) -> Result<(), Error> {
   if patch.rename_to.is_some() {
-    return fs.rename(source_path, &patch.new_file);
+    return fs.rename(patch.source_file(), &patch.new_file);
   }
 
   if patch.copy_to.is_some() {
-    return fs.copy(source_path, &patch.new_file);
+    return fs.copy(patch.source_file(), &patch.new_file);
   }
 
   if patch.old_file.is_dev_null() && !patch.new_file.is_dev_null() {

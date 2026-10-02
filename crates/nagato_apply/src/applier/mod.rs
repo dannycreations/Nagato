@@ -35,21 +35,25 @@ pub(crate) fn apply_streamed<'a>(
     return applier.process_binary(patch);
   }
 
-  let mut first = true;
-  while let Some(hunk) = parser.next_hunk(patch)? {
-    if first {
-      if !hunk.has_header {
-        // Hunkless patches need every hunk up front, so fall back to the
-        // buffered path once the first one turns out to be headerless.
-        patch.hunks.push(hunk);
-        while let Some(h) = parser.next_hunk(patch)? {
-          patch.hunks.push(h);
-        }
-        applier.process_hunkless_patches(patch)?;
-        return applier.end(patch);
-      }
-      first = false;
+  // The first hunk decides the mode: a headerless one needs every hunk up
+  // front, so the patch falls back to the buffered path. Later hunks are
+  // streamed one by one no matter what shape they have.
+  let Some(first_hunk) = parser.next_hunk(patch)? else {
+    return applier.end(patch);
+  };
+
+  if !first_hunk.has_header {
+    patch.hunks.push(first_hunk);
+    while let Some(hunk) = parser.next_hunk(patch)? {
+      patch.hunks.push(hunk);
     }
+    applier.process_hunkless_patches(patch)?;
+    return applier.end(patch);
+  }
+
+  applier.process_hunk(patch, &first_hunk)?;
+
+  while let Some(hunk) = parser.next_hunk(patch)? {
     applier.process_hunk(patch, &hunk)?;
   }
 
@@ -61,8 +65,8 @@ pub fn patch_file(
   patch: Patch<'_>,
   reverse: bool,
 ) -> Result<(), Error> {
-  let patch = if reverse { patch.invert() } else { patch };
-  fs::patch_file(fs, &patch)
+  let mut patch = if reverse { patch.invert() } else { patch };
+  fs::patch_file(fs, &mut patch)
 }
 
 pub fn apply_to_fs(
@@ -76,7 +80,7 @@ pub fn apply_to_fs(
   // only the forward direction can be streamed hunk by hunk.
   if reverse {
     for patch in parser {
-      patch_file(fs, patch?, reverse)?;
+      fs::patch_file(fs, &mut patch?.invert())?;
     }
     return Ok(());
   }
