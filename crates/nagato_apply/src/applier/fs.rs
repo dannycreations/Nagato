@@ -29,13 +29,6 @@ fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
   }
 }
 
-fn remove_source(fs: &FileSystem, source_path: &[u8]) -> Result<(), Error> {
-  if is_dev_null(source_path) {
-    return Ok(());
-  }
-  fs.remove(source_path)
-}
-
 fn finish(
   fs: &FileSystem,
   patch: &Patch<'_>,
@@ -162,7 +155,7 @@ fn apply_then_remove(
     .and_then(|source| validate(source.as_deref().unwrap_or(&[])));
   applied?;
 
-  remove_source(fs, source_path)
+  fs.remove(source_path)
 }
 
 fn apply_deletion(fs: &FileSystem, patch: &Patch<'_>) -> Result<(), Error> {
@@ -192,7 +185,8 @@ fn apply_structural_change(
     return fs.copy(patch.source_file(), &patch.new_file);
   }
 
-  if is_dev_null(&patch.old_file) && !is_dev_null(&patch.new_file) {
+  // Only reached for a non-deletion, so `new_file` is always a real path.
+  if is_dev_null(&patch.old_file) {
     ensure_not_exists(fs, &patch.new_file)?;
     fs.write(&patch.new_file)?.commit()?;
   }

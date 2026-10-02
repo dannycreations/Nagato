@@ -55,23 +55,3 @@ macro_rules! test_cli_fail {
     }
   };
 }
-
-#[macro_export]
-macro_rules! test_cli_ok {
-  (
-    $test_name:ident,
-    args: [$($arg:expr),*]
-    $(, stdout_contains: $stdout:expr)?
-    $(, stderr_contains: $stderr:expr)?
-    $(,)?
-  ) => {
-    #[test]
-    fn $test_name() {
-      let mut cmd = Command::new(env!("CARGO_BIN_EXE_nagato"));
-      $(cmd.arg($arg);)*
-      let assert = cmd.assert().success();
-      $(assert.stdout(contains($stdout));)?
-      $(assert.stderr(contains($stderr));)?
-    }
-  };
-}

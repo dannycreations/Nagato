@@ -43,11 +43,14 @@ test_exec_ok!(
   assert_file: ("file.txt", "hello\n")
 );
 
-test_cli_ok!(
-  cli_args_version_flag,
-  args: ["--version"],
-  stdout_contains: env!("CARGO_PKG_VERSION"),
-);
+#[test]
+fn cli_args_version_flag() {
+  Command::new(env!("CARGO_BIN_EXE_nagato"))
+    .arg("--version")
+    .assert()
+    .success()
+    .stdout(contains(env!("CARGO_PKG_VERSION")));
+}
 
 test_cli_fail!(
   cli_args_error_non_existent_patch,

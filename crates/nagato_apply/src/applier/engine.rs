@@ -158,18 +158,7 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
     patch: &Patch<'_>,
   ) -> Result<(), Error> {
     // Hunkless patches are often used in "diff-lite" formats where headers are missing.
-    let pending: Vec<(&Hunk<'_>, Option<Finder>)> = patch
-      .hunks
-      .iter()
-      .map(|h| {
-        let lines = patch.hunk_lines(h);
-        let finder =
-          first_non_empty_match_line(lines).map(|(_, l)| Finder::new(l.text));
-        (h, finder)
-      })
-      .collect();
-
-    let mut to_apply = Vec::with_capacity(pending.len());
+    let mut to_apply = Vec::with_capacity(patch.hunks.len());
     let mut unmatched = Vec::new();
     let source = self.source_at();
     let initial_pos = self.pos;
@@ -177,7 +166,10 @@ impl<'s, 'b, W: Write + ?Sized> Applier<'s, 'b, W> {
 
     // First pass: match hunks in document order, advancing past each match so
     // repeated content binds to successive occurrences.
-    for (hunk, finder) in pending {
+    for hunk in &patch.hunks {
+      let finder = first_non_empty_match_line(patch.hunk_lines(hunk))
+        .map(|(_, line)| Finder::new(line.text));
+
       if offset > source.len() {
         unmatched.push((hunk, finder));
         continue;

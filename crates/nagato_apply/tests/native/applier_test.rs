@@ -129,6 +129,20 @@ test_patch_ok!(
 );
 
 test_patch_ok!(
+  applier_creates_empty_file_from_header_only_patch,
+  initial_fs: { },
+  diff: r#"
+    diff --git a/new_file.txt b/new_file.txt
+    new file mode 100644
+    --- /dev/null
+    +++ b/new_file.txt
+  "#,
+  assertions: |root| {
+    assert_eq!(fs::read(root.join("new_file.txt")).unwrap(), b"");
+  }
+);
+
+test_patch_ok!(
   applier_renames_and_copies,
   initial_fs: { "old_name.txt" => "file content\n", "old_file.txt" => "content" },
   diff: r#"

@@ -117,15 +117,13 @@ impl<'a> Patch<'a> {
 
       let lines = self.hunk_lines(hunk);
       for line in lines {
-        let prefix = match line.kind {
-          LineKind::Addition => Some(b'+'),
-          LineKind::Deletion => Some(b'-'),
-          LineKind::Context => Some(b' '),
-          LineKind::Gap => None,
+        let prefix: &[u8] = match line.kind {
+          LineKind::Addition => b"+",
+          LineKind::Deletion => b"-",
+          LineKind::Context => b" ",
+          LineKind::Gap => b"",
         };
-        if let Some(p) = prefix {
-          writer.write_bytes(&[p])?;
-        }
+        writer.write_bytes(prefix)?;
         writer.write_bytes(line.text)?;
         writer.write_newline()?;
       }
