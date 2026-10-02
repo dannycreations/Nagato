@@ -26,8 +26,7 @@ pub fn next_hunk<'a>(
       | TokenKind::Gap => {
         let initial_line = item.line_num;
         let lines_start = patch.lines.len() as u32;
-        let (old_span, new_span) =
-          collect_hunk_lines(parser, patch, TokenKind::is_padding)?;
+        let (old_span, new_span) = collect_hunk_lines(parser, patch, true)?;
         let lines_len = patch.lines.len() as u32 - lines_start;
 
         if lines_len > 0 {
@@ -57,13 +56,13 @@ pub fn next_hunk<'a>(
 pub fn collect_hunk_lines<'a>(
   parser: &mut Parser<'a>,
   patch: &mut Patch<'a>,
-  stop_condition: impl Fn(&TokenKind<'a>) -> bool,
+  stop_on_padding: bool,
 ) -> Result<(u32, u32), Error> {
   let mut old_span = 0;
   let mut new_span = 0;
 
   while let Some(item) = parser.peek_token()? {
-    if stop_condition(&item.token) {
+    if stop_on_padding && item.token.is_padding() {
       break;
     }
 
@@ -140,7 +139,7 @@ pub fn parse_hunk<'a>(
   patch.lines.reserve(new_span.max(old_span) as usize);
 
   let (actual_old_span, actual_new_span) =
-    match collect_hunk_lines(parser, patch, |_| false) {
+    match collect_hunk_lines(parser, patch, false) {
       Ok(spans) => spans,
       Err(e) => {
         patch.lines.truncate(lines_start as usize);

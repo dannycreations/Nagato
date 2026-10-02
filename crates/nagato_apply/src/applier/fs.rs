@@ -1,7 +1,7 @@
 use std::io::sink;
 
 use memmap2::Mmap;
-use nagato_core::{AtomicWriter, Error, ErrorKind, FileSystem, IsDevNull};
+use nagato_core::{is_dev_null, AtomicWriter, Error, ErrorKind, FileSystem};
 
 use crate::{applier::apply_streamed, apply, Parser, Patch};
 
@@ -11,7 +11,7 @@ fn read_source_mapped(
   fs: &FileSystem,
   path: &[u8],
 ) -> Result<Option<Mmap>, Error> {
-  if path.is_dev_null() {
+  if is_dev_null(path) {
     return Ok(None);
   }
   match fs.read(path) {
@@ -30,7 +30,7 @@ fn ensure_not_exists(fs: &FileSystem, path: &[u8]) -> Result<(), Error> {
 }
 
 fn remove_source(fs: &FileSystem, source_path: &[u8]) -> Result<(), Error> {
-  if source_path.is_dev_null() {
+  if is_dev_null(source_path) {
     return Ok(());
   }
   fs.remove(source_path)
@@ -43,7 +43,7 @@ fn finish(
 ) -> Result<(), Error> {
   result.map_err(|e| e.with_file(String::from_utf8_lossy(patch.filename())))?;
 
-  if patch.new_file.is_dev_null() {
+  if is_dev_null(&patch.new_file) {
     return Ok(());
   }
 
@@ -72,7 +72,7 @@ fn rewrite_file<'a>(
   patch: &mut Patch<'a>,
   apply: impl FnOnce(&mut AtomicWriter, &mut Patch<'a>, &[u8]) -> Result<(), Error>,
 ) -> Result<(), Error> {
-  if patch.old_file.is_dev_null() {
+  if is_dev_null(&patch.old_file) {
     ensure_not_exists(fs, &patch.new_file)?;
   }
 
@@ -95,7 +95,7 @@ pub fn patch_file(fs: &FileSystem, patch: &mut Patch<'_>) -> Result<(), Error> {
     return Err(Error::new(ErrorKind::UnsupportedBinaryPatch));
   }
 
-  let is_deletion = patch.new_file.is_dev_null();
+  let is_deletion = is_dev_null(&patch.new_file);
   let has_content = patch.has_content_changes();
 
   let result = match (is_deletion, has_content) {
@@ -112,7 +112,7 @@ pub fn patch_file_streamed<'a>(
   patch: &mut Patch<'a>,
   parser: &mut Parser<'a>,
 ) -> Result<(), Error> {
-  let is_deletion = patch.new_file.is_dev_null();
+  let is_deletion = is_dev_null(&patch.new_file);
 
   // Binary payloads are already fully buffered by the header parse, so they
   // take the whole-file path rather than the streaming one.
@@ -192,7 +192,7 @@ fn apply_structural_change(
     return fs.copy(patch.source_file(), &patch.new_file);
   }
 
-  if patch.old_file.is_dev_null() && !patch.new_file.is_dev_null() {
+  if is_dev_null(&patch.old_file) && !is_dev_null(&patch.new_file) {
     ensure_not_exists(fs, &patch.new_file)?;
     fs.write(&patch.new_file)?.commit()?;
   }

@@ -8,8 +8,8 @@ use std::{
 use std::{fs::metadata, os::unix::fs::PermissionsExt};
 
 use nagato_core::{
-  create_test_fs, get_unique_path, AtomicWriter, ErrorKind, FileSystem,
-  IsDevNull,
+  create_test_fs, get_unique_path, is_dev_null, AtomicWriter, ErrorKind,
+  FileSystem,
 };
 
 #[cfg(unix)]
@@ -173,11 +173,11 @@ test_fs_ops_ok!(
 
 #[test]
 fn test_is_dev_null() {
-  assert!(b"dev/null".is_dev_null());
-  assert!(b"/dev/null".is_dev_null());
-  assert!(!b"not/dev/null".is_dev_null());
-  assert!(Cow::Borrowed(b"dev/null" as &[u8]).is_dev_null());
-  assert!(!Cow::Borrowed(b"other" as &[u8]).is_dev_null());
+  assert!(is_dev_null(b"dev/null"));
+  assert!(is_dev_null(b"/dev/null"));
+  assert!(!is_dev_null(b"not/dev/null"));
+  assert!(is_dev_null(&Cow::Borrowed(b"dev/null" as &[u8])));
+  assert!(!is_dev_null(&Cow::Borrowed(b"other" as &[u8])));
 }
 
 test_fs_ops_ok!(

@@ -1,6 +1,13 @@
+use std::borrow::Cow;
+
 use nagato_core::{next_path_pair, parse_int, unquote_path, Error};
 
 use crate::{parser::binary::parse_binary_patch, Parser, Patch, TokenKind};
+
+fn old_and_new(path: &[u8]) -> (Cow<'_, [u8]>, Cow<'_, [u8]>) {
+  next_path_pair(path, b"")
+    .unwrap_or_else(|| (unquote_path(path), unquote_path(path)))
+}
 
 pub fn parse_header<'a>(
   parser: &mut Parser<'a>,
@@ -9,8 +16,7 @@ pub fn parse_header<'a>(
   while let Some(item) = parser.peek_token()? {
     match &item.token {
       TokenKind::FileHeader(path) => {
-        let (old, new) = next_path_pair(path, b"")
-          .unwrap_or_else(|| (unquote_path(path), unquote_path(path)));
+        let (old, new) = old_and_new(path);
         patch.old_file = old;
         patch.new_file = new;
       }
@@ -58,9 +64,8 @@ pub fn parse_header<'a>(
       TokenKind::Binary(path) => {
         // "a/x and b/y" is the standard form; fall back to a bare pair for
         // the lines that carry only one path.
-        let (old, new) = next_path_pair(path, b"and ")
-          .or_else(|| next_path_pair(path, b""))
-          .unwrap_or_else(|| (unquote_path(path), unquote_path(path)));
+        let (old, new) =
+          next_path_pair(path, b"and ").unwrap_or_else(|| old_and_new(path));
         patch.old_file = old;
         patch.new_file = new;
         patch.binary = true;

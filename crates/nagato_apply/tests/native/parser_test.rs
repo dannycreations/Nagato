@@ -35,6 +35,26 @@ fn test_parser_hunk_range_defaults() {
   assert_eq!(patch.hunks[0].new_span, 1);
 }
 
+#[test]
+fn test_parser_binary_files_header_paths() {
+  // The header names one path per side, separated by "and". A header that
+  // carries a single path names that path on both sides.
+  let patch = parse_diff!("Binary files a/old.bin and b/new.bin differ\n")
+    .next()
+    .unwrap()
+    .unwrap();
+  assert_eq!(patch.old_file.as_ref(), b"old.bin");
+  assert_eq!(patch.new_file.as_ref(), b"new.bin");
+  assert!(patch.binary);
+
+  let patch = parse_diff!("Binary files a/only.bin differ\n")
+    .next()
+    .unwrap()
+    .unwrap();
+  assert_eq!(patch.old_file.as_ref(), b"only.bin");
+  assert_eq!(patch.new_file.as_ref(), b"only.bin");
+}
+
 test_parser_err!(
   test_parser_error_invalid_hunk_range_old_non_digit,
   diff: "--- a/file.txt\n+++ b/file.txt\n@@ -a,1 +1,1 @@\n-old\n+new\n",

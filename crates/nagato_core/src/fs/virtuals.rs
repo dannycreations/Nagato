@@ -17,7 +17,7 @@ use memmap2::Mmap;
 use tempfile::TempDir;
 
 use crate::{
-  utils::{to_path_buf, IsDevNull},
+  utils::{is_dev_null, to_path_buf},
   AtomicWriter, Error, ErrorKind,
 };
 
@@ -119,7 +119,7 @@ impl FileSystem {
   }
 
   pub fn remove(&self, path: &[u8]) -> Result<(), Error> {
-    if path.is_dev_null() {
+    if is_dev_null(path) {
       return Ok(());
     }
     let rel = self.resolve_relative(path)?;

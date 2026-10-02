@@ -15,15 +15,9 @@ use crate::Error;
 #[cfg(windows)]
 use crate::ErrorKind;
 
-pub trait IsDevNull {
-  fn is_dev_null(&self) -> bool;
-}
-
-impl IsDevNull for [u8] {
-  #[inline]
-  fn is_dev_null(&self) -> bool {
-    self == b"dev/null" || self == b"/dev/null"
-  }
+#[inline]
+pub fn is_dev_null(path: &[u8]) -> bool {
+  path == b"dev/null" || path == b"/dev/null"
 }
 
 #[inline(always)]

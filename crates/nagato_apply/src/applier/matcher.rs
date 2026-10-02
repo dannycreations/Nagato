@@ -20,19 +20,24 @@ fn lines_to_match<'h, 'p>(
 }
 
 #[inline]
+fn anchorable_lines<'h, 'p>(
+  lines: &'h [Line<'p>],
+) -> impl Iterator<Item = (usize, &'h Line<'p>)> + Clone {
+  lines_to_match(lines).filter(|(_, l)| !l.text.is_empty())
+}
+
+#[inline]
 pub(crate) fn first_non_empty_match_line<'h, 'p>(
   lines: &'h [Line<'p>],
 ) -> Option<(usize, &'h Line<'p>)> {
-  lines_to_match(lines).find(|(_, l)| !l.text.is_empty())
+  anchorable_lines(lines).next()
 }
 
 #[inline]
 fn best_match_line<'h, 'p>(
   lines: &'h [Line<'p>],
 ) -> Option<(usize, &'h Line<'p>)> {
-  lines_to_match(lines)
-    .filter(|(_, l)| !l.text.is_empty())
-    .max_by_key(|(_, l)| l.text.len())
+  anchorable_lines(lines).max_by_key(|(_, l)| l.text.len())
 }
 
 #[derive(Default)]

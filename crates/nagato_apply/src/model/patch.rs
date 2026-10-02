@@ -4,7 +4,7 @@ use std::{
   mem,
 };
 
-use nagato_core::{IsDevNull, LineWriter};
+use nagato_core::{is_dev_null, LineWriter};
 
 use crate::{BinaryFragment, Hunk, Line, LineKind};
 
@@ -60,7 +60,7 @@ impl<'a> Patch<'a> {
   }
 
   pub fn filename(&self) -> &[u8] {
-    if !self.new_file.is_empty() && !self.new_file.is_dev_null() {
+    if !self.new_file.is_empty() && !is_dev_null(&self.new_file) {
       &self.new_file
     } else {
       &self.old_file

@@ -41,22 +41,6 @@ impl<'a> Lexer<'a> {
   }
 
   #[inline]
-  fn parse_line(&mut self) -> Option<Result<LexerItem<'a>, Error>> {
-    let line = self.next_line()?;
-    let line_num = self.line_num;
-
-    // The mode flips between text and binary while a patch interleaves both.
-    let res = match self.mode {
-      LexerMode::Binary => self.tokenize_binary(line),
-      LexerMode::Text => self.tokenize_text(line),
-    }
-    .map(|token| LexerItem { token, line_num })
-    .map_err(|kind| Error::with_line(kind, line_num));
-
-    Some(res)
-  }
-
-  #[inline]
   fn next_line(&mut self) -> Option<&'a [u8]> {
     let (line, rest) = get_line(&self.input[self.pos..])?;
     self.line_num += 1;
@@ -70,6 +54,17 @@ impl<'a> Iterator for Lexer<'a> {
 
   #[inline]
   fn next(&mut self) -> Option<Self::Item> {
-    self.parse_line()
+    let line = self.next_line()?;
+    let line_num = self.line_num;
+
+    // The mode flips between text and binary while a patch interleaves both.
+    let res = match self.mode {
+      LexerMode::Binary => self.tokenize_binary(line),
+      LexerMode::Text => self.tokenize_text(line),
+    }
+    .map(|token| LexerItem { token, line_num })
+    .map_err(|kind| Error::with_line(kind, line_num));
+
+    Some(res)
   }
 }
